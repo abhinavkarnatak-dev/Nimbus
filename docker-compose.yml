@@ -1,0 +1,71 @@
+name: nimbus
+
+services:
+  mongo:
+    image: mongo:8.0.28
+    container_name: nimbus-mongo
+    ports:
+      - '127.0.0.1:27017:27017'
+    volumes:
+      - mongo_data:/data/db
+      - mongo_config:/data/configdb
+    command: ['--bind_ip', '0.0.0.0', '--wiredTigerCacheSizeGB', '0.5']
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 10s
+
+  redis:
+    image: redis:8.10.0-alpine
+    container_name: nimbus-redis
+    ports:
+      - '127.0.0.1:6379:6379'
+    volumes:
+      - redis_data:/data
+    command:
+      [
+        'redis-server',
+        '--appendonly',
+        'yes',
+        '--maxmemory',
+        '256mb',
+        '--maxmemory-policy',
+        'noeviction',
+      ]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 3s
+    stop_grace_period: 10s
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.0
+    container_name: nimbus-qdrant
+    profiles: ['semantic']
+    ports:
+      - '127.0.0.1:6333:6333'
+      - '127.0.0.1:6334:6334'
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: '6333'
+      QDRANT__SERVICE__GRPC_PORT: '6334'
+      QDRANT__TELEMETRY_DISABLED: 'true'
+    healthcheck:
+      test: ['CMD-SHELL', 'bash -c ":> /dev/tcp/127.0.0.1/6333" || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    stop_grace_period: 10s
+
+volumes:
+  mongo_data:
+  mongo_config:
+  redis_data:
+  qdrant_data:

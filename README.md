@@ -84,10 +84,36 @@ Node reads the `.env` file natively, so no extra library is involved:
 node --env-file=.env apps/api/dist/index.js
 ```
 
-## Local services _(not yet implemented)_
+## Local services
 
-`pnpm dev:services` will start MongoDB, Redis, and optional Qdrant through Docker Compose, bound to
-loopback only.
+Docker Compose runs MongoDB and Redis locally. Qdrant is optional and only starts when asked for,
+since semantic search is off by default.
+
+```bash
+pnpm dev:services            # start MongoDB and Redis, wait until genuinely ready
+pnpm dev:services:semantic   # the same, plus Qdrant
+pnpm dev:services:status     # what is running and whether it is healthy
+pnpm dev:services:logs       # follow the logs
+pnpm dev:services:down       # stop and remove containers, keep the data
+pnpm dev:services:reset      # stop and also delete the data volumes
+```
+
+`pnpm dev:services` uses `--wait`, so it only returns once every health check passes. When it
+finishes, the databases genuinely accept connections rather than merely having been started.
+
+| Service | Version | Address                            |
+| ------- | ------- | ---------------------------------- |
+| MongoDB | 8.0.28  | `127.0.0.1:27017`                  |
+| Redis   | 8.10.0  | `127.0.0.1:6379`                   |
+| Qdrant  | 1.19.0  | `127.0.0.1:6333` HTTP, `6334` gRPC |
+
+Every port is published to `127.0.0.1` only, never to `0.0.0.0`. The plain form `"27017:27017"`
+binds every network interface, which would put a passwordless database on whatever network you are
+connected to, and Docker opens the firewall for published ports. Neither database uses
+authentication locally, so the loopback binding is the protection.
+
+`pnpm dev:services:reset` deletes your local data on purpose. It is a separate command rather than a
+flag so it cannot be run by accident.
 
 ## Local fake-adapter mode _(not yet implemented)_
 

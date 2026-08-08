@@ -11,8 +11,12 @@
     "pnpm": ">=10.12.0"
   },
   "scripts": {
-    "dev:services": "docker compose up -d",
-    "dev:services:down": "docker compose down",
+    "dev:services": "docker compose up -d --wait --wait-timeout 120",
+    "dev:services:semantic": "docker compose --profile semantic up -d --wait --wait-timeout 180",
+    "dev:services:status": "docker compose ps",
+    "dev:services:logs": "docker compose logs -f --tail 100",
+    "dev:services:down": "docker compose --profile semantic down",
+    "dev:services:reset": "docker compose --profile semantic down --volumes",
     "dev": "pnpm -r --parallel dev",
     "build": "pnpm -r build",
     "typecheck": "tsc -b --pretty && pnpm -r --if-present run typecheck",
