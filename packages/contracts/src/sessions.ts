@@ -1,0 +1,141 @@
+import { z } from 'zod';
+
+import { ApprovalRecordSchema } from './approvals.js';
+import { AttachmentMetadataSchema } from './attachments.js';
+import { BranchNameSchema, RepositorySummarySchema } from './github.js';
+import {
+  AttachmentIdSchema,
+  CommitShaSchema,
+  IdempotencyKeySchema,
+  IsoTimestampSchema,
+  SessionIdSchema,
+} from './ids.js';
+import { LIMITS } from './limits.js';
+import { PullRequestResultSchema } from './pull-request.js';
+import { CheckResultSchema, FileChangeSchema } from './tools.js';
+
+export const SESSION_STATUSES = [
+  'queued',
+  'provisioning',
+  'indexing',
+  'working',
+  'awaiting_user',
+  'validating',
+  'pushing',
+  'pr_created',
+  'failed',
+  'cancelled',
+] as const;
+
+export const SessionStatusSchema = z.enum(SESSION_STATUSES);
+
+export const TERMINAL_SESSION_STATUSES = ['pr_created', 'failed', 'cancelled'] as const;
+
+export const FAILURE_CODES = [
+  'TASK_TOO_BROAD',
+  'CLARIFICATION_TIMEOUT',
+  'APPROVAL_TIMEOUT',
+  'POLICY_DENIED',
+  'STEP_BUDGET_EXHAUSTED',
+  'TOKEN_BUDGET_EXHAUSTED',
+  'TIME_BUDGET_EXHAUSTED',
+  'SANDBOX_FAILED',
+  'CHECKS_FAILED',
+  'PATCH_REJECTED',
+  'PUSH_FAILED',
+  'PULL_REQUEST_FAILED',
+  'PROVIDER_UNAVAILABLE',
+  'INTERNAL_ERROR',
+] as const;
+
+export const FailureCodeSchema = z.enum(FAILURE_CODES);
+
+export const SessionFailureSchema = z.strictObject({
+  code: FailureCodeSchema,
+  message: z.string().min(1).max(LIMITS.errorMessageMaxChars),
+});
+
+export const TaskSchema = z
+  .string()
+  .trim()
+  .min(LIMITS.taskMinChars, { error: 'Describe the task in a little more detail' })
+  .max(LIMITS.taskMaxChars, { error: 'Task description is too long' });
+
+export const UserMessageSchema = z.string().trim().min(1).max(LIMITS.messageMaxChars);
+
+export const ModelSelectionSchema = z.strictObject({
+  textModel: z.string().min(1).max(120),
+});
+
+export const CreateSessionBodySchema = z.strictObject({
+  repositoryId: z.int().positive(),
+  task: TaskSchema,
+  attachmentIds: z.array(AttachmentIdSchema).max(LIMITS.maxAttachmentsPerSession).default([]),
+  model: ModelSelectionSchema.optional(),
+  idempotencyKey: IdempotencyKeySchema,
+});
+
+export const SessionSummarySchema = z.strictObject({
+  sessionId: SessionIdSchema,
+  status: SessionStatusSchema,
+  task: z.string().min(1).max(LIMITS.taskMaxChars),
+  repository: RepositorySummarySchema,
+  branch: BranchNameSchema.nullable(),
+  pullRequest: PullRequestResultSchema.nullable(),
+  createdAt: IsoTimestampSchema,
+  lastActivityAt: IsoTimestampSchema,
+  completedAt: IsoTimestampSchema.nullable(),
+});
+
+export const SessionProgressSchema = z.strictObject({
+  step: z.int().nonnegative(),
+  maxSteps: z.int().positive(),
+  currentActivity: z.string().max(LIMITS.summaryMaxChars).nullable(),
+});
+
+export const SessionDetailSchema = SessionSummarySchema.extend({
+  baseCommitSha: CommitShaSchema.nullable(),
+  attachments: z.array(AttachmentMetadataSchema).max(LIMITS.maxAttachmentsPerSession),
+  progress: SessionProgressSchema,
+  filesChanged: z.array(FileChangeSchema).max(LIMITS.maxChangedFiles),
+  checks: z.array(CheckResultSchema).max(LIMITS.maxChecksPerSession),
+  approvals: z.array(ApprovalRecordSchema).max(50),
+  failure: SessionFailureSchema.nullable(),
+});
+
+export const SessionListResponseSchema = z.strictObject({
+  sessions: z.array(SessionSummarySchema).max(LIMITS.sessionHistoryPageSize),
+  activeSessionId: SessionIdSchema.nullable(),
+});
+
+export const SessionDetailResponseSchema = z.strictObject({
+  session: SessionDetailSchema,
+  lastEventSequence: z.int().nonnegative(),
+});
+
+export const CreateSessionResponseSchema = z.strictObject({
+  session: SessionSummarySchema,
+});
+
+export const PostMessageBodySchema = z.strictObject({
+  message: UserMessageSchema,
+});
+
+export const CancelSessionResponseSchema = z.strictObject({
+  sessionId: SessionIdSchema,
+  status: SessionStatusSchema,
+});
+
+export type SessionStatus = z.infer<typeof SessionStatusSchema>;
+export type FailureCode = z.infer<typeof FailureCodeSchema>;
+export type SessionFailure = z.infer<typeof SessionFailureSchema>;
+export type ModelSelection = z.infer<typeof ModelSelectionSchema>;
+export type CreateSessionBody = z.infer<typeof CreateSessionBodySchema>;
+export type SessionSummary = z.infer<typeof SessionSummarySchema>;
+export type SessionProgress = z.infer<typeof SessionProgressSchema>;
+export type SessionDetail = z.infer<typeof SessionDetailSchema>;
+export type SessionListResponse = z.infer<typeof SessionListResponseSchema>;
+export type SessionDetailResponse = z.infer<typeof SessionDetailResponseSchema>;
+export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>;
+export type PostMessageBody = z.infer<typeof PostMessageBodySchema>;
+export type CancelSessionResponse = z.infer<typeof CancelSessionResponseSchema>;

@@ -1,0 +1,17 @@
+{
+  "extends": ["./tsconfig.json", "../../packages/config/tsconfig.emit.json"],
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "tsBuildInfoFile": "./dist/.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts",
+    "src/**/*.fixtures.ts",
+    "test",
+    "dist",
+    "node_modules"
+  ]
+}

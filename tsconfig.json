@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "files": [],
+  "references": [
+    { "path": "./packages/contracts/tsconfig.build.json" },
+    { "path": "./packages/test-utils/tsconfig.build.json" },
+    { "path": "./apps/api/tsconfig.build.json" }
+  ]
+}

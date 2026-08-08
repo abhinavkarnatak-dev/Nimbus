@@ -1,0 +1,44 @@
+{
+  "name": "nimbus",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Nimbus V1: a cloud coding agent that works in an isolated sandbox and opens pull requests for human review.",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@10.12.1",
+  "engines": {
+    "node": ">=22.12.0",
+    "pnpm": ">=10.12.0"
+  },
+  "scripts": {
+    "dev:services": "docker compose up -d",
+    "dev:services:down": "docker compose down",
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "typecheck": "tsc -b --pretty && pnpm -r --if-present run typecheck",
+    "typecheck:clean": "tsc -b --clean",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --project integration",
+    "test:e2e": "playwright test",
+    "security:check": "pnpm audit --audit-level high",
+    "clean": "pnpm -r exec rimraf dist .tsbuildinfo && rimraf **/*.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.2.0",
+    "eslint": "10.8.1",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.9.0",
+    "prettier": "3.9.6",
+    "rimraf": "6.1.3",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.66.0",
+    "vite": "8.2.1",
+    "vitest": "4.1.10"
+  }
+}

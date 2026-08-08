@@ -1,0 +1,9 @@
+{
+  "extends": "../../packages/config/tsconfig.web.json",
+  "compilerOptions": {
+    "types": ["vite/client"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"],
+  "exclude": ["dist", "node_modules"],
+  "references": [{ "path": "../../packages/contracts/tsconfig.build.json" }]
+}
