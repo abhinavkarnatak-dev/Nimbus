@@ -67,8 +67,22 @@ Generate strong secrets with:
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
 
-Every variable is listed in `.env.example`. _(Validation and fail-fast startup arrive in feature
-004; nothing reads these values yet.)_
+Every variable is listed in `.env.example`.
+
+Settings are read in exactly one place, `apps/api/src/config`. No other module reads `process.env`.
+The whole environment is validated once at startup, and the process refuses to start if anything is
+missing or malformed. Error messages name the setting and the reason but never print the value, so a
+bad connection string cannot leak its password into a log.
+
+Google, GitHub, SMTP, E2B, and the model providers may all be left blank in development, which is
+what makes the local fake-adapter mode possible. In production they are required, and startup fails
+if they are absent.
+
+Node reads the `.env` file natively, so no extra library is involved:
+
+```bash
+node --env-file=.env apps/api/dist/index.js
+```
 
 ## Local services _(not yet implemented)_
 

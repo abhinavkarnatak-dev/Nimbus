@@ -1,7 +1,24 @@
-import { CONTRACTS_VERSION } from '@nimbus/contracts';
+export { ConfigError, getConfig, loadConfig, resetConfigForTests } from './config/index.js';
+export type {
+  AppConfig,
+  GitHubConfig,
+  GoogleConfig,
+  LlmConfig,
+  QdrantConfig,
+  SandboxConfig,
+  SmtpConfig,
+} from './config/index.js';
 
-export const API_NAME = 'nimbus-api' as const;
+export { createLogger, LOG_LEVELS } from './logging/logger.js';
+export type { Logger, LoggerConfig, LogLevel } from './logging/logger.js';
 
-export function describeBuild(): string {
-  return `${API_NAME} (contracts ${CONTRACTS_VERSION})`;
-}
+export {
+  attachToRequestContext,
+  getRequestContext,
+  getRequestId,
+  newRequestId,
+  runWithRequestContext,
+} from './logging/request-context.js';
+export type { RequestContext } from './logging/request-context.js';
+
+export { isSecretKey, REDACTED, redactString, redactValue } from './logging/redact.js';
