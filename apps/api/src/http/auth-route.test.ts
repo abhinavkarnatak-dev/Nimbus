@@ -17,17 +17,20 @@ import type {
   VerifyCodeInput,
   VerifyCodeResult,
 } from '../auth/otp-service.js';
+import type { BeginResult, CompleteResult } from '../auth/google-service.js';
 import type { ActiveSession, EstablishedSession } from '../auth/session-service.js';
 import { createApp } from '../app.js';
 import { ApiError } from './api-error.js';
 import { SESSION_COOKIE_NAME } from './cookies.js';
 import { createTestLogger, testConfig } from './http.fixtures.js';
+import { OAUTH_BINDING_COOKIE } from '../auth/oauth-state.js';
 import { createAttachSession } from './middleware/session.js';
 import { clientIp, createAuthRouter, UNKNOWN_CLIENT_IP } from './routes/auth.js';
 
 const REQUEST_ID = 'req_V1StGXR8Z5jdHi6BmyTab';
 const SESSION_ID = 'session-id-value';
 const CSRF_TOKEN = 'csrf-token-value';
+const WEB_ORIGIN = 'http://localhost:5173';
 
 const USER: AuthenticatedUser = AuthenticatedUserSchema.parse({
   userId: 'usr_V1StGXR8Z5jdHi6BmyTab',
@@ -58,13 +61,17 @@ interface Harness {
   verifyCalls: VerifyCodeInput[];
   endedSessions: string[];
   startedFor: { userId: string; replacing: string | undefined }[];
+  completions: { code: string; state: string; bindingValue: string; ip: string }[];
 }
 
-function harness(options: { signedIn?: boolean; onRequest?: () => never } = {}): Harness {
+function harness(
+  options: { signedIn?: boolean; onRequest?: () => never; withGoogle?: boolean } = {},
+): Harness {
   const requestCalls: RequestCodeInput[] = [];
   const verifyCalls: VerifyCodeInput[] = [];
   const endedSessions: string[] = [];
   const startedFor: { userId: string; replacing: string | undefined }[] = [];
+  const completions: { code: string; state: string; bindingValue: string; ip: string }[] = [];
   const { logger } = createTestLogger();
 
   const otp = {
@@ -104,14 +111,48 @@ function harness(options: { signedIn?: boolean; onRequest?: () => never } = {}):
       candidate === session.csrfToken,
   };
 
+  const google = {
+    begin: async (): Promise<BeginResult> => {
+      await Promise.resolve();
+      return {
+        state: 'non_V1StGXR8Z5jdHi6BmyTab',
+        codeVerifier: 'verifier-value-that-must-stay-server-side',
+        codeChallenge: 'challenge-value',
+        bindingValue: 'binding-value',
+        redirectUrl: 'https://accounts.google.com/o/oauth2/v2/auth?state=non_V1StGXR8Z5jdHi6BmyTab',
+      };
+    },
+    complete: async (input: {
+      code: string;
+      state: string;
+      bindingValue: string;
+      ip: string;
+    }): Promise<CompleteResult> => {
+      completions.push(input);
+      await Promise.resolve();
+      if (input.bindingValue === '') {
+        throw new ApiError('OAUTH_STATE_INVALID', 'That sign in link is no longer valid.');
+      }
+      return { user: USER, created: false };
+    },
+  };
+
   const app = createApp({
     config: testConfig(),
     logger,
-    routers: [createAuthRouter({ otp, sessions, isProduction: false })],
+    routers: [
+      createAuthRouter({
+        otp,
+        sessions,
+        isProduction: false,
+        webOrigin: WEB_ORIGIN,
+        ...(options.withGoogle === false ? {} : { google }),
+      }),
+    ],
     attachSession: createAttachSession(sessions, false),
   });
 
-  return { app, requestCalls, verifyCalls, endedSessions, startedFor };
+  return { app, requestCalls, verifyCalls, endedSessions, startedFor, completions };
 }
 
 function errorBody(body: unknown): ApiErrorBody {
@@ -353,6 +394,130 @@ describe('POST /auth/logout', () => {
 
     const cookie = (response.headers['set-cookie'] as unknown as string[]).join(';');
     expect(cookie).toContain(`${SESSION_COOKIE_NAME}=;`);
+  });
+});
+
+describe('GET /auth/google', () => {
+  it('redirects the browser to Google', async () => {
+    const { app } = harness();
+
+    const response = await request(app).get('/auth/google');
+
+    expect(response.status).toBe(302);
+    expect(response.headers['location']).toContain('accounts.google.com');
+  });
+
+  it('sets a binding cookie that is not readable by scripts', async () => {
+    const { app } = harness();
+
+    const response = await request(app).get('/auth/google');
+    const cookie = (response.headers['set-cookie'] as unknown as string[]).join(';');
+
+    expect(cookie).toContain(`${OAUTH_BINDING_COOKIE}=binding-value`);
+    expect(cookie).toContain('HttpOnly');
+    expect(cookie).toContain('SameSite=Lax');
+  });
+
+  it('never puts the PKCE secret in the redirect or the cookie', async () => {
+    const { app } = harness();
+
+    const response = await request(app).get('/auth/google');
+    const everything = JSON.stringify(response.headers);
+
+    expect(everything).not.toContain('verifier-value-that-must-stay-server-side');
+  });
+
+  it('says plainly when Google sign in is not configured', async () => {
+    const { app } = harness({ withGoogle: false });
+
+    const response = await request(app).get('/auth/google');
+
+    expect(response.status).toBe(503);
+    expect(errorBody(response.body).error.code).toBe('PROVIDER_UNAVAILABLE');
+  });
+});
+
+describe('GET /auth/google/callback', () => {
+  const bindingCookie = `${OAUTH_BINDING_COOKIE}=binding-value`;
+
+  it('signs the caller in and sends them to the frontend', async () => {
+    const { app } = harness();
+
+    const response = await request(app)
+      .get('/auth/google/callback?code=abc&state=non_V1StGXR8Z5jdHi6BmyTab')
+      .set('Cookie', bindingCookie);
+
+    expect(response.status).toBe(302);
+    expect(response.headers['location']).toBe(`${WEB_ORIGIN}/auth/callback?signin=success`);
+  });
+
+  it('sets the session cookie and clears the binding cookie', async () => {
+    const { app } = harness();
+
+    const response = await request(app)
+      .get('/auth/google/callback?code=abc&state=non_V1StGXR8Z5jdHi6BmyTab')
+      .set('Cookie', bindingCookie);
+
+    const cookies = (response.headers['set-cookie'] as unknown as string[]).join(';');
+    expect(cookies).toContain(`${SESSION_COOKIE_NAME}=${SESSION_ID}`);
+    expect(cookies).toContain(`${OAUTH_BINDING_COOKIE}=;`);
+  });
+
+  it('passes the binding cookie through to the service', async () => {
+    const { app, completions } = harness();
+
+    await request(app)
+      .get('/auth/google/callback?code=abc&state=non_V1StGXR8Z5jdHi6BmyTab')
+      .set('Cookie', bindingCookie);
+
+    expect(completions[0]?.bindingValue).toBe('binding-value');
+    expect(completions[0]?.code).toBe('abc');
+  });
+
+  it('handles the caller pressing cancel at Google', async () => {
+    const { app, completions } = harness();
+
+    const response = await request(app).get('/auth/google/callback?error=access_denied');
+
+    expect(response.status).toBe(302);
+    expect(response.headers['location']).toBe(`${WEB_ORIGIN}/auth/callback?signin=cancelled`);
+    expect(completions).toHaveLength(0);
+  });
+
+  it('refuses a callback with no code or state', async () => {
+    const { app, completions } = harness();
+
+    const response = await request(app).get('/auth/google/callback');
+
+    expect(response.headers['location']).toContain('signin=failed');
+    expect(response.headers['location']).toContain('reason=OAUTH_STATE_INVALID');
+    expect(completions).toHaveLength(0);
+  });
+
+  it('sends a refusal to the frontend rather than showing raw text', async () => {
+    const { app } = harness();
+
+    const response = await request(app).get(
+      '/auth/google/callback?code=abc&state=non_V1StGXR8Z5jdHi6BmyTab',
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers['location']).toContain('signin=failed');
+    expect(response.headers['location']).toContain('reason=OAUTH_STATE_INVALID');
+  });
+
+  it('never sends the caller anywhere except the configured frontend', async () => {
+    const { app } = harness();
+
+    const cancelled = await request(app).get('/auth/google/callback?error=access_denied');
+    const failed = await request(app).get('/auth/google/callback');
+    const succeeded = await request(app)
+      .get('/auth/google/callback?code=abc&state=non_V1StGXR8Z5jdHi6BmyTab')
+      .set('Cookie', bindingCookie);
+
+    for (const response of [cancelled, failed, succeeded]) {
+      expect(String(response.headers['location']).startsWith(WEB_ORIGIN)).toBe(true);
+    }
   });
 });
 

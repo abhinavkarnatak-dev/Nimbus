@@ -317,6 +317,35 @@ Three properties are worth knowing about, each covered by tests:
 
 Codes never appear in logs or in the audit trail, and neither do email addresses.
 
+## Signing in with Google
+
+```text
+GET /auth/google           sends the browser to Google
+GET /auth/google/callback  finishes, sets the session cookie, redirects to the frontend
+```
+
+Both doors reach the same account. Signing in with Google using an address that already has a Nimbus
+account adds `google` to that account rather than creating a second one.
+
+- **Authorization code flow with PKCE.** The verifier stays on the server, so a captured code cannot
+  be exchanged by anybody else.
+- **State is single use and bound to the browser that started it.** A separate short lived cookie
+  holds a random value whose hash is stored beside the state. Without both, the callback is refused
+  before Nimbus talks to Google at all. This is what stops an attacker sending you a link that signs
+  you into **their** account, which would quietly route everything you then do into it.
+- **An address Google has not verified is refused outright.** It does not link and it does not create
+  an account. A Workspace administrator can create an account claiming any address, so linking on an
+  unverified one would be an account takeover.
+- **Scopes are `openid email` and nothing else.** The display name is derived from the address, so
+  `profile` would be collecting data with no use for it.
+
+The ID token's issuer, audience, expiry, and verified flag are all checked. Its signature is not,
+because it arrives directly from Google's token endpoint over TLS rather than through the browser,
+which the OpenID Connect specification permits for this flow.
+
+Leaving `GOOGLE_CLIENT_ID` blank is supported: both routes then answer `PROVIDER_UNAVAILABLE` and
+email codes still work.
+
 ## Sessions
 
 The session cookie holds a long random value and nothing else. Everything real lives in Redis, keyed

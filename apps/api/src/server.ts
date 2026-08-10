@@ -6,6 +6,8 @@ import { createApp } from './app.js';
 import type { AppConfig } from './config/load.js';
 import { closeDatabase, connectDatabase } from './db/client.js';
 import { ensureDatabaseSchema } from './db/bootstrap.js';
+import { GoogleIdentityAdapter } from './auth/google-identity.js';
+import { GoogleService } from './auth/google-service.js';
 import { OtpService } from './auth/otp-service.js';
 import { SessionService } from './auth/session-service.js';
 import { createMailService, type MailService } from './email/mail-service.js';
@@ -122,10 +124,25 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
 
   const otp = new OtpService({ redis, db: handle.db, mail, logger, config });
   const sessions = new SessionService({ redis, db: handle.db, config, logger });
+
+  const google =
+    config.google === null
+      ? undefined
+      : new GoogleService({
+          redis,
+          db: handle.db,
+          provider: new GoogleIdentityAdapter({ google: config.google, logger }),
+          logger,
+        });
+
+  logger.info({ googleSignIn: google !== undefined }, 'Sign in methods ready');
+
   const authRouter = createAuthRouter({
     otp,
     sessions,
+    google,
     isProduction: config.isProduction,
+    webOrigin: config.api.webOrigin,
   });
 
   const app = createApp({
