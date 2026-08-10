@@ -284,8 +284,15 @@ curl -i -X POST http://localhost:4000/auth/otp/request \
 
 An eight digit code arrives by email, or prints to your terminal if SMTP is blank.
 
-`POST /auth/otp/verify` _(not yet implemented)_ arrives with sessions, since its response carries a
-CSRF token and a session cookie.
+Send it back to finish signing in:
+
+```bash
+curl -s -c jar.txt -X POST http://localhost:4000/auth/otp/verify \
+  -H "Content-Type: application/json" \
+  -d '{"requestId":"req_...","email":"you@example.com","code":"12345678"}'
+
+curl -s -b jar.txt http://localhost:4000/auth/me
+```
 
 | Limit                                       | Value                         |
 | ------------------------------------------- | ----------------------------- |
@@ -309,6 +316,44 @@ Three properties are worth knowing about, each covered by tests:
   itself elects the winner, so ten simultaneous attempts produce one success and one account.
 
 Codes never appear in logs or in the audit trail, and neither do email addresses.
+
+## Sessions
+
+The session cookie holds a long random value and nothing else. Everything real lives in Redis, keyed
+by a hash of that value, so a database dump is not a set of working sessions. A token carrying its
+own claims could not be revoked; an opaque identifier can be deleted, and the moment it is, the
+session is over.
+
+| Route                   | Needs                                                 |
+| ----------------------- | ----------------------------------------------------- |
+| `POST /auth/otp/verify` | Nothing. Signs you in and sets the cookie             |
+| `GET /auth/me`          | The cookie. Reading changes nothing, so no CSRF token |
+| `POST /auth/logout`     | The cookie and a CSRF token                           |
+
+```text
+Set-Cookie: nimbus_session=...; Max-Age=3600; Path=/; HttpOnly; SameSite=Lax
+```
+
+In production the cookie is `Secure` and named `__Host-nimbus_session`, a prefix browsers only accept
+on a cookie that is `Secure`, has no `Domain`, and uses `Path=/`, which blocks a sibling host from
+overwriting it.
+
+`SameSite` is `Lax` rather than `Strict` on purpose. `Strict` would withhold the cookie when Google
+redirects back after sign in, so the callback would see nobody logged in.
+
+Four properties, each with tests:
+
+- **Signing in destroys whatever session identifier you arrived with.** Otherwise somebody who
+  planted an identifier in your browser would be holding your session after you logged in.
+- **State changing requests need a CSRF token** sent as a header, never as a cookie. It is derived
+  from the session, so it is stable across browser tabs and changes automatically when the session
+  does. A failed check refuses the request but does **not** end the session, or any website could
+  sign you out with one blind request.
+- **Two expiry clocks.** An hour of inactivity ends a session, and an absolute lifetime ends it
+  regardless of activity, so a stolen cookie kept quietly warm still dies.
+- **Disabling an account takes effect on the next request**, not at the next login, because the
+  account is re-read every time rather than trusted from the session. Every session that person holds
+  is revoked at once.
 
 ## Local fake-adapter mode _(not yet implemented)_
 

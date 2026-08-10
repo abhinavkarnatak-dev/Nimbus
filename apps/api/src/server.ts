@@ -7,7 +7,9 @@ import type { AppConfig } from './config/load.js';
 import { closeDatabase, connectDatabase } from './db/client.js';
 import { ensureDatabaseSchema } from './db/bootstrap.js';
 import { OtpService } from './auth/otp-service.js';
+import { SessionService } from './auth/session-service.js';
 import { createMailService, type MailService } from './email/mail-service.js';
+import { createAttachSession } from './http/middleware/session.js';
 import { createAuthRouter } from './http/routes/auth.js';
 import type { DependencyCheck } from './http/routes/health.js';
 import type { Logger } from './logging/logger.js';
@@ -119,9 +121,20 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   logger.info({ adapter: mail.adapterName, deliversForReal: mail.deliversForReal }, 'Mailer ready');
 
   const otp = new OtpService({ redis, db: handle.db, mail, logger, config });
-  const authRouter = createAuthRouter({ otp });
+  const sessions = new SessionService({ redis, db: handle.db, config, logger });
+  const authRouter = createAuthRouter({
+    otp,
+    sessions,
+    isProduction: config.isProduction,
+  });
 
-  const app = createApp({ config, logger, checks, routers: [authRouter] });
+  const app = createApp({
+    config,
+    logger,
+    checks,
+    routers: [authRouter],
+    attachSession: createAttachSession(sessions, config.isProduction),
+  });
   const server = createHttpServer(app);
   const port = await listenAsync(server, options.port ?? config.api.port, config.api.host);
 

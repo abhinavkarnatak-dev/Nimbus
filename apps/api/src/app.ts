@@ -1,4 +1,5 @@
-import express, { type Express, type Router } from 'express';
+import cookieParser from 'cookie-parser';
+import express, { type Express, type Router, type RequestHandler } from 'express';
 
 import type { AppConfig } from './config/load.js';
 import { createCorsMiddleware } from './http/middleware/cors.js';
@@ -19,6 +20,7 @@ export interface AppDependencies {
   logger: Logger;
   checks?: readonly DependencyCheck[];
   routers?: readonly Router[];
+  attachSession?: RequestHandler;
 }
 
 function needsRawBody(path: string): boolean {
@@ -47,7 +49,12 @@ export function createApp(dependencies: AppDependencies): Express {
     jsonParser(request, response, next);
   });
 
+  app.use(cookieParser());
   app.use(createRequestLogger(logger));
+
+  if (dependencies.attachSession !== undefined) {
+    app.use(dependencies.attachSession);
+  }
 
   app.use(createHealthRouter({ logger, checks: dependencies.checks ?? [] }));
 
