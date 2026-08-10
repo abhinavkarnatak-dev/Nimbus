@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@nimbus/contracts": "workspace:*",
+    "ioredis": "5.11.1",
     "mongodb": "7.5.0"
   },
   "devDependencies": {

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { COLLECTIONS } from '../../src/db/collections.js';
 import { closeDatabase } from '../../src/db/client.js';
+import { closeRedis, getRedis } from '../../src/redis/client.js';
 import { createTestLogger, testConfig, type CapturedLog } from '../../src/http/http.fixtures.js';
 import { startApi, type RunningApi } from '../../src/server.js';
 
@@ -31,6 +32,7 @@ async function bootApi(): Promise<{
 
 afterEach(async () => {
   await Promise.all(started.splice(0).map((api) => api.shutdown('test cleanup')));
+  await closeRedis();
   await closeDatabase();
 
   const client = new MongoClient(testMongoUri());
@@ -57,13 +59,27 @@ describe('starting the api for real', () => {
     expect(names.sort()).toEqual(Object.values(COLLECTIONS).sort());
   });
 
-  it('reports ready because MongoDB really answers', async () => {
+  it('reports ready because MongoDB and Redis really answer', async () => {
     const { baseUrl } = await bootApi();
 
     const response = await fetch(`${baseUrl}/ready`);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: 'ready' });
+  });
+
+  it('reports not ready when Redis stops answering, without saying why', async () => {
+    const { baseUrl, lines } = await bootApi();
+
+    getRedis().disconnect();
+
+    const response = await fetch(`${baseUrl}/ready`);
+    const body = await response.text();
+
+    expect(response.status).toBe(503);
+    expect(body).toBe(JSON.stringify({ status: 'not_ready' }));
+    expect(body).not.toContain('redis');
+    expect(JSON.stringify(lines)).toContain('redis');
   });
 
   it('returns the contract error shape for an unknown path', async () => {

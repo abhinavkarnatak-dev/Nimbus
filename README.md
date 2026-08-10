@@ -32,7 +32,7 @@ pnpm build
 ```
 
 `pnpm test` runs the unit project and needs nothing else running. Integration tests talk to a real
-MongoDB, so they are a separate project:
+MongoDB and Redis, so they are a separate project:
 
 ```bash
 pnpm dev:services      # start MongoDB and Redis first
@@ -40,8 +40,8 @@ pnpm test:integration
 pnpm test:all          # both projects
 ```
 
-Each integration test file creates a randomly named database and drops it afterwards, so your local
-`nimbus` database is never touched.
+Each integration test file gets a randomly named MongoDB database and a numbered Redis database, and
+wipes both afterwards, so your local `nimbus` data is never touched.
 
 ## Workspace layout
 
@@ -105,15 +105,18 @@ pnpm dev            # the API on http://localhost:4000, and the web client
 
 `pnpm --filter @nimbus/api start` runs the compiled build instead of the watcher.
 
-Startup connects to MongoDB, waits for a real ping, applies collection validators and indexes, and
-only then begins listening, so the server is never accepting requests it cannot serve. Shutdown on
-`SIGINT` or `SIGTERM` stops accepting connections, lets in flight requests finish, closes the
-database, and exits, with a fifteen second cap.
+Startup connects to MongoDB, waits for a real ping, applies collection validators and indexes,
+connects to Redis, and only then begins listening, so the server is never accepting requests it
+cannot serve. Shutdown on `SIGINT` or `SIGTERM` stops accepting connections, lets in flight requests
+finish, closes both databases, and exits, with a fifteen second cap.
 
-| Route         | Answers                                                                |
-| ------------- | ---------------------------------------------------------------------- |
-| `GET /health` | Whether the process is alive. Checks nothing else, names no dependency |
-| `GET /ready`  | Whether dependencies respond. 200 or 503, with the reason in logs only |
+| Route         | Answers                                                                     |
+| ------------- | --------------------------------------------------------------------------- |
+| `GET /health` | Whether the process is alive. Checks nothing else, names no dependency      |
+| `GET /ready`  | Whether MongoDB and Redis respond. 200 or 503, with the reason in logs only |
+
+Stopping a database does not stop the server. `/health` stays 200 while `/ready` turns 503, and
+readiness returns to 200 on its own once the database comes back, with no restart.
 
 Every response carries an `X-Request-Id` that also appears in the logs and in any error body, so a
 user can report one value and you can find the exact request.
@@ -207,6 +210,30 @@ schemas so an accidental spread cannot leak `_id`.
 
 `ensureDatabaseSchema` applies validators and indexes and is idempotent, so it runs safely on every
 start.
+
+## Short lived state
+
+Redis holds everything that should expire on its own. MongoDB's expiry sweeper runs about once a
+minute, which is too loose for a ten minute login code or a lock held by a worker that died.
+
+| Primitive           | Used later for                     | Guarantee                                                        |
+| ------------------- | ---------------------------------- | ---------------------------------------------------------------- |
+| Typed store         | OTP records, session lookups       | Expiry is compulsory; values validated on write and read         |
+| Rate limiter        | Login, uploads, agent work         | Token bucket, no window boundary to exploit, reports retry delay |
+| Single use values   | Google and GitHub return trips     | `GETDEL`, so a value works exactly once                          |
+| Leases              | One worker per session             | Holder checked on renew and release, self expiring               |
+| Idempotency records | Branch push, pull request creation | Exactly one caller starts; others get the original result        |
+
+Anything that reads, decides, then writes runs as a Lua script, because that gap is where the
+concurrency bug lives. Redis executes a script as one uninterruptible unit.
+
+Two properties are enforced rather than documented:
+
+- **No key can be written without an expiry.** Redis runs with `noeviction`, so an unexpired key is
+  never silently reclaimed; it accumulates until writes start failing. A test walks every key created
+  by every primitive and asserts none lacks a time to live.
+- **A lease can only be renewed or released by whoever still holds it.** Otherwise a stalled worker
+  whose lease already expired would release its successor's lease and admit a third worker.
 
 ## Local fake-adapter mode _(not yet implemented)_
 

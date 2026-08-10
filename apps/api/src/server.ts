@@ -8,6 +8,7 @@ import { closeDatabase, connectDatabase } from './db/client.js';
 import { ensureDatabaseSchema } from './db/bootstrap.js';
 import type { DependencyCheck } from './http/routes/health.js';
 import type { Logger } from './logging/logger.js';
+import { closeRedis, connectRedis } from './redis/client.js';
 
 export const SHUTDOWN_TIMEOUT_MS = 15_000;
 export const HEADERS_TIMEOUT_MS = 20_000;
@@ -93,11 +94,19 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   const handle = await connectDatabase({ uri: config.mongo.uri, logger });
   await ensureDatabaseSchema(handle.db, logger);
 
+  const redis = await connectRedis({ url: config.redis.url, logger });
+
   const checks: DependencyCheck[] = [
     {
       name: 'mongodb',
       run: async () => {
         await handle.db.command({ ping: 1 });
+      },
+    },
+    {
+      name: 'redis',
+      run: async () => {
+        await redis.ping();
       },
     },
   ];
@@ -114,6 +123,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     shuttingDown ??= (async () => {
       logger.info({ reason }, 'Shutting down');
       await closeHttpServer(server);
+      await closeRedis();
       await closeDatabase();
       logger.info({ reason }, 'Shutdown complete');
     })();
