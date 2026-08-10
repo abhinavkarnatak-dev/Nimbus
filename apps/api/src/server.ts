@@ -6,6 +6,7 @@ import { createApp } from './app.js';
 import type { AppConfig } from './config/load.js';
 import { closeDatabase, connectDatabase } from './db/client.js';
 import { ensureDatabaseSchema } from './db/bootstrap.js';
+import { createMailService, type MailService } from './email/mail-service.js';
 import type { DependencyCheck } from './http/routes/health.js';
 import type { Logger } from './logging/logger.js';
 import { closeRedis, connectRedis } from './redis/client.js';
@@ -18,6 +19,7 @@ export const KEEP_ALIVE_TIMEOUT_MS = 15_000;
 export interface RunningApi {
   server: Server;
   port: number;
+  mail: MailService;
   shutdown: (reason: string) => Promise<void>;
 }
 
@@ -111,6 +113,9 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     },
   ];
 
+  const mail = createMailService({ config, logger });
+  logger.info({ adapter: mail.adapterName, deliversForReal: mail.deliversForReal }, 'Mailer ready');
+
   const app = createApp({ config, logger, checks });
   const server = createHttpServer(app);
   const port = await listenAsync(server, options.port ?? config.api.port, config.api.host);
@@ -123,6 +128,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     shuttingDown ??= (async () => {
       logger.info({ reason }, 'Shutting down');
       await closeHttpServer(server);
+      await mail.close();
       await closeRedis();
       await closeDatabase();
       logger.info({ reason }, 'Shutdown complete');
@@ -130,5 +136,5 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     return shuttingDown;
   };
 
-  return { server, port, shutdown };
+  return { server, port, mail, shutdown };
 }

@@ -235,6 +235,35 @@ Two properties are enforced rather than documented:
 - **A lease can only be renewed or released by whoever still holds it.** Otherwise a stalled worker
   whose lease already expired would release its successor's lease and admit a third worker.
 
+## Email
+
+Nimbus picks a mail adapter from your settings at startup and says which one in the log.
+
+| Adapter     | Chosen when                       | Behaviour                                 |
+| ----------- | --------------------------------- | ----------------------------------------- |
+| `smtp`      | SMTP settings are filled in       | Really sends                              |
+| `console`   | SMTP is blank, outside production | Prints the whole message to your terminal |
+| `capturing` | Tests                             | Keeps messages in memory                  |
+
+That means **you can develop the whole login flow without an email account**. Leave SMTP blank and
+the sign in code prints to your terminal. The console adapter throws if it is ever constructed in
+production, and production already refuses to start without SMTP.
+
+Three guarantees, each with tests:
+
+- **Message bodies are never logged.** A sign in code in a log file is a password in a log file. Logs
+  carry a masked recipient, the subject, and a byte count. Recipient addresses are masked to
+  `a***@example.com` because an address is personal data.
+- **Credentials never reach logs or error messages.** A mail server that echoes your password back in
+  a rejection is a real thing; the raw error does contain it and redaction removes it before
+  anything is written.
+- **Addresses, subjects, and bodies are injection safe.** Carriage returns and line feeds are refused
+  so nobody can add a `Bcc:` header through an address field, everything interpolated into HTML is
+  escaped, and only `http` and `https` links become clickable.
+
+Connections require STARTTLS unless already encrypted, so a server that will not upgrade gets no
+credentials and no message at all rather than receiving them in the clear.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,
