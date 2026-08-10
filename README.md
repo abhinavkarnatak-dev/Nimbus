@@ -264,6 +264,52 @@ Three guarantees, each with tests:
 Connections require STARTTLS unless already encrypted, so a server that will not upgrade gets no
 credentials and no message at all rather than receiving them in the clear.
 
+## Signing in
+
+Nimbus has no passwords. You prove you control an email address.
+
+```bash
+curl -i -X POST http://localhost:4000/auth/otp/request \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com"}'
+```
+
+```json
+{
+  "requestId": "req_HrcHSBbyP3UHpFviJ02Xv",
+  "expiresInSeconds": 600,
+  "resendAvailableInSeconds": 60
+}
+```
+
+An eight digit code arrives by email, or prints to your terminal if SMTP is blank.
+
+`POST /auth/otp/verify` _(not yet implemented)_ arrives with sessions, since its response carries a
+CSRF token and a session cookie.
+
+| Limit                                       | Value                         |
+| ------------------------------------------- | ----------------------------- |
+| Guesses per code                            | 5, then the code is destroyed |
+| Codes per address per hour                  | 5                             |
+| Codes per internet address per hour         | 20                            |
+| Verifications per internet address per hour | 50                            |
+| Wait between codes                          | 60 seconds                    |
+| Code lifetime                               | 10 minutes                    |
+
+Three properties are worth knowing about, each covered by tests:
+
+- **Asking for a code cannot reveal whether an account exists.** The request path never reads the
+  users collection. An account is created only when a valid code is proved, so there is nothing to
+  branch on and nothing to leak. A stranger typing your address also cannot cause a record carrying
+  it to exist.
+- **Redis never holds the code.** It holds a keyed HMAC, bound to the request and the address, with
+  the key derived from `SESSION_SECRET`. Eight digits is small enough to reverse a plain hash in
+  seconds, so the server side key is what makes a stolen dump worthless. Comparison is constant time.
+- **A code works exactly once.** The record is deleted at the moment it is accepted and the delete
+  itself elects the winner, so ten simultaneous attempts produce one success and one account.
+
+Codes never appear in logs or in the audit trail, and neither do email addresses.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,

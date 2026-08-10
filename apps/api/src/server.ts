@@ -6,7 +6,9 @@ import { createApp } from './app.js';
 import type { AppConfig } from './config/load.js';
 import { closeDatabase, connectDatabase } from './db/client.js';
 import { ensureDatabaseSchema } from './db/bootstrap.js';
+import { OtpService } from './auth/otp-service.js';
 import { createMailService, type MailService } from './email/mail-service.js';
+import { createAuthRouter } from './http/routes/auth.js';
 import type { DependencyCheck } from './http/routes/health.js';
 import type { Logger } from './logging/logger.js';
 import { closeRedis, connectRedis } from './redis/client.js';
@@ -116,7 +118,10 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   const mail = createMailService({ config, logger });
   logger.info({ adapter: mail.adapterName, deliversForReal: mail.deliversForReal }, 'Mailer ready');
 
-  const app = createApp({ config, logger, checks });
+  const otp = new OtpService({ redis, db: handle.db, mail, logger, config });
+  const authRouter = createAuthRouter({ otp });
+
+  const app = createApp({ config, logger, checks, routers: [authRouter] });
   const server = createHttpServer(app);
   const port = await listenAsync(server, options.port ?? config.api.port, config.api.host);
 

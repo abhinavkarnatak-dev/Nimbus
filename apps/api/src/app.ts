@@ -1,4 +1,4 @@
-import express, { type Express } from 'express';
+import express, { type Express, type Router } from 'express';
 
 import type { AppConfig } from './config/load.js';
 import { createCorsMiddleware } from './http/middleware/cors.js';
@@ -18,6 +18,7 @@ export interface AppDependencies {
   config: AppConfig;
   logger: Logger;
   checks?: readonly DependencyCheck[];
+  routers?: readonly Router[];
 }
 
 function needsRawBody(path: string): boolean {
@@ -49,6 +50,10 @@ export function createApp(dependencies: AppDependencies): Express {
   app.use(createRequestLogger(logger));
 
   app.use(createHealthRouter({ logger, checks: dependencies.checks ?? [] }));
+
+  for (const router of dependencies.routers ?? []) {
+    app.use(router);
+  }
 
   app.use(createNotFoundHandler());
   app.use(createErrorHandler(logger));
