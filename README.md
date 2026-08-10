@@ -31,6 +31,18 @@ pnpm test
 pnpm build
 ```
 
+`pnpm test` runs the unit project and needs nothing else running. Integration tests talk to a real
+MongoDB, so they are a separate project:
+
+```bash
+pnpm dev:services      # start MongoDB and Redis first
+pnpm test:integration
+pnpm test:all          # both projects
+```
+
+Each integration test file creates a randomly named database and drops it afterwards, so your local
+`nimbus` database is never touched.
+
 ## Workspace layout
 
 ```text
@@ -114,6 +126,34 @@ authentication locally, so the loopback binding is the protection.
 
 `pnpm dev:services:reset` deletes your local data on purpose. It is a separate command rather than a
 flag so it cannot be run by accident.
+
+## Data model
+
+Five collections, defined in `apps/api/src/db/models`, each owning its own document type, MongoDB
+`$jsonSchema` validator, indexes, and the mappers that convert a stored record into a wire response.
+
+| Collection             | Holds                              | Constraint the database enforces                                   |
+| ---------------------- | ---------------------------------- | ------------------------------------------------------------------ |
+| `users`                | Accounts                           | Unique normalized email; unique public id                          |
+| `github_installations` | Connected GitHub App installations | Unique GitHub installation id                                      |
+| `sessions`             | One coding task each               | One active session per user; unique idempotency key per user       |
+| `repo_indexes`         | Retrieval indexes                  | Unique per repository, commit, policy version, and embedding model |
+| `audit_events`         | Security relevant history          | Append only, expiring, secrets redacted before storage             |
+
+Two properties are enforced by the database rather than by application code, because a check followed
+by a write has a gap that concurrent requests fall through:
+
+- **One account per email.** Unique index on the normalized address, and the validator refuses an
+  address containing uppercase so an unnormalized write cannot create a second account.
+- **One active session per user.** A partial unique index on `userId`, applied only to non-terminal
+  statuses. Finished sessions are unlimited. Proven by concurrent inserts in the integration suite.
+
+MongoDB object IDs never leave the backend. Every record carries a non-guessable prefixed public id
+such as `usr_V1StGXR8Z5jdHi6BmyT`, and outbound mappers are revalidated against the strict contract
+schemas so an accidental spread cannot leak `_id`.
+
+`ensureDatabaseSchema` applies validators and indexes and is idempotent, so it runs safely on every
+start.
 
 ## Local fake-adapter mode _(not yet implemented)_
 

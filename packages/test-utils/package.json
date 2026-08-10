@@ -22,7 +22,8 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
-    "@nimbus/contracts": "workspace:*"
+    "@nimbus/contracts": "workspace:*",
+    "mongodb": "7.5.0"
   },
   "devDependencies": {
     "rimraf": "6.1.3",
