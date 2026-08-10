@@ -49,7 +49,13 @@ export interface AppConfig {
   isProduction: boolean;
   isDevelopment: boolean;
   isTest: boolean;
-  api: { host: string; port: number; publicUrl: string; webOrigin: string };
+  api: {
+    host: string;
+    port: number;
+    publicUrl: string;
+    webOrigin: string;
+    trustProxyHops: number;
+  };
   mongo: { uri: string };
   redis: { url: string };
   session: { secret: string; ttlSeconds: number };
@@ -224,6 +230,7 @@ function toAppConfig(raw: RawEnvironment): AppConfig {
       port: raw.API_PORT,
       publicUrl: raw.PUBLIC_API_URL,
       webOrigin: raw.WEB_ORIGIN,
+      trustProxyHops: raw.TRUST_PROXY_HOPS,
     },
     mongo: { uri: raw.MONGODB_URI },
     redis: { url: raw.REDIS_URL },

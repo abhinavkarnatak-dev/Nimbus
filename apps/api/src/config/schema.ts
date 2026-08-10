@@ -57,6 +57,7 @@ export const environmentSchema = z.object({
   API_PORT: port.default(4000),
   WEB_ORIGIN: httpUrl,
   PUBLIC_API_URL: httpUrl,
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
 
   MONGODB_URI: connectionUrl(['mongodb:', 'mongodb+srv:']),
   REDIS_URL: connectionUrl(['redis:', 'rediss:']),

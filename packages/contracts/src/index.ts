@@ -2,6 +2,7 @@ export * from './version.js';
 export * from './limits.js';
 export * from './ids.js';
 export * from './errors.js';
+export * from './health.js';
 export * from './auth.js';
 export * from './github.js';
 export * from './attachments.js';

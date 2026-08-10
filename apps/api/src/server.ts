@@ -1,0 +1,124 @@
+import { createServer, type Server } from 'node:http';
+
+import type { Express } from 'express';
+
+import { createApp } from './app.js';
+import type { AppConfig } from './config/load.js';
+import { closeDatabase, connectDatabase } from './db/client.js';
+import { ensureDatabaseSchema } from './db/bootstrap.js';
+import type { DependencyCheck } from './http/routes/health.js';
+import type { Logger } from './logging/logger.js';
+
+export const SHUTDOWN_TIMEOUT_MS = 15_000;
+export const HEADERS_TIMEOUT_MS = 20_000;
+export const REQUEST_TIMEOUT_MS = 30_000;
+export const KEEP_ALIVE_TIMEOUT_MS = 15_000;
+
+export interface RunningApi {
+  server: Server;
+  port: number;
+  shutdown: (reason: string) => Promise<void>;
+}
+
+export interface StartApiOptions {
+  config: AppConfig;
+  logger: Logger;
+  port?: number;
+}
+
+export function applyServerTimeouts(server: Server): void {
+  server.headersTimeout = HEADERS_TIMEOUT_MS;
+  server.requestTimeout = REQUEST_TIMEOUT_MS;
+  server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
+}
+
+export function listenAsync(server: Server, port: number, host: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const onError = (error: Error): void => {
+      server.removeListener('listening', onListening);
+      reject(error);
+    };
+    const onListening = (): void => {
+      server.removeListener('error', onError);
+      const address = server.address();
+      resolve(typeof address === 'object' && address !== null ? address.port : port);
+    };
+
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen(port, host);
+  });
+}
+
+export const IDLE_SWEEP_INTERVAL_MS = 50;
+
+export function closeHttpServer(server: Server, timeoutMs = SHUTDOWN_TIMEOUT_MS): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+
+    const sweep = setInterval(() => {
+      server.closeIdleConnections();
+    }, IDLE_SWEEP_INTERVAL_MS);
+    sweep.unref();
+
+    const timer = setTimeout(() => {
+      server.closeAllConnections();
+    }, timeoutMs);
+    timer.unref();
+
+    const finish = (): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearInterval(sweep);
+      clearTimeout(timer);
+      resolve();
+    };
+
+    server.close(finish);
+    server.closeIdleConnections();
+  });
+}
+
+export function createHttpServer(app: Express): Server {
+  const server = createServer(app);
+  applyServerTimeouts(server);
+  return server;
+}
+
+export async function startApi(options: StartApiOptions): Promise<RunningApi> {
+  const { config, logger } = options;
+
+  const handle = await connectDatabase({ uri: config.mongo.uri, logger });
+  await ensureDatabaseSchema(handle.db, logger);
+
+  const checks: DependencyCheck[] = [
+    {
+      name: 'mongodb',
+      run: async () => {
+        await handle.db.command({ ping: 1 });
+      },
+    },
+  ];
+
+  const app = createApp({ config, logger, checks });
+  const server = createHttpServer(app);
+  const port = await listenAsync(server, options.port ?? config.api.port, config.api.host);
+
+  logger.info({ host: config.api.host, port, environment: config.env }, 'Nimbus API is listening');
+
+  let shuttingDown: Promise<void> | undefined;
+
+  const shutdown = (reason: string): Promise<void> => {
+    shuttingDown ??= (async () => {
+      logger.info({ reason }, 'Shutting down');
+      await closeHttpServer(server);
+      await closeDatabase();
+      logger.info({ reason }, 'Shutdown complete');
+    })();
+    return shuttingDown;
+  };
+
+  return { server, port, shutdown };
+}

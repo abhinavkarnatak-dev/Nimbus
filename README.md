@@ -96,6 +96,59 @@ Node reads the `.env` file natively, so no extra library is involved:
 node --env-file=.env apps/api/dist/index.js
 ```
 
+## Running the API
+
+```bash
+pnpm dev:services   # MongoDB and Redis
+pnpm dev            # the API on http://localhost:4000, and the web client
+```
+
+`pnpm --filter @nimbus/api start` runs the compiled build instead of the watcher.
+
+Startup connects to MongoDB, waits for a real ping, applies collection validators and indexes, and
+only then begins listening, so the server is never accepting requests it cannot serve. Shutdown on
+`SIGINT` or `SIGTERM` stops accepting connections, lets in flight requests finish, closes the
+database, and exits, with a fifteen second cap.
+
+| Route         | Answers                                                                |
+| ------------- | ---------------------------------------------------------------------- |
+| `GET /health` | Whether the process is alive. Checks nothing else, names no dependency |
+| `GET /ready`  | Whether dependencies respond. 200 or 503, with the reason in logs only |
+
+Every response carries an `X-Request-Id` that also appears in the logs and in any error body, so a
+user can report one value and you can find the exact request.
+
+Every error, from every route, uses one shape:
+
+```json
+{
+  "error": {
+    "code": "STABLE_MACHINE_CODE",
+    "message": "Safe message for the user",
+    "requestId": "req_V1StGXR8Z5jdHi6BmyT"
+  }
+}
+```
+
+`code` is stable for programs to branch on. Messages are only ever ones Nimbus wrote; an unexpected
+failure returns a generic message and keeps the detail in the logs, so a connection string or file
+path can never reach a browser.
+
+### Transport security
+
+- **Exactly one allowed browser origin**, `WEB_ORIGIN`, compared as a whole string. Any other origin
+  receives no `Access-Control-Allow-Origin` header at all. This is written directly rather than with
+  the `cors` package, whose `origin: true` option reflects whatever origin asked and, combined with
+  the credentials this API needs, would let any site make authenticated requests as your user.
+- **`Content-Security-Policy: default-src 'none'`**, since a JSON API should load nothing from
+  anywhere, plus `frame-ancestors 'none'`, `nosniff`, `X-Frame-Options: DENY`, and
+  `Referrer-Policy: no-referrer`. HSTS is added in production only.
+- **Explicit socket timeouts** for headers, body, and keep alive, so a slow client cannot hold
+  connections open indefinitely.
+- **JSON bodies capped at 100 KB**, returning `PAYLOAD_TOO_LARGE`.
+- **`TRUST_PROXY_HOPS`** states how many proxies sit in front, defaulting to `0`. Trusting the whole
+  `X-Forwarded-For` chain would let a client forge its own address and defeat per IP rate limiting.
+
 ## Local services
 
 Docker Compose runs MongoDB and Redis locally. Qdrant is optional and only starts when asked for,
