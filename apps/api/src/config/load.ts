@@ -12,6 +12,8 @@ export interface GoogleConfig {
 export interface GitHubConfig {
   appId: string;
   appSlug: string;
+  clientId: string;
+  clientSecret: string;
   privateKeyPem: string;
   webhookSecret: string;
   setupCallbackUrl: string;
@@ -140,6 +142,8 @@ function buildGitHub(raw: RawEnvironment): GitHubConfig | null {
     raw.GITHUB_APP_ID === undefined ||
     raw.GITHUB_APP_SLUG === undefined ||
     raw.GITHUB_APP_PRIVATE_KEY_BASE64 === undefined ||
+    raw.GITHUB_CLIENT_ID === undefined ||
+    raw.GITHUB_CLIENT_SECRET === undefined ||
     raw.GITHUB_WEBHOOK_SECRET === undefined ||
     raw.GITHUB_SETUP_CALLBACK_URL === undefined
   ) {
@@ -148,6 +152,8 @@ function buildGitHub(raw: RawEnvironment): GitHubConfig | null {
   return {
     appId: raw.GITHUB_APP_ID,
     appSlug: raw.GITHUB_APP_SLUG,
+    clientId: raw.GITHUB_CLIENT_ID,
+    clientSecret: raw.GITHUB_CLIENT_SECRET,
     privateKeyPem: Buffer.from(raw.GITHUB_APP_PRIVATE_KEY_BASE64, 'base64').toString('utf8'),
     webhookSecret: raw.GITHUB_WEBHOOK_SECRET,
     setupCallbackUrl: raw.GITHUB_SETUP_CALLBACK_URL,
@@ -191,7 +197,7 @@ function productionIssues(config: AppConfig): string[] {
   }
   if (config.github === null) {
     issues.push(
-      'GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_PRIVATE_KEY_BASE64, GITHUB_WEBHOOK_SECRET, GITHUB_SETUP_CALLBACK_URL: all required in production',
+      'GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_APP_PRIVATE_KEY_BASE64, GITHUB_WEBHOOK_SECRET, GITHUB_SETUP_CALLBACK_URL: all required in production',
     );
   }
   if (config.smtp === null) {

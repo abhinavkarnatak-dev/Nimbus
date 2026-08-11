@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto';
 
 import {
+  assertListingScope,
   assertNarrowScope,
+  listingCacheKey,
   scopeCacheKey,
   TokenScopeError,
   type TokenScope,
@@ -9,6 +11,7 @@ import {
 import {
   EXPIRY_MARGIN_SECONDS,
   GitHubTokenError,
+  LISTING_SCOPE,
   isUsable,
   type GitHubTokenProvider,
   type InstallationToken,
@@ -39,6 +42,7 @@ export class FakeGitHubTokenProvider implements GitHubTokenProvider {
   readonly name = 'github-fake';
 
   readonly requests: TokenScope[] = [];
+  readonly listingRequests: number[] = [];
   readonly revoked: string[] = [];
 
   private readonly known: Set<number> | undefined;
@@ -95,6 +99,36 @@ export class FakeGitHubTokenProvider implements GitHubTokenProvider {
     return token;
   }
 
+  async getListingToken(installationId: number): Promise<InstallationToken> {
+    assertListingScope(installationId);
+    this.listingRequests.push(installationId);
+
+    if (this.known !== undefined && !this.known.has(installationId)) {
+      throw new GitHubTokenError(
+        'GITHUB_INSTALLATION_UNAVAILABLE',
+        'That GitHub installation is no longer available.',
+      );
+    }
+
+    const key = listingCacheKey(installationId);
+    const cached = this.cache.get(key);
+    if (cached !== undefined && isUsable(cached, this.marginSeconds)) {
+      return cached;
+    }
+
+    this.issued += 1;
+    const token: InstallationToken = {
+      token: `ghs_${fakeTokenBody()}`,
+      expiresAt: new Date(Date.now() + this.lifetimeSeconds * 1000),
+      repositoryId: null,
+      scope: LISTING_SCOPE,
+    };
+
+    this.cache.set(key, token);
+    await Promise.resolve();
+    return token;
+  }
+
   async revoke(token: InstallationToken): Promise<void> {
     this.revoked.push(token.token);
 
@@ -127,6 +161,7 @@ export class FakeGitHubTokenProvider implements GitHubTokenProvider {
   reset(): void {
     this.cache.clear();
     this.requests.length = 0;
+    this.listingRequests.length = 0;
     this.revoked.length = 0;
     this.failure = undefined;
     this.issued = 0;

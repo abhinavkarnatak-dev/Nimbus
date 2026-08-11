@@ -78,6 +78,8 @@ export const environmentSchema = z.object({
 
   GITHUB_APP_ID: optionalText,
   GITHUB_APP_SLUG: optionalText,
+  GITHUB_CLIENT_ID: optionalText,
+  GITHUB_CLIENT_SECRET: optionalText,
   GITHUB_APP_PRIVATE_KEY_BASE64: base64PrivateKey.optional(),
   GITHUB_WEBHOOK_SECRET: optionalText,
   GITHUB_SETUP_CALLBACK_URL: httpUrl.optional(),

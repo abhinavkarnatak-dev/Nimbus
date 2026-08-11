@@ -40,6 +40,7 @@ export function makeInstallation(
     installationId: Math.floor(Math.random() * 90_000_000) + 10_000_000,
     accountId: Math.floor(Math.random() * 90_000_000) + 10_000_000,
     accountLogin: 'octocat',
+    installedByGitHubUserId: 5_000_001,
     accountType: 'User',
     status: 'active',
     selectedRepositories: [{ repositoryId: 1_296_269, owner: 'octocat', name: 'hello-world' }],

@@ -66,12 +66,27 @@ describe('valid configuration', () => {
       ...minimalEnv(),
       GITHUB_APP_ID: '123456',
       GITHUB_APP_SLUG: 'nimbus-agent',
+      GITHUB_CLIENT_ID: 'Iv23liFakeClientId',
+      GITHUB_CLIENT_SECRET: 'fake-client-secret',
       GITHUB_APP_PRIVATE_KEY_BASE64: VALID_PRIVATE_KEY_BASE64,
       GITHUB_WEBHOOK_SECRET: 'webhook-secret',
       GITHUB_SETUP_CALLBACK_URL: 'http://localhost:4000/github/setup/callback',
     });
 
     expect(config.github?.privateKeyPem).toBe(VALID_PRIVATE_KEY_PEM);
+  });
+
+  it('leaves GitHub unconfigured when the oauth client credentials are missing', () => {
+    const config = loadConfig({
+      ...minimalEnv(),
+      GITHUB_APP_ID: '123456',
+      GITHUB_APP_SLUG: 'nimbus-agent',
+      GITHUB_APP_PRIVATE_KEY_BASE64: VALID_PRIVATE_KEY_BASE64,
+      GITHUB_WEBHOOK_SECRET: 'webhook-secret',
+      GITHUB_SETUP_CALLBACK_URL: 'http://localhost:4000/github/setup/callback',
+    });
+
+    expect(config.github).toBeNull();
   });
 
   it('returns a frozen object so nothing can change settings at runtime', () => {

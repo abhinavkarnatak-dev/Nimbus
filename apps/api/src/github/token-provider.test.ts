@@ -17,6 +17,8 @@ const keyPair = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const GITHUB_CONFIG = {
   appId: '123456',
   appSlug: 'nimbus-test',
+  clientId: 'Iv23liFakeClientId',
+  clientSecret: 'fake-client-secret',
   privateKeyPem: keyPair.privateKey.export({ type: 'pkcs1', format: 'pem' }),
   webhookSecret: 'webhook-secret',
   setupCallbackUrl: 'http://localhost:4000/github/setup/callback',
@@ -200,6 +202,66 @@ describe('the real cache', () => {
     await provider.getToken(scope());
 
     expect(wire.mints).toHaveLength(2);
+  });
+});
+
+describe('the listing token', () => {
+  it('asks for metadata read only and no repository narrowing', async () => {
+    const wire = transport();
+    const { provider } = build(wire);
+
+    await provider.getListingToken(55_000_001);
+
+    expect(wire.mints[0]?.permissions).toEqual({ metadata: 'read' });
+    expect(wire.mints[0]?.repositoryIds).toBeUndefined();
+  });
+
+  it('is cached separately from repository tokens', async () => {
+    const wire = transport();
+    const { provider } = build(wire);
+
+    const listing = await provider.getListingToken(55_000_001);
+    const reading = await provider.getToken(scope({ scope: 'read' }));
+
+    expect(listing.token).not.toBe(reading.token);
+    expect(listing.repositoryId).toBeNull();
+    expect(wire.mints).toHaveLength(2);
+  });
+
+  it('is reused across calls for the same installation', async () => {
+    const wire = transport();
+    const { provider } = build(wire);
+
+    const first = await provider.getListingToken(55_000_001);
+    const second = await provider.getListingToken(55_000_001);
+
+    expect(second.token).toBe(first.token);
+    expect(wire.mints).toHaveLength(1);
+  });
+
+  it('keeps installations apart', async () => {
+    const wire = transport();
+    const { provider } = build(wire);
+
+    await provider.getListingToken(1);
+    await provider.getListingToken(2);
+
+    expect(wire.mints).toHaveLength(2);
+  });
+
+  it('refuses an installation that is not a real id', async () => {
+    const wire = transport();
+    const { provider } = build(wire);
+
+    await expect(provider.getListingToken(0)).rejects.toThrow(TokenScopeError);
+    expect(wire.mints).toHaveLength(0);
+  });
+
+  it('refuses a grant wider than metadata read', async () => {
+    const wire = transport({ permissions: { metadata: 'read', contents: 'read' } });
+    const { provider } = build(wire);
+
+    await expect(provider.getListingToken(55_000_001)).rejects.toThrow(GitHubTokenError);
   });
 });
 

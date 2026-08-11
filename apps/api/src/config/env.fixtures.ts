@@ -30,6 +30,8 @@ export function productionEnv(): Record<string, string | undefined> {
     GOOGLE_CALLBACK_URL: 'https://api.nimbus.example.com/auth/google/callback',
     GITHUB_APP_ID: '123456',
     GITHUB_APP_SLUG: 'nimbus-agent',
+    GITHUB_CLIENT_ID: 'Iv23liFakeClientId',
+    GITHUB_CLIENT_SECRET: 'fake-github-client-secret',
     GITHUB_APP_PRIVATE_KEY_BASE64: VALID_PRIVATE_KEY_BASE64,
     GITHUB_WEBHOOK_SECRET: 'webhook-secret-value',
     GITHUB_SETUP_CALLBACK_URL: 'https://api.nimbus.example.com/github/setup/callback',

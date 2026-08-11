@@ -39,6 +39,20 @@ export class TokenScopeError extends Error {
   }
 }
 
+export const LISTING_PERMISSIONS: TokenPermissions = { metadata: 'read' };
+
+export const LISTING_CACHE_KEY_PREFIX = 'listing';
+
+export function listingCacheKey(installationId: number): string {
+  return [LISTING_CACHE_KEY_PREFIX, installationId].join(':');
+}
+
+export function assertListingScope(installationId: number): void {
+  if (!Number.isInteger(installationId) || installationId <= 0) {
+    throw new TokenScopeError('A listing token needs a real installation.');
+  }
+}
+
 export function isTokenScopeName(value: string): value is TokenScopeName {
   return (TOKEN_SCOPE_NAMES as readonly string[]).includes(value);
 }

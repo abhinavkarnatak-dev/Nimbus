@@ -31,6 +31,7 @@ export interface GitHubInstallationDocument {
   installationId: number;
   accountId: number;
   accountLogin: string;
+  installedByGitHubUserId: number;
   accountType: GitHubAccountType;
   status: InstallationStatus;
   selectedRepositories: SelectedRepository[];
@@ -66,6 +67,7 @@ export const githubInstallationModel: ModelDefinition = {
         'installationId',
         'accountId',
         'accountLogin',
+        'installedByGitHubUserId',
         'accountType',
         'status',
         'selectedRepositories',
@@ -81,6 +83,7 @@ export const githubInstallationModel: ModelDefinition = {
         userId: { bsonType: 'string', pattern: publicIdPattern('usr') },
         installationId: { bsonType: 'number', minimum: 1 },
         accountId: { bsonType: 'number', minimum: 1 },
+        installedByGitHubUserId: { bsonType: 'number', minimum: 1 },
         accountLogin: { bsonType: 'string', minLength: 1, maxLength: LIMITS.ownerNameMaxChars },
         accountType: { enum: [...GitHubAccountTypeSchema.options] },
         status: { enum: [...InstallationStatusSchema.options] },

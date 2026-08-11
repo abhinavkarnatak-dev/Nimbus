@@ -5,26 +5,32 @@ import type { Logger } from '../logging/logger.js';
 import { redactValue } from '../logging/redact.js';
 import { createAppJwt } from './app-jwt.js';
 import {
+  LISTING_PERMISSIONS,
+  assertListingScope,
   assertNarrowScope,
-  grantedPermissionsAreWithin,
+  listingCacheKey,
   permissionsFor,
   scopeCacheKey,
+  type TokenPermissions,
   type TokenScope,
 } from './permissions.js';
 
 export const EXPIRY_MARGIN_SECONDS = 300;
 export const REQUEST_TIMEOUT_MS = 10_000;
 
+export const LISTING_SCOPE = 'listRepositories';
+
 export interface InstallationToken {
   token: string;
   expiresAt: Date;
-  repositoryId: number;
-  scope: TokenScope['scope'];
+  repositoryId: number | null;
+  scope: TokenScope['scope'] | typeof LISTING_SCOPE;
 }
 
 export interface GitHubTokenProvider {
   readonly name: string;
   getToken(scope: TokenScope): Promise<InstallationToken>;
+  getListingToken(installationId: number): Promise<InstallationToken>;
   revoke(token: InstallationToken): Promise<void>;
   clearCache(): void;
 }
@@ -46,6 +52,19 @@ export class GitHubTokenError extends Error {
     this.name = 'GitHubTokenError';
     this.code = code;
   }
+}
+
+export function grantedPermissionsWithin(
+  granted: Readonly<Record<string, string>>,
+  requested: Readonly<Record<string, string>>,
+): boolean {
+  return Object.entries(granted).every(([name, level]) => {
+    const permitted = requested[name];
+    if (permitted === undefined) {
+      return false;
+    }
+    return permitted === 'write' || level === 'read';
+  });
 }
 
 export function isUsable(
@@ -78,7 +97,7 @@ function statusOf(error: unknown): number | undefined {
 
 export interface MintRequest {
   installationId: number;
-  repositoryIds: number[];
+  repositoryIds?: number[];
   permissions: Readonly<Record<string, string>>;
 }
 
@@ -109,7 +128,7 @@ export function createOctokitTransport(timeoutMs: number): GitHubTransport {
         request: { timeout: timeoutMs },
       }).rest.apps.createInstallationAccessToken({
         installation_id: request.installationId,
-        repository_ids: request.repositoryIds,
+        ...(request.repositoryIds === undefined ? {} : { repository_ids: request.repositoryIds }),
         permissions: request.permissions,
       });
 
@@ -151,7 +170,34 @@ export class GitHubAppTokenProvider implements GitHubTokenProvider {
   async getToken(scope: TokenScope): Promise<InstallationToken> {
     assertNarrowScope(scope);
 
-    const key = scopeCacheKey(scope);
+    return this.cached(scopeCacheKey(scope), async () =>
+      this.mint({
+        installationId: scope.installationId,
+        repositoryIds: [scope.repositoryId],
+        permissions: permissionsFor(scope.scope),
+        repositoryId: scope.repositoryId,
+        scope: scope.scope,
+      }),
+    );
+  }
+
+  async getListingToken(installationId: number): Promise<InstallationToken> {
+    assertListingScope(installationId);
+
+    return this.cached(listingCacheKey(installationId), async () =>
+      this.mint({
+        installationId,
+        permissions: LISTING_PERMISSIONS,
+        repositoryId: null,
+        scope: LISTING_SCOPE,
+      }),
+    );
+  }
+
+  private async cached(
+    key: string,
+    mint: () => Promise<InstallationToken>,
+  ): Promise<InstallationToken> {
     const cached = this.cache.get(key);
 
     if (cached !== undefined && isUsable(cached, this.marginSeconds)) {
@@ -164,7 +210,7 @@ export class GitHubAppTokenProvider implements GitHubTokenProvider {
       return existing;
     }
 
-    const pending = this.mint(scope)
+    const pending = mint()
       .then((token) => {
         this.cache.set(key, token);
         return token;
@@ -198,17 +244,21 @@ export class GitHubAppTokenProvider implements GitHubTokenProvider {
     this.cache.clear();
   }
 
-  private async mint(scope: TokenScope): Promise<InstallationToken> {
-    const permissions = permissionsFor(scope.scope);
-
+  private async mint(request: {
+    installationId: number;
+    repositoryIds?: number[];
+    permissions: TokenPermissions;
+    repositoryId: number | null;
+    scope: InstallationToken['scope'];
+  }): Promise<InstallationToken> {
     let response: MintResponse;
     try {
       response = await this.transport.mint(
         createAppJwt(this.github.appId, this.github.privateKeyPem),
         {
-          installationId: scope.installationId,
-          repositoryIds: [scope.repositoryId],
-          permissions,
+          installationId: request.installationId,
+          ...(request.repositoryIds === undefined ? {} : { repositoryIds: request.repositoryIds }),
+          permissions: request.permissions,
         },
       );
     } catch (error) {
@@ -216,9 +266,9 @@ export class GitHubAppTokenProvider implements GitHubTokenProvider {
 
       this.logger.error(
         {
-          installationId: scope.installationId,
-          repositoryId: scope.repositoryId,
-          scope: scope.scope,
+          installationId: request.installationId,
+          repositoryId: request.repositoryId,
+          scope: request.scope,
           status,
           err: redactValue(error),
         },
@@ -246,7 +296,7 @@ export class GitHubAppTokenProvider implements GitHubTokenProvider {
       );
     }
 
-    if (!grantedPermissionsAreWithin(response.permissions, scope.scope)) {
+    if (!grantedPermissionsWithin(response.permissions, request.permissions)) {
       throw new GitHubTokenError(
         'GITHUB_TOKEN_TOO_BROAD',
         'GitHub returned wider access than Nimbus asked for.',
@@ -256,12 +306,12 @@ export class GitHubAppTokenProvider implements GitHubTokenProvider {
     const token: InstallationToken = {
       token: response.token,
       expiresAt: new Date(response.expiresAt),
-      repositoryId: scope.repositoryId,
-      scope: scope.scope,
+      repositoryId: request.repositoryId,
+      scope: request.scope,
     };
 
     this.logger.info(
-      { installationId: scope.installationId, ...describeTokenForLog(token) },
+      { installationId: request.installationId, ...describeTokenForLog(token) },
       'Minted a narrowed GitHub token',
     );
 

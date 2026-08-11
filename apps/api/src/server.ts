@@ -11,8 +11,12 @@ import { GoogleService } from './auth/google-service.js';
 import { OtpService } from './auth/otp-service.js';
 import { SessionService } from './auth/session-service.js';
 import { createMailService, type MailService } from './email/mail-service.js';
+import { OctokitGitHubDirectory } from './github/directory.js';
+import { InstallationService } from './github/installation-service.js';
+import { GitHubAppTokenProvider } from './github/token-provider.js';
 import { createAttachSession } from './http/middleware/session.js';
 import { createAuthRouter } from './http/routes/auth.js';
+import { createGitHubRouter } from './http/routes/github.js';
 import type { DependencyCheck } from './http/routes/health.js';
 import type { Logger } from './logging/logger.js';
 import { closeRedis, connectRedis } from './redis/client.js';
@@ -145,11 +149,29 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     webOrigin: config.api.webOrigin,
   });
 
+  const routers = [authRouter];
+
+  if (config.github !== null) {
+    const tokens = new GitHubAppTokenProvider({ github: config.github, logger });
+    const installations = new InstallationService({
+      redis,
+      db: handle.db,
+      tokens,
+      directory: new OctokitGitHubDirectory({ github: config.github, logger }),
+      github: config.github,
+      logger,
+    });
+
+    routers.push(createGitHubRouter({ installations, webOrigin: config.api.webOrigin }));
+  }
+
+  logger.info({ githubConnect: config.github !== null }, 'GitHub connection ready');
+
   const app = createApp({
     config,
     logger,
     checks,
-    routers: [authRouter],
+    routers,
     attachSession: createAttachSession(sessions, config.isProduction),
   });
   const server = createHttpServer(app);

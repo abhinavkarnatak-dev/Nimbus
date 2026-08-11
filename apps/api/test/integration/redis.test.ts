@@ -262,6 +262,16 @@ describe('one time values', () => {
     expect(await nonces().consume('non_aaaaaaaaaaaaaaaaaaaaa')).toBeNull();
   });
 
+  it('refuses a malformed value without letting it reach the key builder', async () => {
+    const subject = nonces();
+
+    expect(await subject.consume('')).toBeNull();
+    expect(await subject.consume('not-a-nonce')).toBeNull();
+    expect(await subject.consume('non_short')).toBeNull();
+    expect(await subject.consume('non_aaaaaaaaaaaaaaaaaaaaa:injected')).toBeNull();
+    expect(await subject.consume('non_aaaaaaaaaaaaaaaaaaa*')).toBeNull();
+  });
+
   it('gives every value an expiry', async () => {
     const subject = nonces();
     const nonce = await subject.issue({ userId: 'usr_1' });

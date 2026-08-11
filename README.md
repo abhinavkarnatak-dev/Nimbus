@@ -414,6 +414,40 @@ and a test asserts none of the three sets ever contains one.
 - **What GitHub grants is checked against what was asked for.** A token wider than requested is
   discarded rather than used.
 
+## Connecting a repository
+
+```text
+GET /github/connect           returns a GitHub install URL carrying a one time value
+GET /github/setup/callback    GitHub sends you back here, the installation is remembered
+GET /github/repositories      the public repositories Nimbus may work on
+```
+
+All three require a session. The list is resolved on the server from **your** installation; there is
+no way to name an installation or a repository in a request, and no clone URL is ever accepted.
+
+- **A one time value ties the connect flow to your account.** It is spent on return, and a value
+  issued to a different account is refused even if the installation number is right.
+- **You must prove to GitHub that the installation is yours.** Connecting sends you through GitHub's
+  authorization step, and Nimbus exchanges the resulting code for a user token to ask GitHub which
+  installations that account can actually reach. Without that proof a new connection is refused, so
+  knowing somebody else's installation number is not enough to claim it. The check uses reachable
+  installations rather than comparing account ids, because on an organisation install the account is
+  the organisation, not the person.
+- **The installation is verified with GitHub before it is associated**, so a number typed into the URL
+  is not enough. A bad value is rejected before GitHub is contacted at all, so the callback cannot be
+  used to probe which installation numbers exist.
+- **An installation already connected to another account is refused**, leaving the existing record
+  untouched.
+- **Only public repositories are offered.** A repository must say explicitly that it is not private
+  and that its visibility is public, so `internal` repositories and ambiguous payloads are both
+  refused rather than assumed safe.
+- **Not connected is an error, not an empty list**, because "you have not connected GitHub" and "you
+  have connected it and own nothing" are different answers.
+
+Listing needs a token that is not scoped to one repository, which is the single exception to the rule
+that every GitHub token is. It carries `metadata: read` and nothing else, so it can list repository
+names and cannot read a line of code.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,

@@ -8,6 +8,12 @@ import { TypedStore } from './store.js';
 
 export const NONCE_PREFIX = 'non';
 
+const NONCE_PATTERN = /^non_[0-9A-Za-z_-]{21}$/;
+
+export function looksLikeNonce(value: string): boolean {
+  return NONCE_PATTERN.test(value);
+}
+
 export interface NonceStoreOptions<T> {
   purpose: string;
   schema: z.ZodType<T>;
@@ -38,6 +44,10 @@ export class NonceStore<T> {
   }
 
   async consume(nonce: string): Promise<T | null> {
+    if (!looksLikeNonce(nonce)) {
+      return null;
+    }
+
     const record = await this.store.take(nonce);
     if (record === null) {
       return null;
