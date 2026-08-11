@@ -66,13 +66,18 @@ export function isSecretKey(key: string): boolean {
   return SECRET_SEGMENT_PATTERN.test(normalized);
 }
 
-export function redactString(value: string): string {
-  let output =
-    value.length > MAX_STRING_LENGTH ? `${value.slice(0, MAX_STRING_LENGTH)}...[truncated]` : value;
+export function redactSecrets(value: string): string {
+  let output = value;
   for (const { pattern, replacement } of STRING_PATTERNS) {
     output = output.replace(pattern, replacement);
   }
   return output;
+}
+
+export function redactString(value: string): string {
+  return redactSecrets(
+    value.length > MAX_STRING_LENGTH ? `${value.slice(0, MAX_STRING_LENGTH)}...[truncated]` : value,
+  );
 }
 
 function redactAt(value: unknown, depth: number, seen: WeakSet<object>): unknown {

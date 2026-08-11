@@ -1,6 +1,34 @@
 import { describe, expect, it } from 'vitest';
 
-import { isSecretKey, redactString, redactValue, REDACTED } from './redact.js';
+import { isSecretKey, redactSecrets, redactString, redactValue, REDACTED } from './redact.js';
+
+describe('redacting without the log length cap', () => {
+  it('still hides a secret far past where a log field would be cut', () => {
+    const long = `${'x'.repeat(50_000)}\ntoken ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n`;
+
+    expect(redactSecrets(long)).toContain(REDACTED);
+    expect(redactSecrets(long)).not.toContain('ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  });
+
+  it('keeps the whole string rather than trimming it', () => {
+    const long = 'x'.repeat(50_000);
+
+    expect(redactSecrets(long)).toHaveLength(50_000);
+  });
+
+  it('leaves clean text exactly as it was, so a caller can tell nothing was hidden', () => {
+    const clean = 'all tests passed\n'.repeat(1_000);
+
+    expect(redactSecrets(clean)).toBe(clean);
+  });
+
+  it('is what redactString does after the length cap, so logs are unchanged', () => {
+    const long = `${'x'.repeat(50_000)} ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`;
+
+    expect(redactString(long)).toContain('...[truncated]');
+    expect(redactString(long).length).toBeLessThan(5_000);
+  });
+});
 
 describe('secret key detection', () => {
   it('flags obvious secret keys in any casing style', () => {

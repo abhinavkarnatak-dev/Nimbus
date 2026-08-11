@@ -20,6 +20,7 @@
     "dev": "pnpm -r --parallel dev",
     "demo:sandbox": "pnpm --filter @nimbus/api demo:sandbox",
     "demo:tools": "pnpm --filter @nimbus/api demo:tools",
+    "demo:commands": "pnpm --filter @nimbus/api demo:commands",
     "build": "pnpm -r build",
     "typecheck": "tsc -b --pretty && pnpm -r --if-present run typecheck",
     "typecheck:clean": "tsc -b --clean",
