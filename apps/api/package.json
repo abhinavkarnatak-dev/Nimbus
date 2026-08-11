@@ -10,6 +10,7 @@
     "dev": "tsx watch --env-file-if-exists=../../.env src/index.ts",
     "build:watch": "tsc -b tsconfig.build.json --watch --preserveWatchOutput",
     "start": "node --env-file-if-exists=../../.env dist/index.js",
+    "demo:sandbox": "tsx test/manual/sandbox-demo.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "clean": "rimraf dist"
   },

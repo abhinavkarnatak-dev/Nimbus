@@ -18,6 +18,7 @@
     "dev:services:down": "docker compose --profile semantic down",
     "dev:services:reset": "docker compose --profile semantic down --volumes",
     "dev": "pnpm -r --parallel dev",
+    "demo:sandbox": "pnpm --filter @nimbus/api demo:sandbox",
     "build": "pnpm -r build",
     "typecheck": "tsc -b --pretty && pnpm -r --if-present run typecheck",
     "typecheck:clean": "tsc -b --clean",

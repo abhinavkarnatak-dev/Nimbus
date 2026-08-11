@@ -478,6 +478,42 @@ What a webhook deliberately **cannot** do is the part worth knowing:
 An event for an installation Nimbus does not hold is acknowledged and ignored rather than refused,
 because GitHub disables a webhook that keeps failing, and "I have no use for this" is not a failure.
 
+## The sandbox boundary
+
+Untrusted code runs on a machine that is created empty, used once, and destroyed. The boundary is
+implemented and fully tested; the real rented machine arrives with the E2B adapter, so today the only
+provider is a deterministic fake.
+
+You can watch the whole thing in about half a second, with no Docker, no network, and no keys:
+
+```bash
+pnpm demo:sandbox
+```
+
+A `SandboxProvider` offers six operations and nothing else: create, execute, read and write a file,
+export a patch, terminate, and report status. Two things are deliberately missing. There is no "give
+me a shell", because commands are argv arrays and a shell string is what model output gets injected
+into. And there is no way to keep a sandbox for later, because reuse means one task's leftovers
+reaching the next.
+
+- **No credential ever enters a sandbox.** Environment variables are an allowlist of twelve boring
+  names, and both the name and the value are checked, so a token pasted into an allowed name such as
+  `PATH` is refused too. Internal service addresses are refused even without a password in them. The
+  guard lives in the shared contract, so every provider inherits it rather than remembering it.
+- **Teardown cannot be skipped.** A sandbox is never handed out bare; it comes through a wrapper that
+  destroys it whether the work succeeded, threw, or was cancelled. A failure while destroying is
+  logged and audited, and never allowed to replace the error that actually caused the failure.
+- **Cancellation destroys the machine, not just the command**, because a command can start other
+  processes and stopping only the one you know about is not a stop.
+- **Everything is bounded**: per command time, a session deadline that killed commands still spend,
+  output bytes, file size, workspace size, and patch size. Truncated output always says it was
+  truncated.
+- **The only thing that crosses the wall is a patch**, which is text describing changed lines. The
+  trusted backend validates it and performs the authenticated write.
+
+Command policy, the full set of path traps, and real egress blocking belong to the features that
+follow this one.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,
