@@ -149,9 +149,73 @@ describe('MemoryWorkspace', () => {
   it('is empty after being cleared', () => {
     const workspace = new MemoryWorkspace();
     workspace.seed({ 'a.txt': 'hello' });
+    workspace.seedLinks({ 'link.txt': 'a.txt' });
+    workspace.seedRepositories(['vendor']);
     workspace.clear();
 
     expect(workspace.list()).toEqual([]);
+    expect(workspace.entries()).toEqual([]);
     expect(workspace.snapshot().baseline.size).toBe(0);
+  });
+});
+
+describe('reporting what is in the workspace', () => {
+  it('describes files with their size', () => {
+    const workspace = new MemoryWorkspace();
+    workspace.seed({ 'a.txt': 'hello' });
+
+    expect(workspace.entries()).toEqual([{ path: 'a.txt', kind: 'file', size: 5, target: null }]);
+  });
+
+  it('invents the directories that hold the files', () => {
+    const workspace = new MemoryWorkspace();
+    workspace.seed({ 'src/deep/thing.ts': 'x' });
+
+    expect(workspace.entries().map((entry) => `${entry.kind}:${entry.path}`)).toEqual([
+      'directory:src',
+      'directory:src/deep',
+      'file:src/deep/thing.ts',
+    ]);
+  });
+
+  it('reports a link and where it points, without following it', () => {
+    const workspace = new MemoryWorkspace();
+    workspace.seedLinks({ 'notes.txt': '/etc/passwd' });
+
+    expect(workspace.entries()).toEqual([
+      { path: 'notes.txt', kind: 'symlink', size: 0, target: '/etc/passwd' },
+    ]);
+  });
+
+  it('reports a nested repository as its own kind', () => {
+    const workspace = new MemoryWorkspace();
+    workspace.seedRepositories(['vendor/lib']);
+
+    expect(workspace.entries().map((entry) => entry.kind)).toEqual(['directory', 'repository']);
+  });
+
+  it('lets a link win over a file at the same path, as a real filesystem would', () => {
+    const workspace = new MemoryWorkspace();
+    workspace.seed({ 'a.txt': 'hello' });
+    workspace.seedLinks({ 'a.txt': '/etc/passwd' });
+
+    expect(workspace.entries()[0]?.kind).toBe('symlink');
+  });
+
+  it('returns entries in a stable order', () => {
+    const workspace = new MemoryWorkspace();
+    workspace.seed({ 'b.txt': 'x', 'a.txt': 'x' });
+
+    expect(workspace.entries().map((entry) => entry.path)).toEqual(['a.txt', 'b.txt']);
+  });
+
+  it('refuses a link with no target', () => {
+    const workspace = new MemoryWorkspace();
+
+    expect(
+      codeOf(() => {
+        workspace.seedLinks({ 'bad.txt': '' });
+      }),
+    ).toBe('SANDBOX_PATH_INVALID');
   });
 });

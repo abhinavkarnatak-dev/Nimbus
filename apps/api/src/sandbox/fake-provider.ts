@@ -17,6 +17,7 @@ import {
   type SandboxState,
   type SandboxStatus,
   type SandboxTerminationReason,
+  type WorkspaceEntry,
 } from './provider.js';
 import { MemoryWorkspace } from './workspace.js';
 
@@ -35,6 +36,8 @@ export interface ScriptedCommand {
 
 export interface FakeSandboxOptions {
   files?: Readonly<Record<string, string>>;
+  links?: Readonly<Record<string, string>>;
+  repositories?: readonly string[];
   commands?: Readonly<Record<string, ScriptedCommand>>;
   defaultCommand?: ScriptedCommand;
   createFails?: SandboxError;
@@ -83,6 +86,8 @@ export class FakeSandbox implements Sandbox {
     this.createdAt = new Date();
     this.lifetimeMs = spec.maxSeconds * 1_000;
     this.workspace.seed(options.files ?? {});
+    this.workspace.seedLinks(options.links ?? {});
+    this.workspace.seedRepositories(options.repositories ?? []);
     this.state = 'ready';
   }
 
@@ -172,6 +177,12 @@ export class FakeSandbox implements Sandbox {
       durationMs,
       timedOut: false,
     };
+  }
+
+  async listEntries(): Promise<WorkspaceEntry[]> {
+    assertUsable(this.status());
+    await Promise.resolve();
+    return this.workspace.entries();
   }
 
   async readFile(path: string): Promise<string> {

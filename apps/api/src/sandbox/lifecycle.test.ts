@@ -11,6 +11,7 @@ import {
   type Sandbox,
   type SandboxStatus,
   type SandboxTerminationReason,
+  type WorkspaceEntry,
 } from './provider.js';
 import { testSpec } from './sandbox.fixtures.js';
 
@@ -54,6 +55,10 @@ class StubSandbox implements Sandbox {
   }
 
   async execute(): Promise<CommandResult> {
+    return await Promise.reject(new Error('not used'));
+  }
+
+  async listEntries(): Promise<WorkspaceEntry[]> {
     return await Promise.reject(new Error('not used'));
   }
 

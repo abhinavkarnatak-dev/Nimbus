@@ -511,8 +511,39 @@ reaching the next.
 - **The only thing that crosses the wall is a patch**, which is text describing changed lines. The
   trusted backend validates it and performs the authenticated write.
 
-Command policy, the full set of path traps, and real egress blocking belong to the features that
-follow this one.
+Command policy and real egress blocking belong to the features that follow this one.
+
+## What the agent may do to files
+
+Five operations exist inside the workspace and no others: list the tree, search, read a file, create a
+file, and apply a patch. Every one of them takes a path, and every path is checked against what the
+filesystem reports rather than what the string appears to say.
+
+```bash
+pnpm demo:tools
+```
+
+That builds a repository containing every trap and tries all five tools against all of them.
+
+The reason string checks are not enough: `notes.txt` is relative, has no `..`, and mentions nothing
+forbidden, yet it can be a symlink to `/etc/passwd`. So each path segment is resolved against a
+listing the sandbox provides, and anything landing outside the workspace is refused. Links that stay
+inside are followed normally, because real repositories use them.
+
+Refused outright: traversal and absolute paths, links pointing out of the workspace, paths inside a
+nested repository, link loops, and anything on the ignore list. That list covers `.git`, dependency
+directories, build output, binaries, and credential-shaped files such as `.env`, `*.pem`, and
+`id_rsa`, so a secret committed to a repository by accident never reaches a model provider.
+
+Separately, a **protected path** list covers `.github/**`, `CODEOWNERS`, manifests and lock files,
+Dockerfiles, infrastructure, migrations, and anything named for authentication, sessions, crypto,
+billing, or payments. These are readable; changing them is what matters, because opening a pull
+request can trigger CI, which runs code. Today those changes are flagged, and the approval flow that
+acts on the flag arrives with the agent.
+
+Patches are applied only when their surrounding context matches exactly, and nothing is written until
+every file in the patch has passed the same path checks. Every result reports its own truncation, so a
+bounded answer is never mistaken for a complete one.
 
 ## Local fake-adapter mode _(not yet implemented)_
 

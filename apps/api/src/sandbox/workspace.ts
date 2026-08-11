@@ -1,7 +1,9 @@
 import { WorkspacePathSchema } from '@nimbus/contracts';
 
 import { SANDBOX_LIMITS } from './limits.js';
-import { SandboxError } from './provider.js';
+import { SandboxError, type WorkspaceEntry } from './provider.js';
+
+const LINK_TARGET_MAX_CHARS = 1_024;
 
 export function normalizeWorkspacePath(path: string): string {
   const trimmed = path.trim().replace(/^\.\//, '').replace(/\/+/g, '/');
@@ -16,6 +18,8 @@ export function normalizeWorkspacePath(path: string): string {
 export class MemoryWorkspace {
   private readonly current = new Map<string, string>();
   private readonly baseline = new Map<string, string>();
+  private readonly links = new Map<string, string>();
+  private readonly repositories = new Set<string>();
 
   seed(files: Readonly<Record<string, string>>): void {
     for (const [path, contents] of Object.entries(files)) {
@@ -24,6 +28,57 @@ export class MemoryWorkspace {
       this.baseline.set(key, contents);
     }
     this.assertWithinCapacity();
+  }
+
+  seedLinks(links: Readonly<Record<string, string>>): void {
+    for (const [path, target] of Object.entries(links)) {
+      if (target === '' || target.length > LINK_TARGET_MAX_CHARS) {
+        throw new SandboxError('SANDBOX_PATH_INVALID', 'That link target is not usable.');
+      }
+      this.links.set(normalizeWorkspacePath(path), target);
+    }
+  }
+
+  seedRepositories(paths: readonly string[]): void {
+    for (const path of paths) {
+      this.repositories.add(normalizeWorkspacePath(path));
+    }
+  }
+
+  entries(): WorkspaceEntry[] {
+    const found = new Map<string, WorkspaceEntry>();
+
+    for (const path of this.repositories) {
+      found.set(path, { path, kind: 'repository', size: 0, target: null });
+    }
+
+    for (const [path, target] of this.links) {
+      found.set(path, { path, kind: 'symlink', size: 0, target });
+    }
+
+    for (const [path, contents] of this.current) {
+      if (!found.has(path)) {
+        found.set(path, {
+          path,
+          kind: 'file',
+          size: Buffer.byteLength(contents, 'utf8'),
+          target: null,
+        });
+      }
+    }
+
+    for (const path of [...found.keys()]) {
+      const segments = path.split('/');
+
+      for (let depth = 1; depth < segments.length; depth += 1) {
+        const parent = segments.slice(0, depth).join('/');
+        if (!found.has(parent)) {
+          found.set(parent, { path: parent, kind: 'directory', size: 0, target: null });
+        }
+      }
+    }
+
+    return [...found.values()].sort((left, right) => left.path.localeCompare(right.path));
   }
 
   has(path: string): boolean {
@@ -97,6 +152,8 @@ export class MemoryWorkspace {
   clear(): void {
     this.current.clear();
     this.baseline.clear();
+    this.links.clear();
+    this.repositories.clear();
   }
 
   private assertWithinCapacity(): void {

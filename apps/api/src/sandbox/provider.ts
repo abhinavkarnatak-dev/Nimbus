@@ -106,6 +106,17 @@ export interface CommandResult {
   timedOut: boolean;
 }
 
+export const WORKSPACE_ENTRY_KINDS = ['file', 'directory', 'symlink', 'repository'] as const;
+
+export type WorkspaceEntryKind = (typeof WORKSPACE_ENTRY_KINDS)[number];
+
+export interface WorkspaceEntry {
+  path: string;
+  kind: WorkspaceEntryKind;
+  size: number;
+  target: string | null;
+}
+
 export interface PatchedFile {
   path: string;
   changeKind: 'added' | 'modified' | 'deleted';
@@ -125,6 +136,7 @@ export interface Sandbox {
   readonly sandboxId: string;
   status(): SandboxStatus;
   execute(request: CommandRequest): Promise<CommandResult>;
+  listEntries(): Promise<WorkspaceEntry[]>;
   readFile(path: string): Promise<string>;
   writeFile(path: string, contents: string): Promise<void>;
   exportPatch(): Promise<PatchExport>;
