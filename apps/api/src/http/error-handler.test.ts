@@ -57,7 +57,7 @@ describe('an unexpected failure', () => {
 
     await request(app).get('/boom');
 
-    expect(lines.some((line) => line.level === 50)).toBe(true);
+    expect(lines.some((line) => line.level === 'error')).toBe(true);
     expect(JSON.stringify(lines)).toContain('db-internal');
   });
 
@@ -92,8 +92,8 @@ describe('an error we raised on purpose', () => {
 
     await request(app).get('/boom');
 
-    expect(lines.some((line) => line.level === 40)).toBe(true);
-    expect(lines.some((line) => line.level === 50)).toBe(false);
+    expect(lines.some((line) => line.level === 'warn')).toBe(true);
+    expect(lines.some((line) => line.level === 'error')).toBe(false);
   });
 });
 

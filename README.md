@@ -384,6 +384,36 @@ Four properties, each with tests:
   account is re-read every time rather than trusted from the session. Every session that person holds
   is revoked at once.
 
+## GitHub access
+
+Nimbus never holds a long lived GitHub credential. It holds a private key that proves who it is, and
+trades that for a token scoped to one repository, for one hour, whenever it needs to do something.
+
+```text
+private key  ->  App JWT              proves Nimbus is Nimbus, touches no repository
+App JWT      ->  installation token   one repository, one permission set, one hour
+```
+
+Three permission sets exist, and nothing else is possible:
+
+| Set           | Permissions                                        | Used for                  |
+| ------------- | -------------------------------------------------- | ------------------------- |
+| `read`        | metadata read, contents read                       | Reading a repository      |
+| `push`        | metadata read, contents write                      | Creating the agent branch |
+| `pullRequest` | metadata read, contents write, pull requests write | Opening a pull request    |
+
+The App itself requests no administration, secrets, actions, workflows, or organisation permissions,
+and a test asserts none of the three sets ever contains one.
+
+- **Every token is tied to one repository id**, never a name, since names can be renamed and reused.
+- **Tokens are cached in memory only, never in Redis or MongoDB.** Redis runs with `appendonly yes`,
+  so storing one there would write a repository credential to disk.
+- **Tokens are treated as expired five minutes early**, so an operation never begins with a token
+  about to die.
+- **Tokens are handed back when finished**, and stop working immediately rather than lingering.
+- **What GitHub grants is checked against what was asked for.** A token wider than requested is
+  discarded rather than used.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,

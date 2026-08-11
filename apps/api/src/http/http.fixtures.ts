@@ -1,11 +1,9 @@
-import { pino } from 'pino';
-
 import { loadConfig, type AppConfig } from '../config/load.js';
 import { minimalEnv, productionEnv } from '../config/env.fixtures.js';
-import type { Logger } from '../logging/logger.js';
+import { createLogger, type Logger } from '../logging/logger.js';
 
 export interface CapturedLog {
-  level: number;
+  level: string;
   msg?: string;
   [key: string]: unknown;
 }
@@ -17,14 +15,17 @@ export interface TestLogger {
 
 export function createTestLogger(): TestLogger {
   const lines: CapturedLog[] = [];
-  const logger = pino(
-    { level: 'trace', base: null },
-    {
+
+  const logger = createLogger({
+    level: 'trace',
+    environment: 'test',
+    destination: {
       write(chunk: string) {
         lines.push(JSON.parse(chunk) as CapturedLog);
       },
     },
-  );
+  });
+
   return { logger, lines };
 }
 

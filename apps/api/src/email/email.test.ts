@@ -286,7 +286,7 @@ describe('the development mailer', () => {
     await mailer.send(validEmail());
     await mailer.send(validEmail());
 
-    const warnings = lines.filter((line) => line.level === 40);
+    const warnings = lines.filter((line) => line.level === 'warn');
     expect(warnings).toHaveLength(1);
     expect(JSON.stringify(warnings)).toContain('never delivered');
   });

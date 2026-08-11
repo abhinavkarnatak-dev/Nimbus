@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@nimbus/contracts": "workspace:*",
+    "@octokit/rest": "22.0.1",
     "cookie-parser": "1.4.7",
     "express": "5.2.1",
     "helmet": "8.3.0",

@@ -23,7 +23,10 @@ const STRING_PATTERNS: readonly { pattern: RegExp; replacement: string }[] = [
     replacement: REDACTED,
   },
   { pattern: /\bgithub_pat_[A-Za-z0-9_]{20,}/g, replacement: REDACTED },
-  { pattern: /\bgh[psour]_[A-Za-z0-9]{20,}/g, replacement: REDACTED },
+  {
+    pattern: /\bgh[psour]_[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]+)*/g,
+    replacement: REDACTED,
+  },
   { pattern: /\bgsk_[A-Za-z0-9]{20,}/g, replacement: REDACTED },
   { pattern: /\bAIza[A-Za-z0-9_-]{30,}/g, replacement: REDACTED },
   { pattern: /\b(?:sk|rk)-[A-Za-z0-9_-]{16,}/g, replacement: REDACTED },
