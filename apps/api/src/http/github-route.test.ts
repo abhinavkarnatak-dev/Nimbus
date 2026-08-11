@@ -13,13 +13,19 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
 import type { RepositoriesResult } from '../github/installation-service.js';
+import type { WebhookDelivery, WebhookResult } from '../github/webhook-service.js';
 import type { ActiveSession } from '../auth/session-service.js';
 import { createApp } from '../app.js';
 import { ApiError } from './api-error.js';
 import { SESSION_COOKIE_NAME } from './cookies.js';
 import { createTestLogger, testConfig } from './http.fixtures.js';
 import { createAttachSession } from './middleware/session.js';
-import { createGitHubRouter, parseInstallationId, setupRedirect } from './routes/github.js';
+import {
+  createGitHubRouter,
+  parseInstallationId,
+  setupRedirect,
+  singleHeader,
+} from './routes/github.js';
 
 const SESSION_ID = 'session-id-value';
 const WEB_ORIGIN = 'http://localhost:5173';
@@ -61,14 +67,30 @@ interface Harness {
   app: Express;
   setups: { userId: string; installationId: number; state: string; code: string }[];
   listedFor: string[];
+  deliveries: WebhookDelivery[];
 }
 
 function harness(
-  options: { signedIn?: boolean; onSetup?: () => never; onList?: () => never } = {},
+  options: {
+    signedIn?: boolean;
+    onSetup?: () => never;
+    onList?: () => never;
+    onWebhook?: () => never;
+  } = {},
 ): Harness {
   const setups: { userId: string; installationId: number; state: string; code: string }[] = [];
   const listedFor: string[] = [];
+  const deliveries: WebhookDelivery[] = [];
   const { logger } = createTestLogger();
+
+  const webhooks = {
+    handle: async (delivery: WebhookDelivery): Promise<WebhookResult> => {
+      deliveries.push(delivery);
+      await Promise.resolve();
+      options.onWebhook?.();
+      return { outcome: 'applied', reason: 'status_suspended' };
+    },
+  };
 
   const sessions = {
     load: async (sessionId: string): Promise<ActiveSession | null> => {
@@ -113,11 +135,11 @@ function harness(
   const app = createApp({
     config: testConfig(),
     logger,
-    routers: [createGitHubRouter({ installations, webOrigin: WEB_ORIGIN })],
+    routers: [createGitHubRouter({ installations, webhooks, webOrigin: WEB_ORIGIN })],
     attachSession: createAttachSession(sessions, false),
   });
 
-  return { app, setups, listedFor };
+  return { app, setups, listedFor, deliveries };
 }
 
 function errorBody(body: unknown): ApiErrorBody {
@@ -322,6 +344,93 @@ describe('GET /github/repositories', () => {
 
     expect(response.status).toBe(409);
     expect(errorBody(response.body).error.code).toBe('GITHUB_NOT_CONNECTED');
+  });
+});
+
+describe('POST /github/webhook', () => {
+  const body = JSON.stringify({ action: 'suspend', installation: { id: INSTALLATION_ID } });
+
+  function post(app: Express) {
+    return request(app)
+      .post('/github/webhook')
+      .set('Content-Type', 'application/json')
+      .set('X-GitHub-Event', 'installation')
+      .set('X-GitHub-Delivery', 'e1b0c2d4-0000-4000-8000-000000000001')
+      .set('X-Hub-Signature-256', `sha256=${'a'.repeat(64)}`);
+  }
+
+  it('needs no session and no csrf token', async () => {
+    const { app, deliveries } = harness({ signedIn: false });
+
+    const response = await post(app).send(body);
+
+    expect(response.status).toBe(200);
+    expect(deliveries).toHaveLength(1);
+  });
+
+  it('hands the handler the exact bytes that arrived', async () => {
+    const { app, deliveries } = harness();
+    const awkward = '{"action":"suspend",  "installation":{"id":152851946},"note":"a\\u00e9b"}';
+
+    await post(app).send(awkward);
+
+    expect(deliveries[0]?.body.toString('utf8')).toBe(awkward);
+    expect(Buffer.isBuffer(deliveries[0]?.body)).toBe(true);
+  });
+
+  it('passes the event, delivery id and signature headers through', async () => {
+    const { app, deliveries } = harness();
+
+    await post(app).send(body);
+
+    expect(deliveries[0]?.event).toBe('installation');
+    expect(deliveries[0]?.deliveryId).toBe('e1b0c2d4-0000-4000-8000-000000000001');
+    expect(deliveries[0]?.signature).toBe(`sha256=${'a'.repeat(64)}`);
+  });
+
+  it('treats missing headers as empty rather than crashing', async () => {
+    const { app, deliveries } = harness();
+
+    const response = await request(app)
+      .post('/github/webhook')
+      .set('Content-Type', 'application/json')
+      .send(body);
+
+    expect(response.status).toBe(200);
+    expect(deliveries[0]?.event).toBe('');
+    expect(deliveries[0]?.signature).toBe('');
+  });
+
+  it('turns a refused signature into a 401', async () => {
+    const { app } = harness({
+      onWebhook: () => {
+        throw new ApiError('UNAUTHENTICATED', 'That request could not be verified.');
+      },
+    });
+
+    const response = await post(app).send(body);
+
+    expect(response.status).toBe(401);
+    expect(errorBody(response.body).error.code).toBe('UNAUTHENTICATED');
+  });
+
+  it('reports the outcome without leaking the payload back', async () => {
+    const { app } = harness();
+
+    const response = await post(app).send(body);
+
+    expect(response.body).toEqual({ outcome: 'applied' });
+  });
+});
+
+describe('reading a single header value', () => {
+  it('keeps a plain string', () => {
+    expect(singleHeader('sha256=abc')).toBe('sha256=abc');
+  });
+
+  it('refuses a repeated header rather than picking one', () => {
+    expect(singleHeader(['sha256=abc', 'sha256=def'])).toBe('');
+    expect(singleHeader(undefined)).toBe('');
   });
 });
 

@@ -6,6 +6,8 @@ import {
 import { Router } from 'express';
 
 import type { RepositoriesResult } from '../../github/installation-service.js';
+import { DELIVERY_HEADER, EVENT_HEADER, SIGNATURE_HEADER } from '../../github/webhook-signature.js';
+import type { WebhookDelivery, WebhookResult } from '../../github/webhook-service.js';
 import { ApiError } from '../api-error.js';
 import { createRequireAuth, requireSession } from '../middleware/session.js';
 import { clientIp } from './auth.js';
@@ -22,9 +24,18 @@ export interface GitHubSetupService {
   listRepositories(userId: string): Promise<RepositoriesResult>;
 }
 
+export interface GitHubWebhookHandler {
+  handle(delivery: WebhookDelivery): Promise<WebhookResult>;
+}
+
 export interface GitHubRouterOptions {
   installations: GitHubSetupService;
+  webhooks: GitHubWebhookHandler;
   webOrigin: string;
+}
+
+export function singleHeader(value: string | string[] | undefined): string {
+  return typeof value === 'string' ? value : '';
 }
 
 export const SETUP_LANDING_PATH = '/github/callback';
@@ -97,6 +108,18 @@ export function createGitHubRouter(options: GitHubRouterOptions): Router {
     }
 
     response.redirect(302, setupRedirect(options.webOrigin, 'connected'));
+  });
+
+  router.post('/github/webhook', async (request, response) => {
+    const result = await options.webhooks.handle({
+      event: singleHeader(request.headers[EVENT_HEADER]),
+      deliveryId: singleHeader(request.headers[DELIVERY_HEADER]),
+      signature: singleHeader(request.headers[SIGNATURE_HEADER]),
+      body: Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0),
+      ip: clientIp(request.ip),
+    });
+
+    response.status(200).json({ outcome: result.outcome });
   });
 
   router.get('/github/repositories', requireAuth, async (request, response) => {

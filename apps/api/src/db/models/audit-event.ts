@@ -27,6 +27,7 @@ export const AUDIT_ACTIONS = [
   'github.installation.suspended',
   'github.installation.unsuspended',
   'github.installation.removed',
+  'github.installation.permissions_accepted',
   'github.repositories.changed',
   'github.token.minted',
   'session.created',

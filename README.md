@@ -417,13 +417,15 @@ and a test asserts none of the three sets ever contains one.
 ## Connecting a repository
 
 ```text
-GET /github/connect           returns a GitHub install URL carrying a one time value
-GET /github/setup/callback    GitHub sends you back here, the installation is remembered
-GET /github/repositories      the public repositories Nimbus may work on
+GET  /github/connect           returns a GitHub install URL carrying a one time value
+GET  /github/setup/callback    GitHub sends you back here, the installation is remembered
+GET  /github/repositories      the public repositories Nimbus may work on
+POST /github/webhook           GitHub tells Nimbus what changed, signature checked
 ```
 
-All three require a session. The list is resolved on the server from **your** installation; there is
-no way to name an installation or a repository in a request, and no clone URL is ever accepted.
+The three `GET` routes require a session. The list is resolved on the server from **your**
+installation; there is no way to name an installation or a repository in a request, and no clone URL
+is ever accepted.
 
 - **A one time value ties the connect flow to your account.** It is spent on return, and a value
   issued to a different account is refused even if the installation number is right.
@@ -448,6 +450,34 @@ Listing needs a token that is not scoped to one repository, which is the single 
 that every GitHub token is. It carries `metadata: read` and nothing else, so it can list repository
 names and cannot read a line of code.
 
+## Staying in step with GitHub
+
+`POST /github/webhook` is the one route with no session, because GitHub calls it. It is trusted only
+because every delivery is proved to have come from GitHub before anything else happens.
+
+- **The signature is checked against the raw bytes**, using HMAC SHA-256 and the shared
+  `GITHUB_WEBHOOK_SECRET`, compared in constant time. Parsing the body first and re-serialising it
+  would change the bytes and break the check, so the raw body is kept for these paths only. The older
+  SHA-1 header is never accepted, and a blank secret verifies nothing rather than everything.
+- **A repeated delivery is done once.** Every delivery carries an id, which is claimed before the work
+  and marked done after it, so GitHub's retries and its Redeliver button do not apply a change twice.
+  If handling fails partway the claim is released, so a retry can genuinely retry.
+- **Suspend, unsuspend, uninstall, and repository changes are applied** to the installation record. A
+  suspended or removed installation stops being usable, and a removed one is never revived by a late
+  event.
+
+What a webhook deliberately **cannot** do is the part worth knowing:
+
+- It cannot create an installation record. Records are created in one place only, the setup callback,
+  where a signed in person proved the installation is theirs. A webhook has no user attached and could
+  only guess.
+- It cannot change which account owns an installation, or the proven GitHub identity stored on it.
+- It cannot make a repository appear in the list Nimbus offers you, because that list is still fetched
+  live from GitHub on every request.
+
+An event for an installation Nimbus does not hold is acknowledged and ignored rather than refused,
+because GitHub disables a webhook that keeps failing, and "I have no use for this" is not a failure.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,
@@ -459,6 +489,16 @@ credentials.
 Google OAuth, the GitHub App, E2B, Groq, Gemini, SMTP, and optional Qdrant each require
 configuration before the corresponding real adapter can be used. Exact steps, GitHub App
 permissions, callback URLs, and webhook events will be documented as those features land.
+
+The GitHub App needs four things set before the GitHub routes will mount at all: the App id, slug and
+private key, an OAuth client id and secret with "Request user authorization (OAuth) during
+installation" enabled, a Callback URL pointing at `/github/setup/callback`, and a webhook secret
+matching `GITHUB_WEBHOOK_SECRET`. Missing any of them leaves `config.github` null and the routes
+unmounted, which fails closed.
+
+Webhooks need a URL GitHub can reach, so local testing needs a tunnel. The `installation` and
+`installation_repositories` events are delivered to every GitHub App automatically and do not appear
+in the "Subscribe to events" list.
 
 ## Architecture and trust boundaries
 

@@ -13,6 +13,8 @@ import type { Logger } from './logging/logger.js';
 
 export const JSON_BODY_LIMIT = '100kb';
 
+export const RAW_BODY_LIMIT = '1mb';
+
 export const RAW_BODY_PATHS = ['/github/webhook'] as const;
 
 export interface AppDependencies {
@@ -41,9 +43,10 @@ export function createApp(dependencies: AppDependencies): Express {
   app.use(createCorsMiddleware(config.api.webOrigin));
 
   const jsonParser = express.json({ limit: JSON_BODY_LIMIT });
+  const rawParser = express.raw({ type: '*/*', limit: RAW_BODY_LIMIT });
   app.use((request, response, next) => {
     if (needsRawBody(request.path)) {
-      next();
+      rawParser(request, response, next);
       return;
     }
     jsonParser(request, response, next);

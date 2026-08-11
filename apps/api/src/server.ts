@@ -14,6 +14,7 @@ import { createMailService, type MailService } from './email/mail-service.js';
 import { OctokitGitHubDirectory } from './github/directory.js';
 import { InstallationService } from './github/installation-service.js';
 import { GitHubAppTokenProvider } from './github/token-provider.js';
+import { GitHubWebhookService } from './github/webhook-service.js';
 import { createAttachSession } from './http/middleware/session.js';
 import { createAuthRouter } from './http/routes/auth.js';
 import { createGitHubRouter } from './http/routes/github.js';
@@ -162,7 +163,14 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
       logger,
     });
 
-    routers.push(createGitHubRouter({ installations, webOrigin: config.api.webOrigin }));
+    const webhooks = new GitHubWebhookService({
+      redis,
+      db: handle.db,
+      github: config.github,
+      logger,
+    });
+
+    routers.push(createGitHubRouter({ installations, webhooks, webOrigin: config.api.webOrigin }));
   }
 
   logger.info({ githubConnect: config.github !== null }, 'GitHub connection ready');
