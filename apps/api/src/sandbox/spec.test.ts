@@ -13,7 +13,7 @@ describe('buildSandboxSpec', () => {
 
     expect(spec).toEqual({
       sessionId: SESSION_ID,
-      templateId: 'nimbus-sandbox',
+      templateId: DEFAULT_TEMPLATE_ID,
       workspaceDir: SANDBOX_LIMITS.workspaceDir,
       maxSeconds: 1_800,
       allowInternet: false,
@@ -25,6 +25,10 @@ describe('buildSandboxSpec', () => {
     const spec = buildSandboxSpec(testConfig({ SANDBOX_TEMPLATE_ID: '' }).sandbox, SESSION_ID);
 
     expect(spec.templateId).toBe(DEFAULT_TEMPLATE_ID);
+  });
+
+  it('defaults to a template the provider really has, so a first run works', () => {
+    expect(DEFAULT_TEMPLATE_ID).toBe('base');
   });
 
   it('takes the session lifetime from configuration', () => {

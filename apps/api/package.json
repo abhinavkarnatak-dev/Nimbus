@@ -13,6 +13,8 @@
     "demo:sandbox": "tsx test/manual/sandbox-demo.ts",
     "demo:tools": "tsx test/manual/tools-demo.ts",
     "demo:commands": "tsx test/manual/commands-demo.ts",
+    "demo:e2b": "tsx test/manual/e2b-demo.ts",
+    "demo:e2b:live": "tsx --env-file-if-exists=../../.env test/manual/e2b-live.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "clean": "rimraf dist"
   },
@@ -20,6 +22,7 @@
     "@nimbus/contracts": "workspace:*",
     "@octokit/rest": "22.0.1",
     "cookie-parser": "1.4.7",
+    "e2b": "2.38.3",
     "express": "5.2.1",
     "helmet": "8.3.0",
     "ioredis": "5.11.1",

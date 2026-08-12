@@ -28,6 +28,7 @@ export interface SmtpConfig {
 }
 
 export interface SandboxConfig {
+  provider: 'fake' | 'e2b';
   apiKey?: string;
   templateId?: string;
   maxSeconds: number;
@@ -212,6 +213,9 @@ function productionIssues(config: AppConfig): string[] {
   if (config.sandbox.allowInternet) {
     issues.push('SANDBOX_ALLOW_INTERNET: must be false in production');
   }
+  if (config.sandbox.provider !== 'e2b') {
+    issues.push('SANDBOX_PROVIDER: must be e2b in production');
+  }
   if (config.features.semanticSearch && config.qdrant === null) {
     issues.push('QDRANT_URL: required when ENABLE_SEMANTIC_SEARCH is true');
   }
@@ -249,6 +253,7 @@ function toAppConfig(raw: RawEnvironment): AppConfig {
     google: buildGoogle(raw),
     github: buildGitHub(raw),
     sandbox: {
+      provider: raw.SANDBOX_PROVIDER,
       ...(raw.E2B_API_KEY === undefined ? {} : { apiKey: raw.E2B_API_KEY }),
       ...(raw.SANDBOX_TEMPLATE_ID === undefined ? {} : { templateId: raw.SANDBOX_TEMPLATE_ID }),
       maxSeconds: raw.SANDBOX_MAX_SECONDS,

@@ -33,6 +33,9 @@ export const SANDBOX_ERROR_CODES = [
   'SANDBOX_FILE_NOT_FOUND',
   'SANDBOX_WORKSPACE_FULL',
   'SANDBOX_PATCH_TOO_LARGE',
+  'SANDBOX_PATCH_FAILED',
+  'SANDBOX_BINARY_FILE',
+  'SANDBOX_EGRESS_REFUSED',
   'SANDBOX_TERMINATE_FAILED',
 ] as const;
 
@@ -249,6 +252,21 @@ export function assertUsable(status: SandboxStatus): void {
   if (status.remainingMs <= 0) {
     throw new SandboxError('SANDBOX_EXPIRED', 'This sandbox has run out of time.');
   }
+}
+
+export function truncateToBytes(
+  value: string,
+  limit: number,
+): { text: string; truncated: boolean } {
+  if (limit <= 0) {
+    return { text: '', truncated: value !== '' };
+  }
+
+  const buffer = Buffer.from(value, 'utf8');
+  if (buffer.byteLength <= limit) {
+    return { text: value, truncated: false };
+  }
+  return { text: buffer.subarray(0, limit).toString('utf8'), truncated: true };
 }
 
 export function describeSandboxForLog(status: SandboxStatus): Record<string, unknown> {

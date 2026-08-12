@@ -96,7 +96,19 @@ duration. A cancellation signal terminates the running command and the sandbox. 
 `finally` block and a periodic sweeper terminates orphans left by a crash.
 
 Commands run from a fixed workspace directory using argv arrays. Model and user text is never
-interpolated into a shell string. Every path is canonicalized after symlink resolution and rejected
+interpolated into a shell string. The sandbox provider's own interface takes a command string rather
+than an argument list, so the conversion happens in one place: every argument is POSIX single quoted,
+and the finished string is then parsed back into words and compared to the input. A mismatch of a
+single character refuses the command, so a fault in the quoting is a refusal rather than an
+injection.
+
+The provider key that creates and destroys sandboxes is refused if it appears anywhere in what is
+sent to a machine, including inside a longer value and including sandbox metadata.
+
+Blocking of the cloud metadata address is enforced by a firewall rule installed before the sandbox is
+handed over. Where the machine image grants the sandbox user unrestricted `sudo`, that rule is a
+barrier rather than a boundary; the enforced protections remain the virtual machine itself and the
+absence of any credential inside it. Every path is canonicalized after symlink resolution and rejected
 if it escapes the workspace. Output has terminal control sequences stripped and secrets redacted
 before it is streamed or stored.
 

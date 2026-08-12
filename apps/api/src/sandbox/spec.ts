@@ -2,7 +2,7 @@ import type { SandboxConfig } from '../config/load.js';
 import { SANDBOX_LIMITS } from './limits.js';
 import { SandboxError, assertValidSpec, type SandboxSpec } from './provider.js';
 
-export const DEFAULT_TEMPLATE_ID = 'nimbus-sandbox';
+export const DEFAULT_TEMPLATE_ID = 'base';
 
 export const SANDBOX_ENV: Readonly<Record<string, string>> = {
   CI: 'true',

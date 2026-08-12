@@ -241,6 +241,24 @@ describe('production rules', () => {
     ).toBe(true);
   });
 
+  it('uses the fake sandbox provider unless told otherwise', () => {
+    expect(loadConfig(minimalEnv()).sandbox.provider).toBe('fake');
+  });
+
+  it('accepts the real sandbox provider', () => {
+    expect(loadConfig({ ...minimalEnv(), SANDBOX_PROVIDER: 'e2b' }).sandbox.provider).toBe('e2b');
+  });
+
+  it('refuses a sandbox provider nobody wrote', () => {
+    expect(() => loadConfig({ ...minimalEnv(), SANDBOX_PROVIDER: 'docker' })).toThrow();
+  });
+
+  it('refuses the fake sandbox provider in production', () => {
+    const error = expectConfigError({ ...productionEnv(), SANDBOX_PROVIDER: 'fake' });
+
+    expect(error.issues.join()).toContain('SANDBOX_PROVIDER');
+  });
+
   it('requires https for public URLs in production', () => {
     const error = expectConfigError({
       ...productionEnv(),

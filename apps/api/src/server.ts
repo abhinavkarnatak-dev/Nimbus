@@ -20,7 +20,10 @@ import { createAuthRouter } from './http/routes/auth.js';
 import { createGitHubRouter } from './http/routes/github.js';
 import type { DependencyCheck } from './http/routes/health.js';
 import type { Logger } from './logging/logger.js';
+import { LeaseManager } from './redis/lease.js';
 import { closeRedis, connectRedis } from './redis/client.js';
+import { LiveE2bClient } from './sandbox/e2b-live-client.js';
+import { SandboxSweeper, leaseLock } from './sandbox/sweeper.js';
 
 export const SHUTDOWN_TIMEOUT_MS = 15_000;
 export const HEADERS_TIMEOUT_MS = 20_000;
@@ -175,6 +178,21 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
 
   logger.info({ githubConnect: config.github !== null }, 'GitHub connection ready');
 
+  const sweeper =
+    config.sandbox.provider === 'e2b' && config.sandbox.apiKey !== undefined
+      ? new SandboxSweeper({
+          client: new LiveE2bClient(config.sandbox.apiKey),
+          logger,
+          withLock: leaseLock(new LeaseManager(redis)),
+        })
+      : null;
+
+  sweeper?.start();
+  logger.info(
+    { sandboxProvider: config.sandbox.provider, orphanSweeper: sweeper !== null },
+    'Sandbox provider ready',
+  );
+
   const app = createApp({
     config,
     logger,
@@ -192,6 +210,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   const shutdown = (reason: string): Promise<void> => {
     shuttingDown ??= (async () => {
       logger.info({ reason }, 'Shutting down');
+      sweeper?.stop();
       await closeHttpServer(server);
       await mail.close();
       await closeRedis();

@@ -581,6 +581,39 @@ Whatever a command prints is cleaned before anyone sees it: terminal escape sequ
 with the same patterns the logger uses, and length capped keeping both the beginning and the end,
 because a failing test suite prints its summary last.
 
+## The real machine
+
+The sandbox is a real rented Linux virtual machine from E2B. It comes up with no internet, no
+credentials, and a controller that refuses orders from inside it.
+
+```bash
+pnpm demo:e2b
+```
+
+That runs the whole adapter against a recording double and prints exactly what would have been sent,
+including the refusals. Nothing is rented and no network call is made. A live version exists behind
+`E2B_LIVE=1` for when you want to watch it happen on a real machine.
+
+**One honest complication.** E2B's library takes a command string, not a list of words, and hands it
+to a shell. So the words have to be joined back together, which is where command injection has lived
+for forty years. Every argument is single quoted, and then the finished string is **read back apart
+and compared to what went in**. If a single character differs the command is refused, so a bug in the
+quoting becomes a refusal rather than an injection. It is checked against a real shell as well as
+against itself.
+
+**The network is off, and both switches are thrown.** Internet access disabled and all outbound
+traffic denied, because they are two different settings and one of them being ignored some day should
+not open the machine. On a real sandbox, github, DNS, private addresses, and the cloud metadata
+service are all unreachable. When something genuinely needs the network, it gets a **window**: a
+named-host allowlist, opened for one operation and closed in a `finally`, with the list of hosts
+living in code so no environment variable can widen it. If the window cannot be closed again, the
+machine is destroyed.
+
+**Machines are guaranteed to stop existing** three ways: teardown when the work ends, an explicit
+kill at the deadline rather than a pause that would keep the filesystem and the bill, and a sweeper
+that finds anything which leaked past both. The sweeper never touches a sandbox it cannot attribute
+to Nimbus.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,

@@ -1,3 +1,4 @@
+import type { SandboxConfig } from '../../src/config/load.js';
 import { createLogger } from '../../src/logging/logger.js';
 import {
   FakeSandboxProvider,
@@ -11,7 +12,12 @@ const SESSION_ID = 'ses_demodemodemodemodem';
 
 const logger = createLogger({ level: 'info', environment: 'development' });
 
-const sandboxConfig = { maxSeconds: 30, allowInternet: false, templateId: 'nimbus-sandbox' };
+const sandboxConfig: SandboxConfig = {
+  provider: 'fake',
+  maxSeconds: 30,
+  allowInternet: false,
+  templateId: 'nimbus-sandbox',
+};
 
 function heading(title: string): void {
   process.stdout.write(`\n${title}\n${'-'.repeat(title.length)}\n`);

@@ -8,6 +8,7 @@ import {
   assertValidArgv,
   assertValidSpec,
   resolveTimeout,
+  truncateToBytes,
   type CommandRequest,
   type CommandResult,
   type PatchExport,
@@ -51,18 +52,6 @@ export function commandKey(argv: readonly string[]): string {
 
 function isAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
-}
-
-function truncateToBytes(value: string, limit: number): { text: string; truncated: boolean } {
-  if (limit <= 0) {
-    return { text: '', truncated: value !== '' };
-  }
-
-  const buffer = Buffer.from(value, 'utf8');
-  if (buffer.byteLength <= limit) {
-    return { text: value, truncated: false };
-  }
-  return { text: buffer.subarray(0, limit).toString('utf8'), truncated: true };
 }
 
 export class FakeSandbox implements Sandbox {

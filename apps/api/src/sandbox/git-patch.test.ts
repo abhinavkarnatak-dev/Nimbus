@@ -1,0 +1,278 @@
+import { describe, expect, it } from 'vitest';
+
+import { buildPatch } from './diff.js';
+import {
+  GIT_EXPORT_DIFF,
+  GIT_IS_REPOSITORY,
+  GIT_MARK_NEW_FILES,
+  buildGitPatchExport,
+  summarizeUnifiedDiff,
+} from './git-patch.js';
+import { SANDBOX_LIMITS } from './limits.js';
+import { SandboxError } from './provider.js';
+
+const MODIFIED = [
+  'diff --git a/src/app.ts b/src/app.ts',
+  'index 1111111..2222222 100644',
+  '--- a/src/app.ts',
+  '+++ b/src/app.ts',
+  '@@ -1,3 +1,4 @@',
+  ' const a = 1;',
+  '-const b = 2;',
+  '+const b = 3;',
+  '+const c = 4;',
+  ' const d = 5;',
+  '',
+].join('\n');
+
+const ADDED = [
+  'diff --git a/README.md b/README.md',
+  'new file mode 100644',
+  'index 0000000..3333333',
+  '--- /dev/null',
+  '+++ b/README.md',
+  '@@ -0,0 +1,2 @@',
+  '+hello',
+  '+world',
+  '',
+].join('\n');
+
+const DELETED = [
+  'diff --git a/old.txt b/old.txt',
+  'deleted file mode 100644',
+  'index 4444444..0000000',
+  '--- a/old.txt',
+  '+++ /dev/null',
+  '@@ -1,1 +0,0 @@',
+  '-gone',
+  '',
+].join('\n');
+
+function codeOf(run: () => unknown): string {
+  try {
+    run();
+  } catch (error) {
+    return error instanceof SandboxError ? error.code : 'NOT_A_SANDBOX_ERROR';
+  }
+  return 'NOTHING_THROWN';
+}
+
+describe('the git commands', () => {
+  it('always names the workspace directory rather than trusting where it runs', () => {
+    for (const argv of [GIT_IS_REPOSITORY, GIT_MARK_NEW_FILES, GIT_EXPORT_DIFF]) {
+      expect(argv[0]).toBe('git');
+      expect(argv[1]).toBe('-C');
+      expect(argv[2]).toBe(SANDBOX_LIMITS.workspaceDir);
+    }
+  });
+
+  it('marks new files without staging them, so untracked work still shows up', () => {
+    expect(GIT_MARK_NEW_FILES).toContain('--intent-to-add');
+    expect(GIT_MARK_NEW_FILES).toContain('--all');
+  });
+
+  it('asks for a plain diff a machine can read', () => {
+    expect(GIT_EXPORT_DIFF).toContain('--no-color');
+    expect(GIT_EXPORT_DIFF).toContain('--no-ext-diff');
+    expect(GIT_EXPORT_DIFF).toContain('--no-renames');
+  });
+
+  it('ends every command with a separator, so no path can be read as an option', () => {
+    expect(GIT_MARK_NEW_FILES[GIT_MARK_NEW_FILES.length - 1]).toBe('--');
+    expect(GIT_EXPORT_DIFF[GIT_EXPORT_DIFF.length - 1]).toBe('--');
+  });
+
+  it('never writes anything git would push or commit', () => {
+    const joined = [...GIT_IS_REPOSITORY, ...GIT_MARK_NEW_FILES, ...GIT_EXPORT_DIFF].join(' ');
+
+    for (const forbidden of ['push', 'commit', 'remote', 'fetch', 'clone', 'config']) {
+      expect(joined).not.toContain(forbidden);
+    }
+  });
+});
+
+describe('summarizeUnifiedDiff', () => {
+  it('reads a modified file', () => {
+    const summary = summarizeUnifiedDiff(MODIFIED);
+
+    expect(summary.files).toEqual([
+      { path: 'src/app.ts', changeKind: 'modified', addedLines: 2, removedLines: 1 },
+    ]);
+    expect(summary.addedLines).toBe(2);
+    expect(summary.removedLines).toBe(1);
+  });
+
+  it('reads an added file', () => {
+    expect(summarizeUnifiedDiff(ADDED).files).toEqual([
+      { path: 'README.md', changeKind: 'added', addedLines: 2, removedLines: 0 },
+    ]);
+  });
+
+  it('reads a deleted file', () => {
+    expect(summarizeUnifiedDiff(DELETED).files).toEqual([
+      { path: 'old.txt', changeKind: 'deleted', addedLines: 0, removedLines: 1 },
+    ]);
+  });
+
+  it('reads several files at once', () => {
+    const summary = summarizeUnifiedDiff(`${MODIFIED}${ADDED}${DELETED}`);
+
+    expect(summary.files.map((file) => file.path)).toEqual(['src/app.ts', 'README.md', 'old.txt']);
+    expect(summary.addedLines).toBe(4);
+    expect(summary.removedLines).toBe(2);
+  });
+
+  it('counts nothing for an empty diff', () => {
+    expect(summarizeUnifiedDiff('')).toEqual({ files: [], addedLines: 0, removedLines: 0 });
+  });
+
+  it('does not count the file header lines as changes', () => {
+    const summary = summarizeUnifiedDiff(MODIFIED);
+
+    expect(summary.addedLines).toBe(2);
+    expect(summary.removedLines).toBe(1);
+  });
+
+  it('counts a line that is only a plus or a minus', () => {
+    const patch = [
+      'diff --git a/x.txt b/x.txt',
+      '--- a/x.txt',
+      '+++ b/x.txt',
+      '@@ -1,1 +1,1 @@',
+      '-',
+      '+',
+      '',
+    ].join('\n');
+
+    expect(summarizeUnifiedDiff(patch).files[0]).toEqual({
+      path: 'x.txt',
+      changeKind: 'modified',
+      addedLines: 1,
+      removedLines: 1,
+    });
+  });
+
+  it('refuses a binary file rather than exporting bytes nobody can review', () => {
+    const patch = [
+      'diff --git a/logo.png b/logo.png',
+      'index 1111111..2222222 100644',
+      'Binary files a/logo.png and b/logo.png differ',
+      '',
+    ].join('\n');
+
+    expect(codeOf(() => summarizeUnifiedDiff(patch))).toBe('SANDBOX_BINARY_FILE');
+  });
+
+  it('refuses a git binary patch too', () => {
+    const patch = ['diff --git a/logo.png b/logo.png', 'GIT binary patch', 'literal 8', ''].join(
+      '\n',
+    );
+
+    expect(codeOf(() => summarizeUnifiedDiff(patch))).toBe('SANDBOX_BINARY_FILE');
+  });
+
+  it('refuses a file name git had to quote, rather than guessing at the escapes', () => {
+    const patch = [
+      'diff --git "a/odd name.txt" "b/odd name.txt"',
+      '--- "a/odd name.txt"',
+      '+++ "b/odd name.txt"',
+      '@@ -1,1 +1,1 @@',
+      '-a',
+      '+b',
+      '',
+    ].join('\n');
+
+    expect(codeOf(() => summarizeUnifiedDiff(patch))).toBe('SANDBOX_PATCH_FAILED');
+  });
+
+  it('ignores anything before the first file header', () => {
+    expect(summarizeUnifiedDiff(`warning: something\n${ADDED}`).files).toHaveLength(1);
+  });
+});
+
+describe('summarizeUnifiedDiff agreeing with the writer from feature 016', () => {
+  it.each([
+    ['a modified file', { 'src/a.ts': 'one\ntwo\nthree\n' }, { 'src/a.ts': 'one\nTWO\nthree\n' }],
+    ['an added file', {}, { 'new.ts': 'a\nb\nc\n' }],
+    ['a deleted file', { 'gone.ts': 'a\nb\n' }, {}],
+    [
+      'several files at once',
+      { 'a.ts': 'one\n', 'b.ts': 'two\n' },
+      { 'a.ts': 'ONE\n', 'b.ts': 'two\n', 'c.ts': 'three\n' },
+    ],
+    [
+      'a file with many changed lines',
+      { 'big.ts': 'x\n'.repeat(40) },
+      { 'big.ts': 'y\n'.repeat(40) },
+    ],
+  ])('reads back what 016 wrote for %s', (_label, before, after) => {
+    const written = buildPatch(
+      new Map(Object.entries(before as Record<string, string>)),
+      new Map(Object.entries(after as Record<string, string>)),
+    );
+    const read = summarizeUnifiedDiff(written.patch);
+
+    expect(read.addedLines).toBe(written.addedLines);
+    expect(read.removedLines).toBe(written.removedLines);
+    expect(read.files).toEqual(written.files);
+  });
+});
+
+describe('buildGitPatchExport', () => {
+  it('reports the size in bytes', () => {
+    const exported = buildGitPatchExport(ADDED);
+
+    expect(exported.bytes).toBe(Buffer.byteLength(ADDED, 'utf8'));
+    expect(exported.patch).toBe(ADDED);
+  });
+
+  it('refuses a patch larger than the cap', () => {
+    const huge = `${MODIFIED}${'\n'.repeat(SANDBOX_LIMITS.patchMaxBytes)}`;
+    expect(codeOf(() => buildGitPatchExport(huge))).toBe('SANDBOX_PATCH_TOO_LARGE');
+  });
+
+  it('refuses too many changed files', () => {
+    const sections: string[] = [];
+    for (let index = 0; index <= SANDBOX_LIMITS.patchMaxFiles; index += 1) {
+      sections.push(
+        [
+          `diff --git a/f${String(index)}.txt b/f${String(index)}.txt`,
+          `--- a/f${String(index)}.txt`,
+          `+++ b/f${String(index)}.txt`,
+          '@@ -1,1 +1,1 @@',
+          '-a',
+          '+b',
+          '',
+        ].join('\n'),
+      );
+    }
+
+    expect(codeOf(() => buildGitPatchExport(sections.join('')))).toBe('SANDBOX_PATCH_TOO_LARGE');
+  });
+
+  it('refuses too many changed lines', () => {
+    const body: string[] = [
+      'diff --git a/big.txt b/big.txt',
+      '--- a/big.txt',
+      '+++ b/big.txt',
+      '@@ -1,1 +1,1 @@',
+    ];
+    for (let index = 0; index <= SANDBOX_LIMITS.patchMaxLines; index += 1) {
+      body.push('+line');
+    }
+
+    expect(codeOf(() => buildGitPatchExport(`${body.join('\n')}\n`))).toBe(
+      'SANDBOX_PATCH_TOO_LARGE',
+    );
+  });
+
+  it('exports nothing when nothing changed', () => {
+    expect(buildGitPatchExport('')).toEqual({
+      patch: '',
+      files: [],
+      addedLines: 0,
+      removedLines: 0,
+      bytes: 0,
+    });
+  });
+});

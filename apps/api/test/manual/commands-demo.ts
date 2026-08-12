@@ -45,7 +45,10 @@ async function makeSandbox(): Promise<Sandbox> {
   });
 
   return await provider.create(
-    buildSandboxSpec({ maxSeconds: 120, allowInternet: false, templateId: 'demo' }, SESSION_ID),
+    buildSandboxSpec(
+      { provider: 'fake', maxSeconds: 120, allowInternet: false, templateId: 'demo' },
+      SESSION_ID,
+    ),
   );
 }
 

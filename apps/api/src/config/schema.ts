@@ -85,6 +85,7 @@ export const environmentSchema = z.object({
   GITHUB_SETUP_CALLBACK_URL: httpUrl.optional(),
 
   E2B_API_KEY: optionalText,
+  SANDBOX_PROVIDER: z.enum(['fake', 'e2b']).default('fake'),
   SANDBOX_TEMPLATE_ID: optionalText,
   SANDBOX_MAX_SECONDS: positiveInt.max(7200).default(1800),
   SANDBOX_ALLOW_INTERNET: boolean.default(false),

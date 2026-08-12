@@ -36,6 +36,7 @@ export function productionEnv(): Record<string, string | undefined> {
     GITHUB_WEBHOOK_SECRET: 'webhook-secret-value',
     GITHUB_SETUP_CALLBACK_URL: 'https://api.nimbus.example.com/github/setup/callback',
     E2B_API_KEY: 'e2b-api-key',
+    SANDBOX_PROVIDER: 'e2b',
     SANDBOX_TEMPLATE_ID: 'nimbus-sandbox',
     GROQ_API_KEY: 'groq-api-key',
     SMTP_HOST: 'smtp.example.com',
