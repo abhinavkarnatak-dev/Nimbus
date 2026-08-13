@@ -183,6 +183,23 @@ shape raises an approval request rather than a refusal, because build hashes are
 from keys and a validator that cries wolf gets disabled. In neither case does the matched value enter
 the report, the logs, or any stored record: only the kind of credential and the line it was on.
 
+Steps 6 to 8 never invoke Git. The branch is assembled through the Git Data API as blobs, a tree, a
+commit, and finally a ref, so the installation token exists only as an HTTP header: it is never
+written to disk, never placed in a URL, never passed to a subprocess, and never present while the
+sandbox is running. It is minted only after validation has passed, so material that will be refused
+never causes a credential to exist, and it is revoked in a `finally` regardless of outcome. A failure
+to revoke is logged and does not discard a successful push.
+
+Idempotency does not rely on a database flag. The branch name is derived from the session, so a retry
+targets the same ref, and Git objects are content addressed, so rebuilding them yields the same
+hashes. If the ref already exists and its commit carries the same tree, the earlier attempt is
+returned as the result. If it carries a different tree, the push is refused as a conflict and the ref
+is left untouched, since a reviewer may already be reading it.
+
+Writing to the default branch is refused by comparing against the repository's own reported default,
+not by trusting the branch naming convention. Force pushing is not disabled by configuration; no
+update-ref operation exists in the port at all.
+
 Owned by features 021, 022, and 023.
 
 ## 9. Input validation

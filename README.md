@@ -678,6 +678,28 @@ shapes are refused and named. A long random looking string only asks, because a 
 exactly like a key and a tool that cries wolf gets switched off. Either way the value itself never
 appears in the report, only what kind it was and which line.
 
+## Putting the branch on GitHub
+
+This is the first place Nimbus writes to somebody's repository, and two things about it matter more
+than the writing itself.
+
+**There is no `git push`.** Running Git would mean a working tree on the server, a credential written
+somewhere a process can read, and a subprocess. Instead the branch is built the way Git builds one
+underneath: upload each changed file as a blob, assemble a tree, make a commit whose parent is the
+base commit, then point a new branch at it. The credential is an HTTP header on those calls and
+nothing else.
+
+**A retry must not make a second branch.** A push is several API calls, and networks break in the
+middle of them. So the branch name is derived from the session rather than random, which means a retry
+aims at the same place, and before creating anything Nimbus asks whether that branch already exists.
+If it does and it holds exactly the same file contents, the earlier attempt is reported as the result.
+If it holds something different, Nimbus stops, because somebody may already be reading it.
+
+The token is minted after the changes have been cleared and revoked in a `finally`. If the changes are
+refused, no token is minted at all.
+
+Two things have no code path: writing to the default branch, and force pushing.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,
