@@ -16,6 +16,7 @@
     "demo:e2b": "tsx test/manual/e2b-demo.ts",
     "demo:e2b:live": "tsx --env-file-if-exists=../../.env test/manual/e2b-live.ts",
     "demo:attachments:live": "tsx --env-file-if-exists=../../.env test/manual/attachments-live.ts",
+    "demo:github:live": "tsx --env-file-if-exists=../../.env test/manual/github-write-live.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "clean": "rimraf dist"
   },
