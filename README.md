@@ -700,6 +700,32 @@ refused, no token is minted at all.
 
 Two things have no code path: writing to the default branch, and force pushing.
 
+## Opening the pull request
+
+The last step, and the one where Nimbus stops.
+
+**Exactly one pull request.** GitHub already knows whether a branch has one open, so the rule is look
+first and create second. Ask three times and you get one pull request and one email. If two workers
+race and both try to create, the loser catches the refusal, looks again, and returns what the winner
+made, because losing that race is normal rather than an error.
+
+**The description is written from text nobody trusts.** The task came from a person, the summary from
+a model, the check output from a repository that might be hostile, and all three end up as Markdown.
+Markdown is not inert: `@someone` pings a real person and `#42` leaves a trail on a real issue, so a
+task saying `fix @torvalds` would notify a stranger from an account that is not theirs. So untrusted
+text goes inside a fenced code block, where nothing is interpreted at all, and the fence is measured
+against the content so backticks inside cannot break out. That is one rule instead of a list of
+dangerous characters to keep updated.
+
+**Failing checks come first.** If anything failed or never ran, that is the top of the body, before
+the task and before the diff summary. If everything passed, there is no warning and also no claim of
+success, because "all checks passed" is a sentence that ages badly.
+
+Every pull request says plainly that it was written by an AI agent and that nothing has been merged.
+
+**Nimbus cannot merge, approve or close.** Not disabled by a setting: those operations do not exist in
+the code at all.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,

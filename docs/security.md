@@ -200,6 +200,25 @@ Writing to the default branch is refused by comparing against the repository's o
 not by trusting the branch naming convention. Force pushing is not disabled by configuration; no
 update-ref operation exists in the port at all.
 
+Pull request creation is made idempotent by GitHub itself rather than by local state: a branch has at
+most one open pull request against the same base, so the lookup is both the duplicate check and the
+recovery path. Losing a create race is expected rather than exceptional, and the refusal is turned
+into a second lookup so the loser returns what the winner made. The notification email is sent only
+when a pull request was actually created, and a failure to send it is logged without discarding the
+pull request.
+
+Every piece of untrusted text in the description, meaning the user's task, the model's summary, and
+any check output originating in the repository, is placed inside a fenced code block rather than
+escaped character by character. This makes mentions, issue references, links and HTML inert without
+maintaining a list of dangerous characters, and prevents Nimbus from being used to notify or spam
+third parties through pull request rendering. The fence length is derived from the content so backtick
+runs inside cannot terminate it early.
+
+Checks that failed or did not run appear before anything else in the description, and a body where
+everything passed makes no claim of success. The pull request gateway exposes exactly two operations,
+finding by branch and creating; merging, approving, closing, updating and commenting are absent from
+the port rather than merely disallowed by policy.
+
 Owned by features 021, 022, and 023.
 
 ## 9. Input validation
