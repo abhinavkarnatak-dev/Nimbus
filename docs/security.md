@@ -180,6 +180,32 @@ detectable polyglots are rejected. Images are re-encoded with metadata stripped 
 decompressed size caps. Storage names are generated; the original name is retained only as escaped
 metadata and is never used in a command.
 
+None of the three claims an upload makes about itself is treated as evidence, because all three are
+written by the client. They must agree with each other, and disagreement is a refusal rather than a
+correction. Detection is a hand written allowlist of five signatures rather than a general purpose
+library, so nothing can be accepted that was never intended.
+
+Polyglot files are not detected, they are destroyed. Every image is decoded to raw pixels and
+re-encoded, so what is stored is a file Nimbus wrote rather than a file it received. This is also
+what removes EXIF and GPS data. The pixel cap is passed to the decoder before decoding so a small
+compressed file cannot ask for gigabytes of memory, and the byte cap is enforced while the upload
+streams rather than after it is buffered.
+
+Uploaded bytes never reach object storage without passing through the backend. Presigned upload URLs
+are deliberately not used, since they would route the bytes around every check above. The bucket is
+private, has no public domain, and is only reachable through an authorized request. Storage keys are
+generated from identifiers Nimbus issued.
+
+Every download is sent with `Content-Type` exactly as stored, `X-Content-Type-Options: nosniff`,
+`Content-Disposition: attachment`, `Cache-Control: private, no-store`, and a
+`Content-Security-Policy` of `default-src 'none'; sandbox`, so a browser will not render an
+attachment as a document on Nimbus's own origin. Reading an attachment that belongs to somebody else
+answers `404` rather than `403`, because `403` would confirm that it exists.
+
+Attachments that are never attached to a session expire after 24 hours and are removed from both
+object storage and the database by a leased sweeper, rather than by a database TTL that would leave
+the stored object orphaned.
+
 Owned by features 003 and 020.
 
 ## 10. Logging, redaction, and privacy

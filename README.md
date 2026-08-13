@@ -614,6 +614,38 @@ kill at the deadline rather than a pause that would keep the filesystem and the 
 that finds anything which leaked past both. The sweeper never touches a sandbox it cannot attribute
 to Nimbus.
 
+## Attachments
+
+You can attach a screenshot or an error log when you describe a task. Nothing about that file is
+believed, because everything a browser says about an upload is chosen by whoever is uploading.
+
+**The name lies, the type lies, the extension lies.** So all three are recorded, all three must agree,
+and the decision is made by reading the first bytes of the file. Accepted types are plain text,
+Markdown, PNG, JPEG and WebP, and that is an allowlist of five signatures written by hand rather than
+a library that recognises hundreds.
+
+**Every image is taken apart and rebuilt.** A file can be a valid image and a valid script at the same
+time, and no signature check catches that. So images are decoded to raw pixels and written out again,
+which means what gets stored is a file Nimbus wrote. A PNG with a script glued to the end comes back
+without it. As a side effect, phone photographs lose their GPS coordinates.
+
+**A tiny file can still be enormous.** A 10 KB PNG can describe a picture needing 3.6 GB of memory to
+decode, so the cap that matters is on pixels and it is given to the decoder before it decodes.
+
+**Storage is Cloudflare R2, and the browser never touches it.** The popular pattern hands the browser
+a signed link so it can upload straight to the bucket, which would route the bytes around every check
+above. Every byte goes through the backend first. The bucket is private, the storage name is one
+Nimbus invented, and the name you chose is kept only as escaped text. Locally the same code talks to
+MinIO in Docker.
+
+**Downloads are inert.** Every one carries `nosniff`, `Content-Disposition: attachment`, a null
+content security policy and no caching, so a browser will not render an attachment as a page on
+Nimbus's own domain. Asking for somebody else's attachment answers 404 rather than 403, because 403
+would confirm it exists.
+
+Uploads nobody attaches to a session are deleted after 24 hours, from the bucket and the database
+both.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,

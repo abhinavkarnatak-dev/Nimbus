@@ -3,6 +3,10 @@ import { createServer, type Server } from 'node:http';
 import type { Express } from 'express';
 
 import { createApp } from './app.js';
+import { MongoAttachmentRecords } from './attachments/repository.js';
+import { S3AttachmentStore } from './attachments/s3-store.js';
+import { AttachmentService } from './attachments/service.js';
+import { AttachmentSweeper } from './attachments/sweeper.js';
 import type { AppConfig } from './config/load.js';
 import { closeDatabase, connectDatabase } from './db/client.js';
 import { ensureDatabaseSchema } from './db/bootstrap.js';
@@ -16,6 +20,7 @@ import { InstallationService } from './github/installation-service.js';
 import { GitHubAppTokenProvider } from './github/token-provider.js';
 import { GitHubWebhookService } from './github/webhook-service.js';
 import { createAttachSession } from './http/middleware/session.js';
+import { createAttachmentsRouter } from './http/routes/attachments.js';
 import { createAuthRouter } from './http/routes/auth.js';
 import { createGitHubRouter } from './http/routes/github.js';
 import type { DependencyCheck } from './http/routes/health.js';
@@ -178,6 +183,39 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
 
   logger.info({ githubConnect: config.github !== null }, 'GitHub connection ready');
 
+  const attachmentStore = config.storage === null ? null : new S3AttachmentStore(config.storage);
+
+  const attachments =
+    attachmentStore === null
+      ? null
+      : new AttachmentService({
+          records: new MongoAttachmentRecords(handle.db),
+          store: attachmentStore,
+          maxBytes: config.limits.maxAttachmentBytes,
+        });
+
+  if (attachments !== null) {
+    routers.push(
+      createAttachmentsRouter({
+        attachments,
+        sessions,
+        maxBytes: config.limits.maxAttachmentBytes,
+      }),
+    );
+  }
+
+  const attachmentSweeper =
+    attachments === null
+      ? null
+      : new AttachmentSweeper({
+          attachments,
+          logger,
+          withLock: leaseLock(new LeaseManager(redis)),
+        });
+
+  attachmentSweeper?.start();
+  logger.info({ attachmentUploads: attachments !== null }, 'Attachment storage ready');
+
   const sweeper =
     config.sandbox.provider === 'e2b' && config.sandbox.apiKey !== undefined
       ? new SandboxSweeper({
@@ -211,6 +249,8 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     shuttingDown ??= (async () => {
       logger.info({ reason }, 'Shutting down');
       sweeper?.stop();
+      attachmentSweeper?.stop();
+      attachmentStore?.destroy();
       await closeHttpServer(server);
       await mail.close();
       await closeRedis();

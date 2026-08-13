@@ -90,6 +90,12 @@ export const environmentSchema = z.object({
   SANDBOX_MAX_SECONDS: positiveInt.max(7200).default(1800),
   SANDBOX_ALLOW_INTERNET: boolean.default(false),
 
+  S3_ENDPOINT: httpUrl.optional(),
+  S3_REGION: trimmed.min(1).default('auto'),
+  S3_BUCKET: optionalText,
+  S3_ACCESS_KEY_ID: optionalText,
+  S3_SECRET_ACCESS_KEY: optionalText,
+
   GROQ_API_KEY: optionalText,
   GEMINI_API_KEY: optionalText,
   DEFAULT_TEXT_MODEL: optionalText,

@@ -15,12 +15,15 @@
     "demo:commands": "tsx test/manual/commands-demo.ts",
     "demo:e2b": "tsx test/manual/e2b-demo.ts",
     "demo:e2b:live": "tsx --env-file-if-exists=../../.env test/manual/e2b-live.ts",
+    "demo:attachments:live": "tsx --env-file-if-exists=../../.env test/manual/attachments-live.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "clean": "rimraf dist"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1110.0",
     "@nimbus/contracts": "workspace:*",
     "@octokit/rest": "22.0.1",
+    "busboy": "1.6.0",
     "cookie-parser": "1.4.7",
     "e2b": "2.38.3",
     "express": "5.2.1",
@@ -29,10 +32,12 @@
     "mongodb": "7.5.0",
     "nodemailer": "9.0.5",
     "pino": "10.3.1",
+    "sharp": "0.35.3",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@nimbus/test-utils": "workspace:*",
+    "@types/busboy": "^1.5.4",
     "@types/cookie-parser": "1.4.10",
     "@types/express": "5.0.6",
     "@types/node": "26.2.0",

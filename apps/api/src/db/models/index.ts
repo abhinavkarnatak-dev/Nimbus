@@ -1,3 +1,4 @@
+import { attachmentModel } from './attachment.js';
 import { auditEventModel } from './audit-event.js';
 import { githubInstallationModel } from './github-installation.js';
 import { repoIndexModel } from './repo-index.js';
@@ -10,6 +11,7 @@ export * from './user.js';
 export * from './github-installation.js';
 export * from './session.js';
 export * from './repo-index.js';
+export * from './attachment.js';
 export * from './audit-event.js';
 
 export const ALL_MODELS: readonly ModelDefinition[] = [
@@ -17,5 +19,6 @@ export const ALL_MODELS: readonly ModelDefinition[] = [
   githubInstallationModel,
   sessionModel,
   repoIndexModel,
+  attachmentModel,
   auditEventModel,
 ];

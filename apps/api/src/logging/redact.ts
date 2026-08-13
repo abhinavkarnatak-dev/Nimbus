@@ -5,7 +5,7 @@ const MAX_ARRAY_ITEMS = 100;
 const MAX_STRING_LENGTH = 4096;
 
 const SECRET_SEGMENT_PATTERN =
-  /(?:^|_)(?:password|passwd|secret|token|apikey|api_key|authorization|cookie|credential|credentials|privatekey|private_key|otp|passcode|pin|jwt|bearer|signature|salt)(?:_|$)/;
+  /(?:^|_)(?:password|passwd|secret|token|apikey|api_key|accesskey|access_key|authorization|cookie|credential|credentials|privatekey|private_key|otp|passcode|pin|jwt|bearer|signature|salt)(?:_|$)/;
 
 const ALLOWED_KEYS = new Set([
   'session_id',

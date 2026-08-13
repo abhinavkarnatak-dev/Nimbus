@@ -2,6 +2,7 @@ export const COLLECTIONS = {
   users: 'users',
   githubInstallations: 'github_installations',
   sessions: 'sessions',
+  attachments: 'attachments',
   repoIndexes: 'repo_indexes',
   auditEvents: 'audit_events',
 } as const;

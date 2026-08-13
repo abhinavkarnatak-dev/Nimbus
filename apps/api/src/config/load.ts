@@ -35,6 +35,14 @@ export interface SandboxConfig {
   allowInternet: boolean;
 }
 
+export interface StorageConfig {
+  endpoint: string;
+  region: string;
+  bucket: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
 export interface LlmConfig {
   groqApiKey?: string;
   geminiApiKey?: string;
@@ -66,6 +74,7 @@ export interface AppConfig {
   google: GoogleConfig | null;
   github: GitHubConfig | null;
   sandbox: SandboxConfig;
+  storage: StorageConfig | null;
   llm: LlmConfig;
   smtp: SmtpConfig | null;
   mail: { from: string };
@@ -174,6 +183,24 @@ function buildSmtp(raw: RawEnvironment): SmtpConfig | null {
   };
 }
 
+function buildStorage(raw: RawEnvironment): StorageConfig | null {
+  if (
+    raw.S3_ENDPOINT === undefined ||
+    raw.S3_BUCKET === undefined ||
+    raw.S3_ACCESS_KEY_ID === undefined ||
+    raw.S3_SECRET_ACCESS_KEY === undefined
+  ) {
+    return null;
+  }
+  return {
+    endpoint: raw.S3_ENDPOINT,
+    region: raw.S3_REGION,
+    bucket: raw.S3_BUCKET,
+    accessKeyId: raw.S3_ACCESS_KEY_ID,
+    secretAccessKey: raw.S3_SECRET_ACCESS_KEY,
+  };
+}
+
 function buildQdrant(raw: RawEnvironment): QdrantConfig | null {
   if (raw.QDRANT_URL === undefined) {
     return null;
@@ -206,6 +233,14 @@ function productionIssues(config: AppConfig): string[] {
   }
   if (config.sandbox.apiKey === undefined || config.sandbox.templateId === undefined) {
     issues.push('E2B_API_KEY, SANDBOX_TEMPLATE_ID: both required in production');
+  }
+  if (config.storage === null) {
+    issues.push(
+      'S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY: all required in production',
+    );
+  }
+  if (config.storage !== null && !config.storage.endpoint.startsWith('https://')) {
+    issues.push('S3_ENDPOINT: must use https in production');
   }
   if (config.llm.groqApiKey === undefined) {
     issues.push('GROQ_API_KEY: required in production');
@@ -259,6 +294,7 @@ function toAppConfig(raw: RawEnvironment): AppConfig {
       maxSeconds: raw.SANDBOX_MAX_SECONDS,
       allowInternet: raw.SANDBOX_ALLOW_INTERNET,
     },
+    storage: buildStorage(raw),
     llm: {
       ...(raw.GROQ_API_KEY === undefined ? {} : { groqApiKey: raw.GROQ_API_KEY }),
       ...(raw.GEMINI_API_KEY === undefined ? {} : { geminiApiKey: raw.GEMINI_API_KEY }),

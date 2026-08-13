@@ -23,6 +23,7 @@
     "demo:commands": "pnpm --filter @nimbus/api demo:commands",
     "demo:e2b": "pnpm --filter @nimbus/api demo:e2b",
     "demo:e2b:live": "pnpm --filter @nimbus/api demo:e2b:live",
+    "demo:attachments:live": "pnpm --filter @nimbus/api demo:attachments:live",
     "build": "pnpm -r build",
     "typecheck": "tsc -b --pretty && pnpm -r --if-present run typecheck",
     "typecheck:clean": "tsc -b --clean",

@@ -38,6 +38,10 @@ export function productionEnv(): Record<string, string | undefined> {
     E2B_API_KEY: 'e2b-api-key',
     SANDBOX_PROVIDER: 'e2b',
     SANDBOX_TEMPLATE_ID: 'nimbus-sandbox',
+    S3_ENDPOINT: 'https://account.r2.cloudflarestorage.com',
+    S3_BUCKET: 'nimbus-attachments',
+    S3_ACCESS_KEY_ID: 's3-access-key-id',
+    S3_SECRET_ACCESS_KEY: 's3-secret-access-key',
     GROQ_API_KEY: 'groq-api-key',
     SMTP_HOST: 'smtp.example.com',
   };
