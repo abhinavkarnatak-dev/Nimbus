@@ -646,6 +646,38 @@ would confirm it exists.
 Uploads nobody attaches to a session are deleted after 24 hours, from the bucket and the database
 both.
 
+## Judging a patch before it becomes a branch
+
+The sandbox produces a patch. Before any of it reaches GitHub, that patch is read again in the
+backend, by a parser written for this and nothing else.
+
+**Why read it twice?** Because the sandbox is where the untrusted code ran, and feature 019 found that
+the machine hands its user root. Any check made only in there is a check an attacker could have
+removed. So the only checks that count are the ones made after the patch has left.
+
+**The mode is where the danger is.** Git records a file mode in the diff header, and two of them are
+not ordinary files:
+
+```text
+120000   a symbolic link
+160000   a submodule
+```
+
+A link is a file that points somewhere else, so a link to `/etc/passwd` reads a server's password
+file the moment anything follows it. A submodule is a URL that somebody else's CI will clone and run.
+Both are refused, and both are found by reading a number rather than guessing from content.
+
+**Three answers, and no is final.** Ordinary edits go through. Deleting, renaming, touching
+`package.json` or a workflow or CODEOWNERS, or going over 30 files or 2000 lines, needs a person to
+agree. Path traversal, the `.git` directory, a second repository inside the tree, a binary file, a
+credential, or a patch made from the wrong commit is refused, and a refused patch is never offered an
+approval button, because no approval could rescue it.
+
+**Secrets are read only in the lines being added**, so taking a token out is never penalised. Known
+shapes are refused and named. A long random looking string only asks, because a build hash looks
+exactly like a key and a tool that cries wolf gets switched off. Either way the value itself never
+appears in the report, only what kind it was and which line.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,
