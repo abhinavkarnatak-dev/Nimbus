@@ -141,8 +141,18 @@ start memory, index time, and query quality pass. Every stored point carries imm
 id, commit SHA, path, chunk range, and policy version, and every query carries server owned filters
 on those fields. Lexical V1 is never blocked on it.
 
+Ranking weights each query term by how few of the scanned files contain it, so a word present
+everywhere contributes nothing, and saturates each term's contribution so that matching several terms
+beats matching one term loudly. File name and directory matches are separate signals, test files are
+weighted down unless the task is about tests, and ties break on path so the same query is answered in
+the same order every time. There is no persistent index: every query is a fresh bounded pass over the
+workspace, because the agent edits files while it works.
+
 All retrieved repository content is treated as quoted, untrusted data. It cannot change the system
-prompt, the policy, the user's task, or the tool constraints.
+prompt, the policy, the user's task, or the tool constraints. Each block is delimited by a marker
+carrying a random value generated per bundle and verified absent from the content, so repository text
+cannot close its own block and issue instructions outside it, and content that attempts to give
+instructions is reported by code, path, and line without being quoted.
 
 ## 8. Model routing
 

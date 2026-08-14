@@ -10,6 +10,7 @@ export * from './tools.js';
 export * from './approvals.js';
 export * from './validation.js';
 export * from './push.js';
+export * from './retrieval.js';
 export * from './pull-request.js';
 export * from './sessions.js';
 export * from './events.js';

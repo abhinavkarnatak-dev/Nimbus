@@ -263,6 +263,53 @@ the stored object orphaned.
 
 Owned by features 003 and 020.
 
+## 9a. Retrieval and untrusted repository content
+
+Retrieval is the path by which repository text reaches a model provider, so it carries two duties:
+keep the wrong files out, and make sure what does go through cannot be mistaken for instructions.
+
+**What is never read.** The ignore policy from feature 017 is reused unchanged and covers `.git`,
+dependency and build directories, binaries, and credential shaped files such as `.env`, `*.pem`, and
+`id_rsa`. On top of it sits a secret shaped name policy for files that are material rather than
+modules: `credentials.json`, `secrets.yml`, `passwords.txt`, `apiKeys.json`, and anything under
+`.ssh`, `.aws`, `.gnupg`, `.kube`, `.docker`, or `.azure`. Names are compared as whole words and as
+adjacent word pairs after splitting on case changes and separators, so `tokenizer.ts` is readable and
+`accessToken.json` is not. A file with a source code extension is exempt from the name rule, because
+`src/auth/token.ts` is a module somebody may need to fix; the redaction layer below covers the case
+where that judgement is wrong. Excluded files are never opened, not filtered from results afterwards,
+and a test asserts which paths the reader was asked for.
+
+Only regular files are read. Symbolic links are never followed and paths inside a nested repository
+are never scanned, both as single rules rather than path resolution that has to be correct.
+
+**Every line handed over is redacted** with the same patterns the logger uses, so a credential inside
+a file that was legitimately readable is replaced before it leaves the process. Private key blocks
+span multiple lines and match no single line, so they are tracked across the lines of a window and
+each line is replaced individually, which preserves the line count so the line numbers reported to the
+agent stay accurate.
+
+**Untrusted content labelling.** Everything retrieved is wrapped in markers under a header stating
+that the material is data, that nobody has vouched for it, and that instructions inside it are to be
+reported rather than obeyed. The markers carry a random value generated for each bundle and verified
+absent from the material, so repository content cannot close its own block and issue instructions
+outside it. This is the same reasoning as the measured fence in feature 023: an unguessable value
+rather than a list of characters to escape.
+
+**Prompt injection is flagged, not refused.** Lines matching `IGNORE_PREVIOUS`, `ROLE_SWITCH`,
+`SYSTEM_PROMPT_CLAIM`, `EXFILTRATION`, or `MARKER_SPOOF` are reported as a code, a path, and a line
+number, and the header gains a warning. The flag shape has three fields and nowhere to hold the
+matched text. Refusal is deliberately not the response, because a repository about prompt engineering
+trips every rule and is ordinary work, and a check that fires on ordinary work gets disabled.
+
+Every stage is bounded: files scanned, bytes scanned, per file size and line count, tree depth and
+width, files returned, lines and windows per file, line length, total bundle characters, and flag
+count. Each limit reports truncation truthfully rather than failing or silently overrunning.
+
+There is no persistent index. Every query is a fresh bounded pass, so retrieval cannot serve content
+from a repository or commit other than the one in the workspace.
+
+Owned by feature 024.
+
 ## 10. Logging, redaction, and privacy
 
 Every request and session carries a correlation id. The logger redacts authorization headers,

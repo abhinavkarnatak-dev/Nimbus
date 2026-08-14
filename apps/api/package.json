@@ -13,6 +13,7 @@
     "demo:sandbox": "tsx test/manual/sandbox-demo.ts",
     "demo:tools": "tsx test/manual/tools-demo.ts",
     "demo:commands": "tsx test/manual/commands-demo.ts",
+    "demo:retrieval": "tsx test/manual/retrieval-demo.ts",
     "demo:e2b": "tsx test/manual/e2b-demo.ts",
     "demo:e2b:live": "tsx --env-file-if-exists=../../.env test/manual/e2b-live.ts",
     "demo:attachments:live": "tsx --env-file-if-exists=../../.env test/manual/attachments-live.ts",
