@@ -25,6 +25,7 @@
     "demo:routing": "pnpm --filter @nimbus/api demo:routing",
     "demo:agent-state": "pnpm --filter @nimbus/api demo:agent-state",
     "demo:registry": "pnpm --filter @nimbus/api demo:registry",
+    "demo:policy": "pnpm --filter @nimbus/api demo:policy",
     "demo:e2b": "pnpm --filter @nimbus/api demo:e2b",
     "demo:e2b:live": "pnpm --filter @nimbus/api demo:e2b:live",
     "demo:attachments:live": "pnpm --filter @nimbus/api demo:attachments:live",

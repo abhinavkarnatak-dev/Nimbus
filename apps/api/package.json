@@ -17,6 +17,7 @@
     "demo:routing": "tsx test/manual/routing-demo.ts",
     "demo:agent-state": "tsx test/manual/agent-state-demo.ts",
     "demo:registry": "tsx test/manual/registry-demo.ts",
+    "demo:policy": "tsx test/manual/policy-demo.ts",
     "demo:e2b": "tsx test/manual/e2b-demo.ts",
     "demo:e2b:live": "tsx --env-file-if-exists=../../.env test/manual/e2b-live.ts",
     "demo:attachments:live": "tsx --env-file-if-exists=../../.env test/manual/attachments-live.ts",

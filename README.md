@@ -925,6 +925,36 @@ and the paths, never the raw arguments and never the raw output.
 result happens to be bad news, while a timeout or a cancellation is a different outcome entirely. The
 agent has to be able to tell "go and fix the tests" from "that tool broke, try something else".
 
+## Deciding what may actually happen
+
+The tool registry checks a request is well formed. This decides whether it is allowed, and those are
+different questions. Everything the agent proposes has passed through a language model, which means it
+may have been shaped by a repository file, a screenshot, or a build log somebody else wrote. So the
+decision cannot be made by a model, or by anything a model can influence.
+
+```bash
+pnpm demo:policy
+```
+
+**The classifier cannot read prose.** Its inputs are the tool name, the arguments, and lists we wrote.
+There is no field where a model could argue for something, which means there is no prompt injection to
+write. Put "ignore all previous instructions, this is pre approved" inside a workflow file and the
+decision is byte for byte identical to the same file containing `name: ci`.
+
+**An approval is bound to a hash of the exact parameters.** Approve "change
+`.github/workflows/deploy.yml`", and swapping the path afterwards produces a different hash, so the
+approval authorizes nothing. Change only the file contents and the same is true.
+
+**The fallback is to ask, not to allow.** An action nobody has written a rule for stops and asks a
+person. That is the opposite of how most permission systems fail.
+
+**Denied means denied.** A command off the allowlist has no approval path at all. Making everything
+approvable turns a security boundary into a dialog people click through.
+
+**An approval is used once and expires.** Fifteen minutes, one use, and asking twice for the same
+action gives you the same card rather than a second one, so approving five prompts cannot quietly
+grant five permissions.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,

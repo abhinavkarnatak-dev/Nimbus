@@ -489,6 +489,47 @@ test asserts a distinctive phrase from a tool argument appears in no log line.
 
 Owned by feature 029.
 
+## 10e. Deterministic pre-execution policy and approvals
+
+The registry establishes that a request is well formed. The policy gate decides whether it is
+permitted, and it is the control that the rest of the trusted boundary depends on.
+
+**The decision is made outside the model, on inputs a model cannot argue through.** The classifier
+receives the tool name, the arguments already parsed by feature 029, and fixed lists maintained by us:
+protected paths from feature 017, dependency filenames, and the command allowlist from feature 018. It
+never receives a summary, a reason, a justification, or any repository text. A prompt injection has no
+field to occupy. This is verified by asserting that a hostile instruction placed in a file's contents
+produces a decision and category identical to innocent contents, and that a path named to look
+pre-approved is treated like any other protected path.
+
+**Three outcomes, with a safe default.** `allowed` covers reading, searching, ordinary source changes,
+and allowlisted commands. `approval_required` covers protected paths, dependency and lockfile changes,
+deletions, renames, oversized diffs, lifecycle scripts, and anything with no matching rule. `denied`
+covers commands outside the allowlist and unreadable patches. The fallback for an unrecognised tool or
+argument shape is `approval_required`, never `allowed`.
+
+**Denied is terminal.** A denied action has no approval path and no effect object is produced, so a
+user is never offered the chance to authorize something that must not happen.
+
+**Approvals are bound to a canonical, exact action hash.** SHA-256 over a serialization with keys
+sorted at every depth, covering the tool name and the whole argument object. Canonical so the same
+request written two ways is one action; exact so any changed value is a different action and an
+existing approval no longer applies. Model written summaries and reasons are excluded from the hash so
+it stays stable for the same real action.
+
+**Approvals are single use, time limited, and one per action.** An approval is consumed when it
+authorizes an action. It expires after fifteen minutes, and an expired approval reports as `expired`
+rather than silently failing. A rejection remains a rejection past its expiry. A decision naming a
+different action hash is refused. Requesting approval for an action that already has a pending or
+approved one returns that one, so an agent cannot accumulate authorizations by asking repeatedly. A
+session may request at most twenty approvals.
+
+**Every decision is recorded, including the permitted ones**, because a record of only refusals cannot
+explain how a change was made. The record holds the tool, decision, category, risk, action hash,
+whether a person approved it, and a path count. It holds no model text and no raw arguments.
+
+Owned by feature 030.
+
 ## 11. Rate limiting and abuse control
 
 Limits apply per IP, per account, per session, and globally, covering authentication attempts,
