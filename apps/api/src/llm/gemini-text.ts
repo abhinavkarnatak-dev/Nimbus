@@ -156,7 +156,7 @@ export class GeminiTextProvider implements TextProvider {
         ...messages,
         {
           role: 'user',
-          content: `That answer did not match the required shape: ${problem}. Send a single JSON object matching the schema named ${request.schemaName}, and nothing else.`,
+          content: `That answer did not match the required shape. What was wrong: ${problem}. Send the whole object again, corrected, as one JSON object matching the ${request.schemaName} schema. Include every required field, add no fields that are not in the schema, and write nothing outside the object.`,
         },
       ];
     }

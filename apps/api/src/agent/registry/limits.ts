@@ -11,7 +11,8 @@ export const REGISTRY_LIMITS = {
   outputMaxChars: LIMITS.toolOutputChunkMaxChars,
   summaryMaxChars: LIMITS.summaryMaxChars,
   pathsPerRecordMax: 20,
-  descriptionMaxChars: 400,
+  descriptionMinChars: 80,
+  descriptionMaxChars: 600,
 
   messageMaxChars: LIMITS.messageMaxChars,
   questionMaxChars: LIMITS.messageMaxChars,

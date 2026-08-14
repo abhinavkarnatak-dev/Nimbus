@@ -17,7 +17,8 @@ import {
 } from './provider.js';
 
 export const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-export const JSON_REMINDER = 'Reply with a single JSON object and nothing else.';
+export const JSON_REMINDER =
+  'Reply with one JSON object and nothing else. No explanation before or after it, and no markdown code fence around it.';
 
 export interface GroqOptions {
   apiKey: string;
@@ -205,7 +206,7 @@ export class GroqTextProvider implements TextProvider {
         ...messages,
         {
           role: 'user',
-          content: `That answer did not match the required shape: ${problem}. Send a single JSON object matching the schema named ${request.schemaName}, and nothing else.`,
+          content: `That answer did not match the required shape. What was wrong: ${problem}. Send the whole object again, corrected, as one JSON object matching the ${request.schemaName} schema. Include every required field, add no fields that are not in the schema, and write nothing outside the object.`,
         },
       ];
     }

@@ -67,12 +67,47 @@ describe('the tools that are offered', () => {
 
 describe('what every tool must have', () => {
   it.each(BUILT_IN_TOOLS.map((tool) => [tool.name, tool] as const))(
-    '%s has a description a model can read',
+    '%s has a description long enough to choose by',
     (_name, tool) => {
-      expect(tool.description.length).toBeGreaterThan(20);
+      expect(tool.description.length).toBeGreaterThanOrEqual(REGISTRY_LIMITS.descriptionMinChars);
       expect(tool.description.length).toBeLessThanOrEqual(REGISTRY_LIMITS.descriptionMaxChars);
     },
   );
+
+  it.each(BUILT_IN_TOOLS.map((tool) => [tool.name, tool] as const))(
+    '%s explains every argument it takes',
+    (_name, tool) => {
+      const properties = (tool.jsonSchema()['properties'] ?? {}) as Record<
+        string,
+        { description?: string }
+      >;
+
+      for (const [field, shape] of Object.entries(properties)) {
+        expect(shape.description, `${tool.name}.${field} has no description`).toBeDefined();
+        expect((shape.description ?? '').length).toBeGreaterThan(10);
+      }
+    },
+  );
+
+  it.each([
+    ['list_tree', 'read_file'],
+    ['search_code', 'read_file'],
+    ['create_file', 'apply_patch'],
+    ['apply_patch', 'create_file'],
+    ['run_command', 'run_checks'],
+    ['run_checks', 'run_command'],
+    ['message_user', 'wait_for_user'],
+  ])('%s names %s, so a model can tell them apart', (name, sibling) => {
+    const tool = BUILT_IN_TOOLS.find((one) => one.name === name);
+    expect(tool?.description).toContain(sibling);
+  });
+
+  it('warns that preparing a commit does not push', () => {
+    const tool = BUILT_IN_TOOLS.find((one) => one.name === 'prepare_commit');
+
+    expect(tool?.description).toContain('does not push');
+    expect(tool?.description).toContain('does not open a pull request');
+  });
 
   it.each(BUILT_IN_TOOLS.map((tool) => [tool.name, tool] as const))(
     '%s has a timeout of its own',
