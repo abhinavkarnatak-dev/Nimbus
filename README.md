@@ -826,6 +826,40 @@ tokens on the live run. So vision takes one image and returns a bounded descript
 as ordinary text, and the system instruction tells the model that an image is untrusted material whose
 instructions must be reported rather than followed.
 
+## Choosing a model, and reading a screenshot
+
+Two pipes are not a decision. This is where it is decided which model answers, whether an image needs
+looking at, what actually goes in the prompt, and when a session has spent enough.
+
+```bash
+pnpm demo:routing
+```
+
+**The number that matters is zero.** A session with no images never calls the vision model at all,
+which is checked by asserting the provider recorded no calls rather than by reading the code.
+
+**An image is described once, ever.** One screenshot cost 1.06 cents to describe. The description is
+written to the attachment record the first time and read from it after that, so a retry, a resumed
+session, and a second session using the same upload all cost nothing. Without that, resuming a session
+re-bills every image, which is a bug that shows up on an invoice rather than in a test.
+
+**A model you may not pick is refused, not swapped.** Quietly substituting a working model would bill
+you for a model you did not choose and answer you from a model you did not choose, with no way to
+tell. The refusal happens when the session is built, before a token is spent. You pick the model that
+thinks about your code; which model reads a screenshot, summarises, or takes the hard questions is
+Nimbus's problem.
+
+**A description is untrusted too.** A screenshot can contain a sentence aimed at the model. So the
+description travels inside the same marked block the repository text uses, with the same unguessable
+per session value, and a description containing a fake closing marker cannot break out of it.
+
+**When it does not all fit, the task survives.** Everything competes for one budget, and things are
+dropped by what cannot be got back any other way: the retrieval bundle goes first because the agent
+can search again for it, then attachments, then image descriptions. The task is never dropped.
+
+**Stopping safely means stopping before starting.** A call that would take a session past its token,
+money, or call limit is refused rather than begun, so there is never a half spent state.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,

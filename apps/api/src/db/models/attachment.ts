@@ -41,7 +41,12 @@ export interface AttachmentDocument {
   height: number | null;
   createdAt: Date;
   expiresAt: Date | null;
+  description?: string | null;
+  describedByModel?: string | null;
+  describedAt?: Date | null;
 }
+
+export const DESCRIPTION_MAX_CHARS = 2_000;
 
 export function attachmentsCollection(db: Db): Collection<AttachmentDocument> {
   return db.collection<AttachmentDocument>(COLLECTIONS.attachments);
@@ -99,6 +104,13 @@ export const attachmentModel: ModelDefinition = {
         height: { bsonType: ['number', 'null'], minimum: 1 },
         createdAt: { bsonType: 'date' },
         expiresAt: { bsonType: ['date', 'null'] },
+        description: {
+          bsonType: ['string', 'null'],
+          minLength: 1,
+          maxLength: DESCRIPTION_MAX_CHARS,
+        },
+        describedByModel: { bsonType: ['string', 'null'], minLength: 1, maxLength: 100 },
+        describedAt: { bsonType: ['date', 'null'] },
       },
     },
   },

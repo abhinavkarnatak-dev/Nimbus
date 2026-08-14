@@ -371,6 +371,46 @@ than nothing.
 
 Owned by feature 025.
 
+## 10b. Model and vision routing
+
+Routing decides which model is asked, what it is told, and when a session must stop, so its controls
+are about substitution, untrusted content, and spending.
+
+**A model the user may not choose is refused, never substituted.** The set of selectable text models
+is explicit. An unknown or disallowed name raises `LLM_MODEL_UNKNOWN` when the session router is
+constructed, before any request is made. Silent substitution is treated as the worse failure, because
+it bills a user for a model they did not choose and answers them from a model they did not choose with
+no way to observe it.
+
+**Only the primary text model is a user choice.** The vision, light and reasoning models are chosen by
+the server. This removes any path by which a user could select a model that cannot see for an image
+job, and prevents a cheaper primary from changing the cost of unrelated internal work.
+
+**An image is described once and the description is persisted** on the attachment record along with
+the model that wrote it and the time. Sessions are resumable, and a resume that re-describes every
+image would re-bill every image. Only attachments of kind `image` are ever sent to a vision provider.
+
+**Descriptions and attached text are untrusted content** and are wrapped in the same marked blocks
+feature 024 uses for repository text, sharing one implementation rather than a second copy. The per
+bundle marker value is random and verified absent from every part being assembled, including the
+retrieval bundle, so no part can close its own block or collide with another.
+
+**Context is assembled under a fixed character budget** and trimmed by what cannot be recovered
+elsewhere: the retrieval bundle first, since the agent can search again for it, then attached text,
+then image descriptions. The task is never dropped at any budget. What was dropped is reported rather
+than silently omitted.
+
+**Spending is checked before a call is sent and charged after it returns.** A call that would cross a
+token, money, or call limit raises `LLM_BUDGET_EXCEEDED` without being sent, so there is no partially
+spent state, and the router remains usable for reporting what a session consumed.
+
+**A failure to describe one image never ends a session.** It is logged as an attachment id and an
+error code, never as the description or the image, and the session continues without it. The error
+handling around a vision call covers only the remote call, so a local defect cannot be recorded and
+skipped as though the provider had failed.
+
+Owned by feature 026.
+
 ## 11. Rate limiting and abuse control
 
 Limits apply per IP, per account, per session, and globally, covering authentication attempts,

@@ -10,6 +10,7 @@ export interface AttachmentRecords {
   countUnclaimed(userId: string): Promise<number>;
   remove(attachmentId: string): Promise<boolean>;
   findExpired(now: Date, limit: number): Promise<AttachmentDocument[]>;
+  saveDescription(attachmentId: string, description: string, model: string): Promise<void>;
 }
 
 export class MongoAttachmentRecords implements AttachmentRecords {
@@ -25,6 +26,13 @@ export class MongoAttachmentRecords implements AttachmentRecords {
 
   async findOwned(userId: string, attachmentId: string): Promise<AttachmentDocument | null> {
     return attachmentsCollection(this.db).findOne({ attachmentId, userId });
+  }
+
+  async saveDescription(attachmentId: string, description: string, model: string): Promise<void> {
+    await attachmentsCollection(this.db).updateOne(
+      { attachmentId },
+      { $set: { description, describedByModel: model, describedAt: new Date() } },
+    );
   }
 
   async countUnclaimed(userId: string): Promise<number> {
@@ -47,6 +55,17 @@ export class MongoAttachmentRecords implements AttachmentRecords {
 
 export class InMemoryAttachmentRecords implements AttachmentRecords {
   readonly documents: AttachmentDocument[] = [];
+
+  async saveDescription(attachmentId: string, description: string, model: string): Promise<void> {
+    const held = this.documents.find((one) => one.attachmentId === attachmentId);
+
+    if (held !== undefined) {
+      held.description = description;
+      held.describedByModel = model;
+      held.describedAt = new Date();
+    }
+    return Promise.resolve();
+  }
 
   async insert(document: NewAttachment): Promise<void> {
     if (this.documents.some((held) => held.attachmentId === document.attachmentId)) {
