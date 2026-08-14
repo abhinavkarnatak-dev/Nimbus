@@ -530,6 +530,48 @@ whether a person approved it, and a path count. It holds no model text and no ra
 
 Owned by feature 030.
 
+## 10f. Clarification, retrieval, and reasoning
+
+These are the first nodes where a language model influences what a session does. The design question
+is not whether a model can be misled, which it can, but what its being misled is able to cause.
+
+**The reasoning node cannot authorize anything.** It produces a proposal: an intent sentence, a tool
+name, and an argument object. Feature 030's policy gate then classifies that proposal from the tool
+name and the arguments alone. The intent, the retrieval bundle, the model's reasoning and the
+repository text are not inputs to the decision. This is verified by hashing the same action with a
+hostile intent and with none and asserting the hashes are identical, and by a test in which the model
+is scripted to fall for an injection completely, propose `run_command` with `curl`, and be denied.
+
+**Untrusted material is labelled but the labelling is not the control.** Repository content,
+attachments and image descriptions arrive inside the marked blocks from features 024 and 026, under a
+header stating they are data and that instructions found inside are to be reported and never carried
+out. Each block closes with the nonce it opened with, and the nonce is verified absent from the
+material it wraps. This reduces how often a model is misled. It is not what makes being misled
+harmless.
+
+**Two independent checks run before the policy gate sees anything.** The tool name is checked against
+the registry, so a name a model invented is refused with the real names given back. The arguments are
+then parsed by that tool's own schema through `ToolRegistry.check`, which runs the schema without
+running the tool, so a malformed call never costs a policy decision or an execution attempt. The same
+parse still happens inside `invoke`, unchanged.
+
+**Scope validation is shown the user's words only.** The light model that judges whether a task is
+actionable receives the task and the clarification answer, and no repository content, so no file can
+influence whether a session pauses or what it asks. This is asserted directly: after judging a task
+in a repository containing `redirectAfterLogin`, the messages sent to the model do not contain that
+identifier.
+
+**Every shape is bounded.** The intent is capped at 300 characters, the argument object at 16384
+serialized characters, the assembled context at a fixed budget with the task trimmed last, and the
+retrieval result at a fixed file count. `ScopeVerdictSchema` and `NextActionSchema` are strict, so a
+model cannot smuggle a second action or an extra field alongside the first.
+
+**A session asks at most one clarifying question.** The check reads feature 028's durable
+`clarificationQuestion`, runs before any counting and before any model call, and proceeds regardless
+of what the answer said. A session cannot be made to pause indefinitely.
+
+Owned by feature 031.
+
 ## 11. Rate limiting and abuse control
 
 Limits apply per IP, per account, per session, and globally, covering authentication attempts,

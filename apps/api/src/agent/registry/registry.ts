@@ -100,6 +100,17 @@ export class ToolRegistry {
     return this.tools.has(name as ToolName);
   }
 
+  check(name: string, input: unknown): { ok: true } | { ok: false; detail: string } {
+    const tool = this.tools.get(name as ToolName);
+
+    if (tool === undefined) {
+      return { ok: false, detail: `there is no tool called ${name}` };
+    }
+
+    const parsed = tool.parse(input);
+    return parsed.ok ? { ok: true } : { ok: false, detail: parsed.detail };
+  }
+
   describe(): ReturnType<typeof describeForModel>[] {
     return [...this.tools.values()]
       .sort((left, right) => left.name.localeCompare(right.name))

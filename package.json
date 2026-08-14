@@ -26,6 +26,7 @@
     "demo:agent-state": "pnpm --filter @nimbus/api demo:agent-state",
     "demo:registry": "pnpm --filter @nimbus/api demo:registry",
     "demo:policy": "pnpm --filter @nimbus/api demo:policy",
+    "demo:nodes": "pnpm --filter @nimbus/api demo:nodes",
     "demo:e2b": "pnpm --filter @nimbus/api demo:e2b",
     "demo:e2b:live": "pnpm --filter @nimbus/api demo:e2b:live",
     "demo:attachments:live": "pnpm --filter @nimbus/api demo:attachments:live",
@@ -44,7 +45,7 @@
     "test:all": "vitest run",
     "test:e2e": "playwright test",
     "security:check": "pnpm audit --audit-level high",
-    "clean": "pnpm -r exec rimraf dist .tsbuildinfo && rimraf **/*.tsbuildinfo"
+    "clean": "pnpm -r exec rimraf dist .tsbuildinfo"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
