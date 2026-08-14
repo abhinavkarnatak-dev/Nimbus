@@ -894,6 +894,37 @@ retried forever, tokens, and time. Each is checked before the work rather than a
 says which one stopped it. The token budget is stored with the state and restored on resume, since a
 resumed session with a fresh budget has no budget at all.
 
+## What a model may ask for
+
+Everything Nimbus can do to a repository already existed before this. What was missing is the door a
+model knocks on, and that door is the narrowest thing in the system, because every argument coming
+through it was written by a model.
+
+```bash
+pnpm demo:registry
+```
+
+**Eleven tools, and the interesting part is the list's absence.** Reading, searching, creating, patching,
+running an allowed command, running a named check, git status, packaging changes for review, telling
+you something, and stopping to ask you something. There is no push, no pull request, no network, no
+environment, no secrets. Two things keep it that way: no such tool is written, and a tool whose _name_
+looks like one is refused at registration.
+
+`prepare_commit` says so in the description the model reads: _"This does not push and does not open a
+pull request."_ A boundary a model knows about is one it stops testing.
+
+**An unknown field fails the call.** Not ignored, refused. Ignoring it is how a tool does something
+other than what was asked while looking like it worked. The schema that validates the arguments is the
+same one the model is shown, so what it is told and what is enforced cannot drift.
+
+**Every call leaves a record, especially the failures.** Succeeded, failed, denied, timed out and
+cancelled all produce one. A record of only the successes is the least useful kind. It holds a summary
+and the paths, never the raw arguments and never the raw output.
+
+**A failing test suite is not a broken tool.** A command that exits non zero is a successful call whose
+result happens to be bad news, while a timeout or a cancellation is a different outcome entirely. The
+agent has to be able to tell "go and fix the tests" from "that tool broke, try something else".
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,

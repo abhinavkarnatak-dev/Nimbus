@@ -451,6 +451,44 @@ checkpoints can be removed outright.
 
 Owned by feature 028.
 
+## 10d. The agent tool registry
+
+The registry is the only place a model's request becomes an action, so it is the narrowest boundary in
+the system and every argument reaching it is untrusted by definition.
+
+**Dangerous capabilities are absent, not disabled.** There is no tool that pushes, opens a pull
+request, merges, reads an environment variable, fetches a URL, or returns a credential. On top of that
+absence, registration refuses any tool whose name contains `push`, `pull_request`, `merge`, `approve`,
+`token`, `secret`, `credential`, `fetch`, `http`, `network`, `download` or `upload`, so a later feature
+cannot add one by accident. `prepare_commit` states in its model facing description that it neither
+pushes nor opens a pull request.
+
+**Every tool has a strict schema and an unknown field fails the call.** Ignoring an unrecognised
+argument would let a tool act differently from what was asked while appearing to succeed. The JSON
+schema shown to the model is generated from the same Zod object that validates the input, so the
+description and the enforcement cannot drift, and `additionalProperties: false` is carried through.
+
+**The safety rules of the underlying operations are untouched.** Reading a symlink that leaves the
+workspace still fails with `PATH_OUTSIDE_WORKSPACE`, an ignored or credential shaped path with
+`PATH_IGNORED`, and a command outside the allowlist is surfaced as `denied`. The registry adds a door,
+not a room, and the tests assert those refusals again through it.
+
+**Every tool has its own timeout**, combined with the caller's cancellation signal into one signal
+passed down to the sandbox. A request whose signal is already aborted is refused before the tool is
+looked up, so nothing is read and nothing runs.
+
+**Outcomes are distinguished deliberately.** A command exiting non zero is a successful tool call with
+a bad result; a timeout, a cancellation and a policy denial are separate outcomes. Conflating them
+would leave the agent unable to tell a failing test suite from a broken tool.
+
+**Every invocation produces an audit record, including the failures.** The record holds a call id, the
+tool, a bounded summary, at most twenty paths and a start time. It never holds the raw arguments, which
+are model written text of arbitrary size, or the raw output, which is truncated and redacted by feature
+018 before it goes anywhere. Logs carry the tool, outcome, duration, error code and session id, and a
+test asserts a distinctive phrase from a tool argument appears in no log line.
+
+Owned by feature 029.
+
 ## 11. Rate limiting and abuse control
 
 Limits apply per IP, per account, per session, and globally, covering authentication attempts,
