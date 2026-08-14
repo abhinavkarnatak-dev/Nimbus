@@ -1,10 +1,12 @@
 import {
   AGENT_STATE_VERSION,
   AgentStateSchema,
+  MAX_CHECK_RESULTS,
   MAX_FILES_READ,
   MAX_TOOL_EVENTS,
   type AgentState,
   type AgentStopReason,
+  type CheckResult,
   type ModelPlan,
   type ToolEventSummary,
 } from '@nimbus/contracts';
@@ -57,6 +59,7 @@ export function createState(input: NewStateInput): AgentState {
     proposedAction: null,
     policy: null,
     toolEvents: [],
+    checks: [],
   });
 }
 
@@ -124,6 +127,15 @@ export function recordFileRead(state: AgentState, path: string): AgentState {
   return parseState({
     ...state,
     filesRead: appendBounded(state.filesRead, path, MAX_FILES_READ),
+  });
+}
+
+export function recordCheck(state: AgentState, check: CheckResult): AgentState {
+  const others = state.checks.filter((held) => held.name !== check.name);
+
+  return parseState({
+    ...state,
+    checks: appendBounded(others, check, MAX_CHECK_RESULTS),
   });
 }
 

@@ -1,3 +1,4 @@
+import { AGENT_STATE_VERSION } from '@nimbus/contracts';
 import { createTestDatabase, type TestDatabase } from '@nimbus/test-utils';
 import { StateGraph, Annotation, START, END } from '@langchain/langgraph';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -83,7 +84,7 @@ describe('saving and resuming a real graph', () => {
 
     const stored = await checkpointsCollection(testDatabase.db).findOne({ threadId: SESSION_ID });
     expect(stored).not.toBeNull();
-    expect(stored?.stateVersion).toBe(1);
+    expect(stored?.stateVersion).toBe(AGENT_STATE_VERSION);
     expect(stored?.baseCommitSha).toBe(BASE_COMMIT);
     expect(stored?.byteSize).toBeGreaterThan(0);
   });
@@ -135,7 +136,7 @@ describe('refusing to resume', () => {
   it('refuses a checkpoint written by an older version', async () => {
     await buildGraph(saver()).invoke({ state: sampleState() }, config);
 
-    await expect(saver({ stateVersion: 2 }).getTuple(config)).rejects.toThrow(
+    await expect(saver({ stateVersion: AGENT_STATE_VERSION + 1 }).getTuple(config)).rejects.toThrow(
       expect.objectContaining({ code: 'CHECKPOINT_STALE' }) as Error,
     );
   });

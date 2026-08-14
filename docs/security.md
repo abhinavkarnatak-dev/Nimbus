@@ -572,6 +572,54 @@ of what the answer said. A session cannot be made to pause indefinitely.
 
 Owned by feature 031.
 
+## 10g. Execution, observation, and validation
+
+This is the boundary the rest of the agent exists to protect. Every effect on a repository passes
+through `ActionExecutor.execute`, which authorizes before it acts.
+
+**The ordering is a property of the code, not a convention.** The tool registry and the policy gate
+are held in real private fields, `#registry` and `#policy`. The class exposes two public methods,
+`execute` and `toolNames`, and there is no public path to `registry.invoke`. TypeScript's `private`
+was used first and was not sufficient: it is erased at compile time, leaving an ordinary readable own
+property. This is verified by asserting the instance has no own property names at runtime and that
+the prototype carries exactly two methods.
+
+**Four outcomes, three of which produce no effect.** `executed` only after `allowed`. `denied` with no
+approval path and no effect object. `approval_required`, which opens one card, sets the phase to
+`awaiting_approval`, and runs nothing. `refused`, when the arguments fail the tool's own schema, in
+which case the policy classifier is not consulted at all, since feature 030 is specified to receive
+arguments that have already been parsed.
+
+**Tool output is untrusted content.** A file read, a search result, command output and a test failure
+message are all written by whoever wrote the repository. Each observation is returned inside feature
+024's marked blocks under a header of its own stating that it is data, is scanned with the same flag
+rules, and carries a warning when a flag fires. The nonce is generated absent from the material, so
+output cannot close its own block. There is no exemption for output the agent requested.
+
+**Every observation is redacted three times over.** `redactSecrets` runs before the text reaches the
+model, before it is written into the checkpointed state, and before it is logged, and the event
+summary is redacted separately. Redaction replaces rather than refuses here, unlike feature 028's
+handling of state, because an observation missing a token is still useful while a state missing a
+field is a lie the agent would resume from.
+
+**User facing text cannot impersonate the product.** Only `message_user` and `wait_for_user` produce a
+message for a person. Marker prefixes inside it are rewritten, the text is redacted and length
+bounded, and the approval card a user sees is built from feature 030's policy effect and from nothing
+the model wrote.
+
+**Failure loops terminate in two independent ways.** Different actions failing spend feature 028's
+retry budget. The same action hash failing twice stops immediately with the stop reason
+`repeated_action`, because a global budget spends everything on a single mistake. A pause for approval
+is neither a success nor a failure: it consumes a step and leaves the retry count untouched, so
+alternating a denied action with one awaiting approval cannot evade the budget. Cancellation is
+checked before every step, ahead of all budgets.
+
+**Records are precise.** `ToolEventSummary.outcome` distinguishes `paused` from `refused`, so an
+action a person is about to approve is not recorded as a refusal. Check results live in their own
+state field and are replaced by name, so a stale failure cannot sit beside a current pass.
+
+Owned by feature 032.
+
 ## 11. Rate limiting and abuse control
 
 Limits apply per IP, per account, per session, and globally, covering authentication attempts,

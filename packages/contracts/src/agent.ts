@@ -6,8 +6,9 @@ import { LIMITS } from './limits.js';
 import { BudgetStateSchema } from './llm.js';
 import { ModelPlanSchema } from './routing.js';
 import { BranchNameSchema } from './github.js';
+import { CheckResultSchema } from './tools.js';
 
-export const AGENT_STATE_VERSION = 1;
+export const AGENT_STATE_VERSION = 2;
 
 export const AGENT_PHASES = [
   'starting',
@@ -28,6 +29,7 @@ export const AGENT_STOP_REASONS = [
   'completed',
   'step_budget',
   'retry_budget',
+  'repeated_action',
   'token_budget',
   'time_budget',
   'cancelled',
@@ -39,6 +41,7 @@ export const AgentStopReasonSchema = z.enum(AGENT_STOP_REASONS);
 export const MAX_RETRIEVED_FILES = 20;
 export const MAX_FILES_READ = 100;
 export const MAX_TOOL_EVENTS = 60;
+export const MAX_CHECK_RESULTS = 12;
 export const MAX_SNIPPET_CHARS = 4_000;
 export const MAX_SUMMARY_CHARS = 500;
 
@@ -79,7 +82,7 @@ export const PolicyRecordSchema = z.strictObject({
 export const ToolEventSummarySchema = z.strictObject({
   step: z.int().nonnegative(),
   tool: z.string().min(1).max(60),
-  outcome: z.enum(['ok', 'refused', 'failed']),
+  outcome: z.enum(['ok', 'refused', 'paused', 'failed']),
   summary: z.string().min(1).max(MAX_SUMMARY_CHARS),
   atMs: z.int().positive(),
 });
@@ -116,6 +119,7 @@ export const AgentStateSchema = z.strictObject({
   proposedAction: ProposedActionSchema.nullable(),
   policy: PolicyRecordSchema.nullable(),
   toolEvents: z.array(ToolEventSummarySchema).max(MAX_TOOL_EVENTS),
+  checks: z.array(CheckResultSchema).max(MAX_CHECK_RESULTS),
 });
 
 export const CheckpointMetadataSchema = z.strictObject({

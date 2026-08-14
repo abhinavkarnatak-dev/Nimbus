@@ -1,0 +1,145 @@
+import type { AgentBudgets, AgentState, AgentStopReason } from '@nimbus/contracts';
+
+import { shortfall, takeRetry, takeStep, clearRetries } from '../state/budgets.js';
+import {
+  parseState,
+  recordCheck,
+  recordFileChanged,
+  recordFileRead,
+  recordToolEvent,
+  stopped,
+} from '../state/state.js';
+import type { ExecutionResult } from './executor.js';
+import { EXECUTE_LIMITS } from './limits.js';
+
+const WRITING_TOOLS: ReadonlySet<string> = new Set(['apply_patch', 'create_file']);
+
+export interface StopVerdict {
+  stop: boolean;
+  reason: AgentStopReason | null;
+  detail: string;
+}
+
+export function keepGoing(): StopVerdict {
+  return { stop: false, reason: null, detail: '' };
+}
+
+export class RunGuard {
+  private readonly failures = new Map<string, number>();
+
+  private readonly order: string[] = [];
+
+  beforeStep(state: AgentState, nowMs: number, cancelled = false): StopVerdict {
+    if (cancelled) {
+      return { stop: true, reason: 'cancelled', detail: 'the session was cancelled' };
+    }
+
+    const found = shortfall(state.budgets, nowMs);
+
+    if (found !== null) {
+      return { stop: true, reason: found.reason, detail: found.detail };
+    }
+    return keepGoing();
+  }
+
+  afterStep(result: ExecutionResult): StopVerdict {
+    if (!countsAsFailure(result)) {
+      this.failures.delete(result.actionHash);
+      return keepGoing();
+    }
+
+    const seen = (this.failures.get(result.actionHash) ?? 0) + 1;
+    this.remember(result.actionHash, seen);
+
+    if (seen >= EXECUTE_LIMITS.sameActionFailuresMax) {
+      return {
+        stop: true,
+        reason: 'repeated_action',
+        detail: `${result.event.tool} failed the same way ${String(seen)} times`,
+      };
+    }
+    return keepGoing();
+  }
+
+  failuresFor(actionHash: string): number {
+    return this.failures.get(actionHash) ?? 0;
+  }
+
+  private remember(actionHash: string, seen: number): void {
+    if (!this.failures.has(actionHash)) {
+      this.order.push(actionHash);
+    }
+    this.failures.set(actionHash, seen);
+
+    while (this.order.length > EXECUTE_LIMITS.recentActionsTracked) {
+      const oldest = this.order.shift();
+
+      if (oldest !== undefined) {
+        this.failures.delete(oldest);
+      }
+    }
+  }
+}
+
+export function countsAsFailure(result: ExecutionResult): boolean {
+  if (result.status === 'approval_required') {
+    return false;
+  }
+  return result.event.outcome !== 'ok';
+}
+
+export function applyExecution(state: AgentState, result: ExecutionResult): AgentState {
+  let next = recordToolEvent(state, result.event);
+
+  next = parseState({
+    ...next,
+    policy: result.policy,
+    proposedAction: null,
+    budgets: budgetsAfter(next.budgets, result),
+  });
+
+  if (result.check !== null) {
+    next = recordCheck(next, result.check);
+  }
+
+  for (const path of result.paths) {
+    next =
+      result.status === 'executed' && WRITING_TOOLS.has(result.event.tool)
+        ? recordFileChanged(next, path)
+        : recordFileRead(next, path);
+  }
+
+  return parseState({ ...next, phase: phaseAfter(result) });
+}
+
+export function stopWith(state: AgentState, verdict: StopVerdict): AgentState {
+  return stopped(state, verdict.reason ?? 'failed');
+}
+
+function budgetsAfter(budgets: AgentBudgets, result: ExecutionResult): AgentBudgets {
+  const stepped = takeStep(budgets);
+
+  if (countsAsFailure(result)) {
+    return takeRetry(stepped);
+  }
+
+  if (result.status === 'approval_required') {
+    return stepped;
+  }
+  return clearRetries(stepped);
+}
+
+function phaseAfter(result: ExecutionResult): AgentState['phase'] {
+  if (result.status === 'approval_required') {
+    return 'awaiting_approval';
+  }
+
+  if (result.pause === 'clarification') {
+    return 'clarifying';
+  }
+
+  if (result.check !== null) {
+    return 'validating';
+  }
+  return 'reasoning';
+}
