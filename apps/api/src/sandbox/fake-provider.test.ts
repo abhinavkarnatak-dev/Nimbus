@@ -332,6 +332,55 @@ describe('exporting a patch', () => {
   });
 });
 
+describe('marking a baseline', () => {
+  it('makes everything written so far count as unchanged', async () => {
+    const provider = new FakeSandboxProvider({ files: {} });
+    const sandbox = await ready(provider);
+
+    await sandbox.writeFile('a.txt', 'one\n');
+    await sandbox.writeFile('b.txt', 'two\n');
+    await sandbox.markBaseline();
+
+    expect((await sandbox.exportPatch()).files).toEqual([]);
+  });
+
+  it('still reports what changed afterwards', async () => {
+    const provider = new FakeSandboxProvider({ files: {} });
+    const sandbox = await ready(provider);
+
+    await sandbox.writeFile('a.txt', 'one\n');
+    await sandbox.markBaseline();
+    await sandbox.writeFile('a.txt', 'two\n');
+
+    const patch = await sandbox.exportPatch();
+
+    expect(patch.files.map((file) => file.path)).toEqual(['a.txt']);
+    expect(patch.files[0]?.changeKind).toBe('modified');
+  });
+
+  it('forgets a baseline that was seeded before it', async () => {
+    const provider = new FakeSandboxProvider({ files: { 'old.txt': 'gone\n' } });
+    const sandbox = await ready(provider);
+
+    await sandbox.writeFile('new.txt', 'here\n');
+    await sandbox.markBaseline();
+    await sandbox.writeFile('new.txt', 'changed\n');
+
+    const patch = await sandbox.exportPatch();
+
+    expect(patch.files.map((file) => file.path)).toEqual(['new.txt']);
+  });
+
+  it('refuses once the sandbox is gone', async () => {
+    const provider = new FakeSandboxProvider({ files: {} });
+    const sandbox = await ready(provider);
+
+    await sandbox.terminate('completed');
+
+    expect(await codeOf(async () => sandbox.markBaseline())).toBe('SANDBOX_NOT_READY');
+  });
+});
+
 describe('destroying a sandbox', () => {
   it('moves to terminated and remembers why', async () => {
     const sandbox = await ready(new FakeSandboxProvider());

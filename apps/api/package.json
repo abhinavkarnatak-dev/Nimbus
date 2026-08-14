@@ -20,6 +20,7 @@
     "demo:policy": "tsx test/manual/policy-demo.ts",
     "demo:nodes": "tsx test/manual/nodes-demo.ts",
     "demo:execute": "tsx test/manual/execute-demo.ts",
+    "demo:agent": "tsx test/manual/agent-demo.ts",
     "demo:e2b": "tsx test/manual/e2b-demo.ts",
     "demo:e2b:live": "tsx --env-file-if-exists=../../.env test/manual/e2b-live.ts",
     "demo:attachments:live": "tsx --env-file-if-exists=../../.env test/manual/attachments-live.ts",

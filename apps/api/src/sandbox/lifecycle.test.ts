@@ -70,6 +70,10 @@ class StubSandbox implements Sandbox {
     await Promise.reject(new Error('not used'));
   }
 
+  async markBaseline(): Promise<void> {
+    await Promise.reject(new Error('not used'));
+  }
+
   async exportPatch(): Promise<PatchExport> {
     return await Promise.reject(new Error('not used'));
   }

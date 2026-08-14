@@ -1,9 +1,12 @@
 import type { E2bClient, E2bEntry, E2bHandle, E2bRunResult } from './e2b-client.js';
 import { assertEgressSeconds, closedNetwork, openedNetwork } from './egress.js';
 import {
+  GIT_COMMIT_BASELINE,
   GIT_EXPORT_DIFF,
+  GIT_INIT,
   GIT_IS_REPOSITORY,
   GIT_MARK_NEW_FILES,
+  GIT_STAGE_ALL,
   buildGitPatchExport,
 } from './git-patch.js';
 import { SANDBOX_LIMITS } from './limits.js';
@@ -281,6 +284,32 @@ export class E2bSandbox implements Sandbox {
     }
 
     await this.handle.write(this.absolute(path), contents);
+  }
+
+  async markBaseline(): Promise<void> {
+    assertUsable(this.status());
+
+    const inside = await this.runInternally(GIT_IS_REPOSITORY);
+
+    if (inside.exitCode !== 0 || inside.stdout.trim() !== 'true') {
+      const started = await this.runInternally(GIT_INIT);
+
+      if (started.exitCode !== 0) {
+        throw new SandboxError('SANDBOX_PATCH_FAILED', 'The workspace could not be prepared.');
+      }
+    }
+
+    const staged = await this.runInternally(GIT_STAGE_ALL);
+
+    if (staged.exitCode !== 0) {
+      throw new SandboxError('SANDBOX_PATCH_FAILED', 'The workspace could not be prepared.');
+    }
+
+    const committed = await this.runInternally(GIT_COMMIT_BASELINE);
+
+    if (committed.exitCode !== 0) {
+      throw new SandboxError('SANDBOX_PATCH_FAILED', 'The workspace could not be prepared.');
+    }
   }
 
   async exportPatch(): Promise<PatchExport> {

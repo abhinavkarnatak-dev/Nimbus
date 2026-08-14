@@ -1071,6 +1071,59 @@ the log holds it                     false
 same action failing twice is not a retry, it is a loop, and it stops immediately saying which tool
 kept failing.
 
+## The whole thing, running
+
+Everything above is a piece. This is the agent.
+
+```bash
+pnpm demo:agent
+```
+
+One task in, a checked patch out, with nobody driving it:
+
+```text
+the task              the login redirect always sends people to the dashboard
+files cloned in       4
+what it did           read_file:ok -> apply_patch:ok -> run_checks:ok -> prepare_commit:ok
+outcome               finished, completed
+validator decision    allowed
+changed files         1
+lines                 +1 -1
+sandbox state         terminated
+```
+
+**The repository arrives through a door that refuses things.** Cloning is the one moment somebody
+else's code enters the machine the agent can touch, so the interesting part is what never gets
+written: credential files, symlinks that could point outside the workspace, submodules, binaries, and
+anything past the size caps. The agent cannot read a `.env` out of the repository because there is no
+`.env` there to read. The GitHub token stays in the backend and never enters the sandbox at all.
+
+**It knows the difference between the repository and its own work.** The clone marks itself as the
+baseline, so the patch at the end contains the one line that changed, not the four files that arrived.
+
+**It cannot declare victory over nothing.** Saying "done" is calling `prepare_commit`, and that is
+refused if no file changed, if the checks were never run, or if a check failed. The refusal says which
+one.
+
+**Every ending is a real ending.** A vague task asks one question and stops. A protected file waits
+for a person. A model that keeps proposing the same broken thing is stopped as a loop. A model that
+wanders runs out of steps. In all of them the sandbox is torn down and the state is checkpointed, so
+nothing is left running and nothing is lost.
+
+**And a repository that gives orders costs one step.** The demo lets the model fall for a README
+demanding `curl`:
+
+```text
+the model obeyed the README     yes, it proposed the curl
+what happened to it             refused
+the run                         run_command:refused -> read_file:ok -> ... -> prepare_commit:ok
+outcome                         finished, completed
+anything reached the patch      false
+```
+
+It got refused, the model was told the refusal was permanent, and the run went on to finish the job it
+was actually given.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,

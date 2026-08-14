@@ -186,6 +186,12 @@ export class FakeSandbox implements Sandbox {
     this.workspace.write(path, contents);
   }
 
+  async markBaseline(): Promise<void> {
+    assertUsable(this.status());
+    await Promise.resolve();
+    this.workspace.markBaseline();
+  }
+
   async exportPatch(): Promise<PatchExport> {
     assertUsable(this.status());
     await Promise.resolve();

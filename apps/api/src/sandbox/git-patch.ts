@@ -33,6 +33,39 @@ export const GIT_IS_REPOSITORY: readonly string[] = [
   '--is-inside-work-tree',
 ];
 
+export const GIT_INIT: readonly string[] = [
+  'git',
+  '-C',
+  SANDBOX_LIMITS.workspaceDir,
+  'init',
+  '--quiet',
+  '--initial-branch=nimbus-base',
+];
+
+export const GIT_STAGE_ALL: readonly string[] = [
+  'git',
+  '-C',
+  SANDBOX_LIMITS.workspaceDir,
+  'add',
+  '--all',
+  '--',
+];
+
+export const GIT_COMMIT_BASELINE: readonly string[] = [
+  'git',
+  '-C',
+  SANDBOX_LIMITS.workspaceDir,
+  '-c',
+  'user.name=Nimbus',
+  '-c',
+  'user.email=nimbus@localhost',
+  'commit',
+  '--quiet',
+  '--allow-empty',
+  '--no-gpg-sign',
+  '--message=base',
+];
+
 const FILE_HEADER = 'diff --git ';
 const BINARY_MARKERS: readonly string[] = ['Binary files ', 'GIT binary patch'];
 

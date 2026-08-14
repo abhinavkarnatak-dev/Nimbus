@@ -149,6 +149,14 @@ export class MemoryWorkspace {
     return { baseline: new Map(this.baseline), current: new Map(this.current) };
   }
 
+  markBaseline(): void {
+    this.baseline.clear();
+
+    for (const [path, contents] of this.current) {
+      this.baseline.set(path, contents);
+    }
+  }
+
   clear(): void {
     this.current.clear();
     this.baseline.clear();

@@ -620,6 +620,50 @@ state field and are replaced by name, so a stale failure cannot sit beside a cur
 
 Owned by feature 032.
 
+## 10h. Cloning, completion, and the full graph
+
+**The clone is a trust boundary and is defined by what it refuses.** It is the one moment repository
+content crosses into the machine the agent can touch. Credential files, private keys, symlinks,
+submodules, binaries, and anything past the file count, per file byte and total byte caps are never
+written into the sandbox. Feature 017 refuses to read a credential file; this refuses to place one,
+which is the stronger of the two. A partial clone reports which categories it skipped rather than
+appearing complete.
+
+**The installation token never enters the sandbox.** The backend fetches the tree and the blobs and
+writes the contents in, the same division feature 022 uses for pushing. This is verified by reading
+every file in the sandbox after a clone and asserting the token appears in none of them.
+
+**A truncated listing is refused.** GitHub marks a recursive tree listing truncated on large
+repositories. Cloning half a repository would have the agent reasoning confidently about code it
+cannot see, so the run fails with `CLONE_TREE_TRUNCATED`.
+
+**The clone is the baseline, not a change.** `Sandbox.markBaseline()` is called once the clone has
+written everything: `git init`, stage, and a baseline commit in the real sandbox, and a baseline copy
+in the fake. Without it the exported patch would contain the entire repository, and on the real path
+`exportPatch` would fail outright because the workspace would not be a git repository.
+
+**Completion is a tool call, not a sentence.** An agent declares itself finished by calling
+`prepare_commit`, which policy already classifies. Completion is then refused if no file changed, if
+the checks were never run, or if any check failed or errored, each with a reason naming what is
+missing. No English is parsed to decide whether work is done.
+
+**The patch is exported by the backend and validated by feature 021.** Nothing is re-decided here, and
+nothing in this feature pushes a branch or opens a pull request. Publishing belongs to a session, not
+to a graph.
+
+**A pause ends a run.** A clarifying question or a required approval checkpoints the state and returns
+rather than holding a thread open. A process that waits in memory for a human loses the work when it
+restarts, and a human approval is the wait with no upper bound. The sandbox is torn down on a pause
+and rebuilt from the clone on resume, which is deterministic because the base commit is fixed.
+
+**Teardown is unconditional.** Every terminal path terminates the sandbox, including a run that throws
+and a run stopped by a budget, and a failure to terminate is logged rather than swallowed.
+
+**The graph cannot loop forever.** On top of every budget from feature 028 and the repetition guard
+from feature 032, the compiled graph carries a recursion limit derived from the step budget.
+
+Owned by feature 033.
+
 ## 11. Rate limiting and abuse control
 
 Limits apply per IP, per account, per session, and globally, covering authentication attempts,
