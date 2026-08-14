@@ -14,7 +14,7 @@ export function minimalEnv(): Record<string, string | undefined> {
     WEB_ORIGIN: 'http://localhost:5173',
     PUBLIC_API_URL: 'http://localhost:4000',
     MONGODB_URI: 'mongodb://127.0.0.1:27017/nimbus',
-    REDIS_URL: 'redis://127.0.0.1:6379',
+    REDIS_URL: 'redis://127.0.0.1:6390',
     SESSION_SECRET: 'z'.repeat(48),
   };
 }

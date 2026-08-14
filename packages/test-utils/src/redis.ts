@@ -1,6 +1,6 @@
 import { Redis } from 'ioredis';
 
-const DEFAULT_TEST_URL = 'redis://127.0.0.1:6379';
+const DEFAULT_TEST_URL = 'redis://127.0.0.1:6390';
 const FIRST_TEST_DATABASE = 1;
 const LAST_TEST_DATABASE = 15;
 

@@ -1,0 +1,104 @@
+import type { LlmProviderName } from '@nimbus/contracts';
+
+export interface ModelFacts {
+  id: string;
+  provider: LlmProviderName;
+  contextTokens: number;
+  inputMicroCentsPerToken: number;
+  outputMicroCentsPerToken: number;
+  structuredOutput: 'json_schema' | 'json_object';
+  vision: boolean;
+  thinks: boolean;
+}
+
+export const DEFAULT_TEXT_MODEL = 'gemini-3.6-flash';
+export const DEFAULT_VISION_MODEL = 'gemini-3.6-flash';
+export const DEFAULT_LIGHT_MODEL = 'gemini-3.5-flash-lite';
+export const DEFAULT_REASONING_MODEL = 'openai/gpt-oss-120b';
+
+export const DEFAULT_GROQ_TEXT_MODEL = 'openai/gpt-oss-20b';
+export const DEFAULT_GEMINI_TEXT_MODEL = 'gemini-3.6-flash';
+
+export const KNOWN_MODELS: readonly ModelFacts[] = [
+  {
+    id: 'gemini-3.6-flash',
+    provider: 'gemini',
+    contextTokens: 1_048_576,
+    inputMicroCentsPerToken: 30,
+    outputMicroCentsPerToken: 250,
+    structuredOutput: 'json_schema',
+    vision: true,
+    thinks: true,
+  },
+  {
+    id: 'gemini-3.5-flash-lite',
+    provider: 'gemini',
+    contextTokens: 1_048_576,
+    inputMicroCentsPerToken: 10,
+    outputMicroCentsPerToken: 40,
+    structuredOutput: 'json_schema',
+    vision: true,
+    thinks: false,
+  },
+  {
+    id: 'openai/gpt-oss-120b',
+    provider: 'groq',
+    contextTokens: 131_072,
+    inputMicroCentsPerToken: 15,
+    outputMicroCentsPerToken: 75,
+    structuredOutput: 'json_schema',
+    vision: false,
+    thinks: true,
+  },
+  {
+    id: 'openai/gpt-oss-20b',
+    provider: 'groq',
+    contextTokens: 131_072,
+    inputMicroCentsPerToken: 10,
+    outputMicroCentsPerToken: 50,
+    structuredOutput: 'json_schema',
+    vision: false,
+    thinks: true,
+  },
+  {
+    id: 'llama-3.3-70b-versatile',
+    provider: 'groq',
+    contextTokens: 131_072,
+    inputMicroCentsPerToken: 59,
+    outputMicroCentsPerToken: 79,
+    structuredOutput: 'json_object',
+    vision: false,
+    thinks: false,
+  },
+];
+
+const BY_ID = new Map(KNOWN_MODELS.map((model) => [model.id, model]));
+
+export function findModel(id: string): ModelFacts | null {
+  return BY_ID.get(id) ?? null;
+}
+
+export function modelsFor(provider: LlmProviderName): ModelFacts[] {
+  return KNOWN_MODELS.filter((model) => model.provider === provider);
+}
+
+export function highestInputRate(): number {
+  return Math.max(...KNOWN_MODELS.map((model) => model.inputMicroCentsPerToken));
+}
+
+export function highestOutputRate(): number {
+  return Math.max(...KNOWN_MODELS.map((model) => model.outputMicroCentsPerToken));
+}
+
+export function ratesFor(id: string): { input: number; output: number; known: boolean } {
+  const model = findModel(id);
+
+  if (model === null) {
+    return { input: highestInputRate(), output: highestOutputRate(), known: false };
+  }
+  return {
+    input: model.inputMicroCentsPerToken,
+    output: model.outputMicroCentsPerToken,
+    known: true,
+  };
+}

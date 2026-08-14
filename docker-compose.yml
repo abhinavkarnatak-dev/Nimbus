@@ -22,7 +22,7 @@ services:
     image: redis:8.10.0-alpine
     container_name: nimbus-redis
     ports:
-      - '127.0.0.1:6379:6379'
+      - '127.0.0.1:6390:6379'
     volumes:
       - redis_data:/data
     command:

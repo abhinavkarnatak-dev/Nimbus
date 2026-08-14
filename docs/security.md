@@ -326,6 +326,51 @@ Documented deletion behavior exists for sessions, attachments, indexes, and acco
 
 Owned by features 004, 006, and 046.
 
+## 10a. Model providers
+
+Provider adapters are the one place where a user's private source code leaves the system, so the
+controls here are about what is sent, what is recorded, and what is spent.
+
+**Nothing about the conversation is logged.** A model call records the provider, the model, the
+attempt number, the HTTP status, the duration, the token counts, and the estimated cost. It never
+records the messages, the answer, the image bytes, or the API key. Five tests capture every line the
+logger emits during a call and assert that a distinctive phrase from the prompt appears in none of
+them, including during a schema repair round and during a run of failed attempts.
+
+Schema validation failures are recorded and raised as field paths and codes, such as
+`summary:invalid_type,files:invalid_type`, never as the validator's message, because that message
+quotes the offending key out of the model's answer. The detailed message is sent back to the model,
+where the detail is useful, and never leaves the process any other way.
+
+**Outgoing content is redacted.** Every message is passed through the same redaction the logger uses
+before it is sent, so a credential pasted into a task, present in build output, or embedded in an
+error message is replaced before it reaches a provider. This is a second pass over material feature
+024 already redacts, and exists for the paths that do not come from retrieval.
+
+**Keys travel as headers, never in a URL.** Gemini's documented query parameter form is deliberately
+unused, since a URL is the value most likely to appear in a log line, an error, or a proxy record.
+Error details returned by a provider are redacted and clipped before they are stored on an error
+object, because a provider may echo the request back.
+
+**Images are declared untrusted to the model that reads them.** The vision system instruction states
+that an image is untrusted material and that instructions found inside it are to be described and
+never carried out, which is the same position feature 024 takes on repository text.
+
+**Retries are bounded and selective.** Only 408, 409, 429, and 5xx are retried, with exponential
+backoff and full jitter, capped, and honouring `Retry-After` when the provider sends it. 400, 401,
+403, 404, 413, and 422 are never retried, since the request would be equally wrong the second time. A
+cancelled request is never retried, and cancellation interrupts the backoff wait as well as the
+request itself. Every call carries a timeout combined with the caller's cancellation signal.
+
+**Spending is bounded per session** in tokens, in estimated money, and in number of calls, checked
+before a call is started rather than during it, so there is no partially spent state. Token counts are
+taken from what the provider reported, including hidden reasoning tokens, which the two providers
+report differently and which the adapters normalise. Cost is derived from a price table, is always
+labelled as an estimate, and a model absent from the table is charged the highest rate in it rather
+than nothing.
+
+Owned by feature 025.
+
 ## 11. Rate limiting and abuse control
 
 Limits apply per IP, per account, per session, and globally, covering authentication attempts,

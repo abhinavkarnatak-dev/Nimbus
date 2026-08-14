@@ -172,7 +172,7 @@ finishes, the databases genuinely accept connections rather than merely having b
 | Service | Version | Address                            |
 | ------- | ------- | ---------------------------------- |
 | MongoDB | 8.0.28  | `127.0.0.1:27017`                  |
-| Redis   | 8.10.0  | `127.0.0.1:6379`                   |
+| Redis   | 8.10.0  | `127.0.0.1:6390`                   |
 | Qdrant  | 1.19.0  | `127.0.0.1:6333` HTTP, `6334` gRPC |
 
 Every port is published to `127.0.0.1` only, never to `0.0.0.0`. The plain form `"27017:27017"`
@@ -763,6 +763,68 @@ and is ordinary work.
 
 **A second layer catches what the first missed.** Every line handed over is redacted the same way logs
 are, so a credential inside a file that was legitimately readable is replaced before it leaves.
+
+## Talking to the models
+
+Groq answers questions about code and Gemini describes images. Both are slow, charged by the word, and
+occasionally down, so the adapter is not a wrapper around `fetch`.
+
+```bash
+LLM_LIVE=1 pnpm demo:llm:live
+```
+
+**Every model was called before it was written down.** That check found a retired model, a live 503
+from another, one model that refuses the structured output format its sibling accepts, and a model
+that bills 138 reasoning tokens the user never sees.
+
+It also removed a model from the plan. Qwen 3.6 27B was going to be the second coding model, and it
+returns 400 for both structured output modes and wraps its answers in a `<think>` block. A coding
+agent asks for a schema at nearly every step, so a model that cannot hold one is not a fifth option,
+it is a trap. `llama-3.3-70b-versatile` took the slot.
+
+| Model                     | For                     | Structured | Sees images | Thinks |
+| ------------------------- | ----------------------- | ---------- | ----------- | ------ |
+| `gemini-3.6-flash`        | The default, and images | schema     | yes         | yes    |
+| `gemini-3.5-flash-lite`   | Small fast jobs         | schema     | yes         | no     |
+| `openai/gpt-oss-120b`     | Hard problems, on Groq  | schema     | no          | yes    |
+| `openai/gpt-oss-20b`      | General work, on Groq   | schema     | no          | yes    |
+| `llama-3.3-70b-versatile` | The Groq mid tier       | object     | no          | no     |
+
+**Thinking cannot be switched off on Gemini**, and thinking tokens compete with the answer for the
+output budget. Asked for 400 output tokens, a structured answer came back as `{"` after the model
+spent 568 tokens thinking; asked for 4096, the same call returned valid JSON. So every Gemini request
+adds a fixed headroom on top of what the caller asked for, and a model that does not think gets none.
+Without that rule, structured answers truncate at random.
+
+**The schema is guaranteed here, not there.** The request asks for structured output in whatever form
+the chosen model supports, but the answer is always parsed and validated locally. On the first live run
+the model returned `{"file": ...}` instead of the required shape, the local check caught it, one
+corrective round fixed it. There is exactly one repair attempt: a model that got it wrong twice will
+not get it right on the fourth try, and every attempt is billed.
+
+**Retries are for failures that could change.** A 429 or a 503 is retried with backoff and jitter, and
+`Retry-After` is believed over our own formula. A 400 or a 404 is not, because the request will be
+exactly as wrong the second time. Asking for a model that does not exist takes 51 milliseconds and one
+attempt.
+
+**Cancelling is not the same as timing out.** A user closing a tab, a session hitting its budget, or
+the agent changing its mind all stop the call, and a cancelled call is never retried.
+
+**Nothing about the conversation reaches the logs.** A prompt is the user's private source code, so
+what gets recorded is the model, the attempt, the status, the duration, and the token counts, and
+nothing else. Five tests capture every line the logger emits and assert a phrase from the prompt
+appears in none of them. Writing those tests found a real leak: the validation error message quoted a
+key from the model's answer, so failures are now logged as field paths and codes instead.
+
+**Money is treated as the estimate it is.** Token counts come from the provider and are exact; cost is
+a table lookup and says so. A model with no price in the table is charged the highest rate in the
+table rather than nothing, because free is the dangerous default. Sessions stop on tokens, on money,
+and on number of calls, all checked before a call rather than during one.
+
+**An image is described once, not made into a conversation.** A single screenshot cost 1208 image
+tokens on the live run. So vision takes one image and returns a bounded description, which then travels
+as ordinary text, and the system instruction tells the model that an image is untrusted material whose
+instructions must be reported rather than followed.
 
 ## Local fake-adapter mode _(not yet implemented)_
 
