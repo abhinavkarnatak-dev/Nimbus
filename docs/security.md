@@ -411,6 +411,46 @@ skipped as though the provider had failed.
 
 Owned by feature 026.
 
+## 10c. Durable agent state
+
+A checkpoint is a row in a database that outlives the process that wrote it, so anything sensitive in
+it is sensitive at rest, findable in a backup, long after it should have been gone.
+
+**Three independent defences keep credentials out.** The state schema has no field capable of holding
+a token, and a sandbox is referenced by id rather than by object. Field names are checked recursively,
+including inside arrays, so anything named `token`, `apiKey`, `secret`, `password`, `credentials`,
+`authorization`, `cookie`, `privateKey`, `client`, `connection`, `socket` or `db` is refused; whole
+normalised names are compared, so a counter named `tokensUsed` is unaffected. Finally the serialized
+bytes are scanned with the same detector the logger uses, plus an explicit connection string pattern.
+
+**A refusal, never a redaction.** Unlike a log line, a state with a value removed is one the agent
+would resume from and act on. A write carrying anything credential shaped fails and stores nothing.
+
+**Only plain data is accepted.** A class instance, a `Map`, a `Date` or a function is refused, which
+removes the path by which a live client, connection or sandbox handle could be captured into state.
+
+**Everything is bounded.** Every array and string has a maximum in the schema, the whole serialized
+state is capped at 256 KB, and the state drops its oldest tool events and file reads as it runs, so a
+long session cannot grow past the cap and then fail to save.
+
+**Resuming is refused when it would be wrong.** A checkpoint is rejected if it was written under a
+different state version, if it records a different base commit, or if it is older than a day. State is
+never migrated across a code change. Corruption, meaning unreadable bytes or json not shaped like a
+checkpoint, raises a named error and returns nothing, so a partly rebuilt state is never handed back.
+
+**Sessions are isolated.** Every checkpoint query is keyed by thread and namespace, where the thread is
+the session id, and an integration test proves one session cannot read another's checkpoints.
+
+**Four budgets bound a run**: steps, retries, tokens and time. Each is checked before work begins so a
+refusal leaves nothing half done, and the stop names the budget that ran out. The token budget is
+stored in the state and restored on resume, and refuses a record kept under different limits, so
+spending cannot reset itself across a restart.
+
+Checkpoints expire after a day, enforced on read and by a TTL index, and a finished session's
+checkpoints can be removed outright.
+
+Owned by feature 028.
+
 ## 11. Rate limiting and abuse control
 
 Limits apply per IP, per account, per session, and globally, covering authentication attempts,

@@ -13,6 +13,7 @@ export * from './push.js';
 export * from './retrieval.js';
 export * from './llm.js';
 export * from './routing.js';
+export * from './agent.js';
 export * from './pull-request.js';
 export * from './sessions.js';
 export * from './events.js';

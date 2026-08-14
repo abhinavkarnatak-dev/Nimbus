@@ -860,6 +860,40 @@ can search again for it, then attachments, then image descriptions. The task is 
 **Stopping safely means stopping before starting.** A call that would take a session past its token,
 money, or call limit is refused rather than begun, so there is never a half spent state.
 
+## What the agent remembers
+
+A session runs for minutes, spends real money, rents a real machine, and ends by opening a pull
+request. Backends restart and deploys happen, so what the agent knows has to be written down somewhere
+that survives the process.
+
+```bash
+pnpm demo:agent-state
+```
+
+**The shape is the limit.** The state is one strict schema with a maximum on every array and every
+string. A state that does not parse is never written, and one that does not parse coming back is never
+resumed, so a damaged checkpoint fails the same way whether the damage happened in the database, in
+transit, or in a bug of ours.
+
+**It cannot hold a credential, checked three ways.** There is no field for a token. Any field _named_
+like one is refused wherever it appears, nested or in an array, while a count called `tokensUsed` is
+fine because the check is on whole names. And the bytes are scanned before every write with the same
+detector the logs use.
+
+**It refuses rather than redacts**, which is the opposite of what the logger does. A log line with a
+hole in it is still a useful log line. A state with a hole in it is a lie the agent would then resume
+from and act on.
+
+**It refuses to resume when resuming would be wrong.** A checkpoint written by a different version of
+the code, or from a different base commit, or more than a day old, is refused rather than migrated.
+Migrating agent state across a code change gives you a session that is half one version and half
+another; one abandoned session starting over is much the cheaper failure.
+
+**Four budgets, because there are four ways to run away**: steps that never converge, one action
+retried forever, tokens, and time. Each is checked before the work rather than after, and the session
+says which one stopped it. The token budget is stored with the state and restored on resume, since a
+resumed session with a fresh budget has no budget at all.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,

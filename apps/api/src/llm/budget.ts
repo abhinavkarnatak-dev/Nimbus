@@ -85,6 +85,23 @@ export class SessionBudget {
     }
   }
 
+  restore(state: BudgetState): void {
+    if (
+      state.tokenLimit !== this.limits.tokenLimit ||
+      state.microCentLimit !== this.limits.microCentLimit ||
+      state.callLimit !== this.limits.callLimit
+    ) {
+      throw new LlmError(
+        'LLM_REQUEST_INVALID',
+        'That spending record was kept under different limits.',
+      );
+    }
+
+    this.tokensUsed = state.tokensUsed;
+    this.microCentsUsed = state.microCentsUsed;
+    this.calls = state.calls;
+  }
+
   charge(report: CallReport): BudgetState {
     this.tokensUsed += report.usage.totalTokens;
     this.microCentsUsed += report.cost.microCents;
