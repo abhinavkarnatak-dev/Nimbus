@@ -23,6 +23,9 @@ import { GitHubWebhookService } from './github/webhook-service.js';
 import { createAttachSession } from './http/middleware/session.js';
 import { createAttachmentsRouter } from './http/routes/attachments.js';
 import { createSessionsRouter } from './http/routes/sessions.js';
+import { EventHub, listenForEvents } from './events/hub.js';
+import { LiveEventPublisher } from './events/publisher.js';
+import { MongoEventStore } from './events/store.js';
 import { createRoutedTextProvider } from './llm/factory.js';
 import { Orchestrator } from './orchestrator/orchestrator.js';
 import { LiveSessionWorkshop } from './orchestrator/live-workshop.js';
@@ -258,6 +261,9 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
 
   logger.info({ agentSessions: repositories !== null }, 'Agent sessions ready');
 
+  const eventStore = new MongoEventStore(handle.db);
+  const events = new LiveEventPublisher({ store: eventStore, redis, logger });
+
   const orchestrator =
     repositories === null || githubTokens === null
       ? null
@@ -286,6 +292,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
               logger,
             }),
             logger,
+            events,
             notifyEmailFor: async (session) => emailOf(handle.db, session.userId),
           }),
         });
@@ -331,6 +338,21 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     attachSession: createAttachSession(sessions, config.isProduction),
   });
   const server = createHttpServer(app);
+
+  const hub = new EventHub({
+    server,
+    redis,
+    store: eventStore,
+    sessions,
+    records: sessionRecords,
+    logger,
+    allowedOrigin: config.api.webOrigin,
+    isProduction: config.isProduction,
+  });
+
+  hub.start();
+  const eventListener = await listenForEvents(redis, hub, logger);
+
   const port = await listenAsync(server, options.port ?? config.api.port, config.api.host);
 
   logger.info({ host: config.api.host, port, environment: config.env }, 'Nimbus API is listening');
@@ -341,6 +363,8 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     shuttingDown ??= (async () => {
       logger.info({ reason }, 'Shutting down');
       await orchestrator?.stop();
+      await hub.stop();
+      eventListener.disconnect();
       sweeper?.stop();
       attachmentSweeper?.stop();
       attachmentStore?.destroy();

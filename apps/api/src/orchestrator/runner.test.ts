@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { CollectingEventPublisher } from '../events/publisher.js';
 import { SANDBOX_ENV } from '../sandbox/spec.js';
 import { changedFiles, SessionRunner } from './runner.js';
 import {
@@ -171,6 +172,84 @@ describe('the sandbox never holds a credential', () => {
     await held.runner.run(sessionDocument(), new AbortController().signal);
 
     expect(held.push.calls[0]?.installationId).toBe(4_242);
+  });
+});
+
+describe('what a run says while it happens', () => {
+  function talking(options: { answers?: readonly { value: unknown }[] } = {}): {
+    runner: SessionRunner;
+    events: CollectingEventPublisher;
+    push: RecordingPushGateway;
+    pullRequests: RecordingPullRequestGateway;
+  } {
+    const captured = orchestratorLogger();
+    const events = new CollectingEventPublisher();
+    const push = new RecordingPushGateway();
+    const pullRequests = new RecordingPullRequestGateway();
+
+    return {
+      events,
+      push,
+      pullRequests,
+      runner: new SessionRunner({
+        workshop: new FakeWorkshop({
+          logger: captured.logger,
+          answers: options.answers ?? FINISHING_ANSWERS,
+        }),
+        push,
+        pullRequests,
+        logger: captured.logger,
+        events,
+        notifyEmailFor: async () => Promise.resolve('person@example.com'),
+      }),
+    };
+  }
+
+  it('says it is starting before anything is rented', async () => {
+    const held = talking();
+    const session = sessionDocument();
+
+    await held.runner.run(session, new AbortController().signal);
+
+    expect(held.events.typesFor(session.sessionId)[0]).toBe('session.status');
+  });
+
+  it('reports every tool it ran and what changed', async () => {
+    const held = talking();
+    const session = sessionDocument();
+
+    await held.runner.run(session, new AbortController().signal);
+    const types = held.events.typesFor(session.sessionId);
+
+    expect(types).toContain('tool.completed');
+    expect(types).toContain('files.changed');
+    expect(types).toContain('checks.updated');
+  });
+
+  it('announces the pull request last', async () => {
+    const held = talking();
+    const session = sessionDocument();
+
+    await held.runner.run(session, new AbortController().signal);
+    const types = held.events.typesFor(session.sessionId);
+
+    expect(types[types.length - 1]).toBe('pr.created');
+  });
+
+  it('says why when it fails', async () => {
+    const held = talking({ answers: [CLEAR_SCOPE] });
+    const session = sessionDocument();
+
+    await held.runner.run(session, new AbortController().signal);
+
+    expect(held.events.typesFor(session.sessionId)).toContain('session.failed');
+  });
+
+  it('runs perfectly well with nobody listening', async () => {
+    const held = runnerFor();
+    const outcome = await held.runner.run(sessionDocument(), new AbortController().signal);
+
+    expect(outcome.status).toBe('pr_created');
   });
 });
 

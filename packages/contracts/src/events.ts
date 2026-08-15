@@ -151,9 +151,21 @@ export const CLIENT_EVENT_TYPES = ['session.subscribe', 'session.unsubscribe'] a
 
 export const ClientEventTypeSchema = z.enum(CLIENT_EVENT_TYPES);
 
+export const ClientMessageSchema = z.discriminatedUnion('type', [
+  z.strictObject({
+    type: z.literal('session.subscribe'),
+    payload: SubscribeSessionPayloadSchema,
+  }),
+  z.strictObject({
+    type: z.literal('session.unsubscribe'),
+    payload: UnsubscribeSessionPayloadSchema,
+  }),
+]);
+
 export type ServerEventType = z.infer<typeof ServerEventTypeSchema>;
 export type ServerEvent = z.infer<typeof ServerEventSchema>;
 export type SessionEventEnvelope = z.infer<typeof SessionEventEnvelopeSchema>;
 export type SubscribeSessionPayload = z.infer<typeof SubscribeSessionPayloadSchema>;
 export type UnsubscribeSessionPayload = z.infer<typeof UnsubscribeSessionPayloadSchema>;
 export type ClientEventType = z.infer<typeof ClientEventTypeSchema>;
+export type ClientMessage = z.infer<typeof ClientMessageSchema>;
