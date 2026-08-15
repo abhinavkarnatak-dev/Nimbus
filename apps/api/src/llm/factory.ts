@@ -8,6 +8,7 @@ import { GeminiVisionProvider } from './gemini.js';
 import { GroqTextProvider } from './groq.js';
 import { DEFAULT_TEXT_MODEL, DEFAULT_VISION_MODEL, findModel, type ModelFacts } from './models.js';
 import type { TextProvider, VisionProvider } from './provider.js';
+import { RoutedTextProvider } from './routed-text.js';
 
 export interface LlmFactoryOptions {
   config: LlmConfig;
@@ -58,6 +59,37 @@ export function createTextProvider(options: LlmFactoryOptions): TextProvider {
     return new GeminiTextProvider({ apiKey: key, logger, defaultModel: model });
   }
   return new GroqTextProvider({ apiKey: key, logger, defaultModel: model });
+}
+
+export function createRoutedTextProvider(options: LlmFactoryOptions): TextProvider {
+  const { config, logger } = options;
+  const model = chosenModel(config.defaultTextModel, DEFAULT_TEXT_MODEL);
+  const gemini = keyFor(config, 'gemini');
+  const groq = keyFor(config, 'groq');
+  const providers: TextProvider[] = [];
+
+  if (gemini !== null) {
+    providers.push(new GeminiTextProvider({ apiKey: gemini, logger }));
+  }
+
+  if (groq !== null) {
+    providers.push(new GroqTextProvider({ apiKey: groq, logger }));
+  }
+
+  if (providers.length === 0) {
+    logger.warn(
+      { model },
+      'no model provider has an API key, using the fake text provider for every role',
+    );
+    return new FakeTextProvider({ defaultModel: model, ...options.fakeText });
+  }
+
+  logger.info(
+    { providers: providers.map((one) => one.name), defaultModel: model },
+    'model providers ready',
+  );
+
+  return new RoutedTextProvider({ providers, defaultModel: model });
 }
 
 export function createVisionProvider(options: LlmFactoryOptions): VisionProvider {

@@ -1,4 +1,4 @@
-import type { SessionStatus } from '@nimbus/contracts';
+import type { CheckResult, FileChange, SessionFailure, SessionStatus } from '@nimbus/contracts';
 import type { Db } from 'mongodb';
 
 import {
@@ -6,6 +6,7 @@ import {
   isActiveSessionStatus,
   sessionsCollection,
   type SessionDocument,
+  type SessionPullRequestDocument,
 } from '../db/models/session.js';
 
 export const INSERT_OUTCOMES = ['created', 'same_request', 'already_active'] as const;
@@ -13,6 +14,19 @@ export const INSERT_OUTCOMES = ['created', 'same_request', 'already_active'] as 
 export type InsertOutcome = (typeof INSERT_OUTCOMES)[number];
 
 export const DUPLICATE_KEY = 11_000;
+
+export interface RunOutcome {
+  status: SessionStatus;
+  failure?: SessionFailure | null;
+  branch?: string | null;
+  baseCommitSha?: string | null;
+  sandboxId?: string | null;
+  pullRequest?: SessionPullRequestDocument | null;
+  step?: number;
+  currentActivity?: string | null;
+  filesChanged?: FileChange[];
+  checks?: CheckResult[];
+}
 
 export interface SessionRecords {
   insert(document: SessionDocument): Promise<InsertOutcome>;
@@ -26,6 +40,11 @@ export interface SessionRecords {
     status: SessionStatus,
     at: Date,
   ): Promise<SessionDocument | null>;
+  findClaimable(limit: number): Promise<SessionDocument[]>;
+  findById(sessionId: string): Promise<SessionDocument | null>;
+  recordOutcome(sessionId: string, outcome: RunOutcome, at: Date): Promise<SessionDocument | null>;
+  bumpRetry(sessionId: string, at: Date): Promise<number>;
+  isLive(sessionId: string): Promise<boolean>;
 }
 
 export function isDuplicateKey(error: unknown): boolean {
@@ -101,6 +120,51 @@ export class MongoSessionRecords implements SessionRecords {
     );
 
     return result ?? null;
+  }
+
+  async findClaimable(limit: number): Promise<SessionDocument[]> {
+    return sessionsCollection(this.db)
+      .find({ status: { $in: activeStatuses() } })
+      .sort({ createdAt: 1 })
+      .limit(limit)
+      .toArray();
+  }
+
+  async findById(sessionId: string): Promise<SessionDocument | null> {
+    return sessionsCollection(this.db).findOne({ sessionId });
+  }
+
+  async recordOutcome(
+    sessionId: string,
+    outcome: RunOutcome,
+    at: Date,
+  ): Promise<SessionDocument | null> {
+    const result = await sessionsCollection(this.db).findOneAndUpdate(
+      { sessionId, status: { $in: activeStatuses() } },
+      { $set: outcomeFields(outcome, at) },
+      { returnDocument: 'after' },
+    );
+
+    return result ?? null;
+  }
+
+  async bumpRetry(sessionId: string, at: Date): Promise<number> {
+    const result = await sessionsCollection(this.db).findOneAndUpdate(
+      { sessionId },
+      { $inc: { retryCount: 1 }, $set: { updatedAt: at } },
+      { returnDocument: 'after' },
+    );
+
+    return result?.retryCount ?? 0;
+  }
+
+  async isLive(sessionId: string): Promise<boolean> {
+    const found = await sessionsCollection(this.db).countDocuments(
+      { sessionId, status: { $in: activeStatuses() } },
+      { limit: 1 },
+    );
+
+    return found > 0;
   }
 }
 
@@ -183,8 +247,78 @@ export class InMemorySessionRecords implements SessionRecords {
     held.currentActivity = null;
     return Promise.resolve({ ...held });
   }
+
+  async findClaimable(limit: number): Promise<SessionDocument[]> {
+    return Promise.resolve(
+      this.documents
+        .filter((held) => isActiveSessionStatus(held.status))
+        .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())
+        .slice(0, limit),
+    );
+  }
+
+  async findById(sessionId: string): Promise<SessionDocument | null> {
+    return Promise.resolve(this.documents.find((held) => held.sessionId === sessionId) ?? null);
+  }
+
+  async recordOutcome(
+    sessionId: string,
+    outcome: RunOutcome,
+    at: Date,
+  ): Promise<SessionDocument | null> {
+    const held = this.documents.find(
+      (one) => one.sessionId === sessionId && isActiveSessionStatus(one.status),
+    );
+
+    if (held === undefined) {
+      return Promise.resolve(null);
+    }
+
+    Object.assign(held, outcomeFields(outcome, at));
+    return Promise.resolve({ ...held });
+  }
+
+  async bumpRetry(sessionId: string, at: Date): Promise<number> {
+    const held = this.documents.find((one) => one.sessionId === sessionId);
+
+    if (held === undefined) {
+      return Promise.resolve(0);
+    }
+
+    held.retryCount += 1;
+    held.updatedAt = at;
+    return Promise.resolve(held.retryCount);
+  }
+
+  async isLive(sessionId: string): Promise<boolean> {
+    return Promise.resolve(
+      this.documents.some(
+        (one) => one.sessionId === sessionId && isActiveSessionStatus(one.status),
+      ),
+    );
+  }
 }
 
 function activeStatuses(): SessionStatus[] {
   return [...ACTIVE_SESSION_STATUSES];
+}
+
+export function outcomeFields(outcome: RunOutcome, at: Date): Partial<SessionDocument> {
+  const terminal = !isActiveSessionStatus(outcome.status);
+
+  return {
+    status: outcome.status,
+    updatedAt: at,
+    lastActivityAt: at,
+    completedAt: terminal ? at : null,
+    ...(outcome.failure === undefined ? {} : { failure: outcome.failure }),
+    ...(outcome.branch === undefined ? {} : { branch: outcome.branch }),
+    ...(outcome.baseCommitSha === undefined ? {} : { baseCommitSha: outcome.baseCommitSha }),
+    ...(outcome.sandboxId === undefined ? {} : { sandboxId: outcome.sandboxId }),
+    ...(outcome.pullRequest === undefined ? {} : { pullRequest: outcome.pullRequest }),
+    ...(outcome.step === undefined ? {} : { step: outcome.step }),
+    ...(outcome.currentActivity === undefined ? {} : { currentActivity: outcome.currentActivity }),
+    ...(outcome.filesChanged === undefined ? {} : { filesChanged: outcome.filesChanged }),
+    ...(outcome.checks === undefined ? {} : { checks: outcome.checks }),
+  };
 }

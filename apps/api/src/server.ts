@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http';
 
 import type { Express } from 'express';
+import type { Db } from 'mongodb';
 
 import { createApp } from './app.js';
 import { MongoAttachmentRecords } from './attachments/repository.js';
@@ -22,8 +23,20 @@ import { GitHubWebhookService } from './github/webhook-service.js';
 import { createAttachSession } from './http/middleware/session.js';
 import { createAttachmentsRouter } from './http/routes/attachments.js';
 import { createSessionsRouter } from './http/routes/sessions.js';
+import { createRoutedTextProvider } from './llm/factory.js';
+import { Orchestrator } from './orchestrator/orchestrator.js';
+import { LiveSessionWorkshop } from './orchestrator/live-workshop.js';
+import { SessionRunner } from './orchestrator/runner.js';
+import { OctokitPullRequestClientFactory } from './pull-request/octokit-client.js';
+import { TrustedPullRequestGateway } from './pull-request/gateway.js';
+import { OctokitGitDataFactory } from './push/octokit-git-data.js';
+import { TrustedPushGateway } from './push/gateway.js';
 import { MongoSessionRecords } from './sessions/repository.js';
 import { AgentSessionService } from './sessions/service.js';
+import { usersCollection } from './db/models/user.js';
+import { E2bSandboxProvider } from './sandbox/e2b-provider.js';
+import { FakeSandboxProvider } from './sandbox/fake-provider.js';
+import type { SandboxProvider } from './sandbox/provider.js';
 import { createAuthRouter } from './http/routes/auth.js';
 import { createGitHubRouter } from './http/routes/github.js';
 import type { DependencyCheck } from './http/routes/health.js';
@@ -112,6 +125,24 @@ export function createHttpServer(app: Express): Server {
   return server;
 }
 
+export function createSandboxProvider(config: AppConfig, logger: Logger): SandboxProvider {
+  if (config.sandbox.provider === 'e2b' && config.sandbox.apiKey !== undefined) {
+    return new E2bSandboxProvider(new LiveE2bClient(config.sandbox.apiKey));
+  }
+
+  logger.warn({ provider: config.sandbox.provider }, 'no real sandbox is configured, using a fake');
+  return new FakeSandboxProvider({ files: {} });
+}
+
+export async function emailOf(db: Db, userId: string): Promise<string> {
+  const user = await usersCollection(db).findOne({ userId });
+
+  if (user === null) {
+    throw new Error(`no user called ${userId}`);
+  }
+  return user.email;
+}
+
 export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   const { config, logger } = options;
 
@@ -163,9 +194,11 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
 
   const routers = [authRouter];
   let repositories: InstallationService | null = null;
+  let githubTokens: GitHubAppTokenProvider | null = null;
 
   if (config.github !== null) {
     const tokens = new GitHubAppTokenProvider({ github: config.github, logger });
+    githubTokens = tokens;
     const installations = new InstallationService({
       redis,
       db: handle.db,
@@ -225,6 +258,41 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
 
   logger.info({ agentSessions: repositories !== null }, 'Agent sessions ready');
 
+  const orchestrator =
+    repositories === null || githubTokens === null
+      ? null
+      : new Orchestrator({
+          records: new MongoSessionRecords(handle.db),
+          leases: new LeaseManager(redis),
+          logger,
+          runner: new SessionRunner({
+            workshop: new LiveSessionWorkshop({
+              installations: repositories,
+              tokens: githubTokens,
+              sandboxes: createSandboxProvider(config, logger),
+              text: createRoutedTextProvider({ config: config.llm, logger }),
+              config,
+              logger,
+            }),
+            push: new TrustedPushGateway({
+              tokens: githubTokens,
+              gitData: new OctokitGitDataFactory(),
+              logger,
+            }),
+            pullRequests: new TrustedPullRequestGateway({
+              tokens: githubTokens,
+              clients: new OctokitPullRequestClientFactory(),
+              mail,
+              logger,
+            }),
+            logger,
+            notifyEmailFor: async (session) => emailOf(handle.db, session.userId),
+          }),
+        });
+
+  orchestrator?.start();
+  logger.info({ orchestrator: orchestrator !== null }, 'Session orchestrator ready');
+
   const attachmentSweeper =
     attachments === null
       ? null
@@ -237,12 +305,15 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   attachmentSweeper?.start();
   logger.info({ attachmentUploads: attachments !== null }, 'Attachment storage ready');
 
+  const sessionRecords = new MongoSessionRecords(handle.db);
+
   const sweeper =
     config.sandbox.provider === 'e2b' && config.sandbox.apiKey !== undefined
       ? new SandboxSweeper({
           client: new LiveE2bClient(config.sandbox.apiKey),
           logger,
           withLock: leaseLock(new LeaseManager(redis)),
+          isSessionLive: async (sessionId: string) => sessionRecords.isLive(sessionId),
         })
       : null;
 
@@ -269,6 +340,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   const shutdown = (reason: string): Promise<void> => {
     shuttingDown ??= (async () => {
       logger.info({ reason }, 'Shutting down');
+      await orchestrator?.stop();
       sweeper?.stop();
       attachmentSweeper?.stop();
       attachmentStore?.destroy();

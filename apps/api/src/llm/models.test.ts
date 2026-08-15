@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createTextProvider, createVisionProvider } from './factory.js';
+import { createRoutedTextProvider, createTextProvider, createVisionProvider } from './factory.js';
 import { capturingLogger } from './llm.fixtures.js';
 import {
   DEFAULT_GEMINI_TEXT_MODEL,
@@ -15,6 +15,7 @@ import {
   ratesFor,
 } from './models.js';
 import { costOf } from './provider.js';
+import { RoutedTextProvider } from './routed-text.js';
 
 describe('KNOWN_MODELS', () => {
   it('has no duplicate ids', () => {
@@ -212,6 +213,32 @@ describe('the factory', () => {
     expect(() =>
       createVisionProvider({ config: { defaultVisionModel: 'openai/gpt-oss-120b' }, logger }),
     ).toThrow(expect.objectContaining({ code: 'LLM_MODEL_UNKNOWN' }) as Error);
+  });
+
+  it('routes across every provider that has a key, because a plan spans them', () => {
+    const { logger } = capturingLogger();
+    const text = createRoutedTextProvider({
+      config: { geminiApiKey: 'AIza'.repeat(6), groqApiKey: 'gsk_x'.repeat(6) },
+      logger,
+    });
+
+    expect(text.real).toBe(true);
+    expect(text).toBeInstanceOf(RoutedTextProvider);
+  });
+
+  it('still works with one provider configured', () => {
+    const { logger } = capturingLogger();
+    const text = createRoutedTextProvider({ config: { geminiApiKey: 'AIza'.repeat(6) }, logger });
+
+    expect(text.real).toBe(true);
+  });
+
+  it('falls back to a fake when nothing is configured, and says so', () => {
+    const captured = capturingLogger();
+    const text = createRoutedTextProvider({ config: {}, logger: captured.logger });
+
+    expect(text.real).toBe(false);
+    expect(captured.text()).toContain('no model provider has an API key');
   });
 
   it('defaults to the model the project chose', () => {
