@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import { ApprovalDecisionBodySchema, type ApprovalDecisionBody } from '@nimbus/contracts';
+
+import { InMemoryApprovals } from '../agent/policy/approvals.js';
 import { ApiError } from '../http/api-error.js';
 import {
   CLEAR_TASK,
@@ -316,6 +319,171 @@ describe('somebody else asking', () => {
     const harness = sessionHarness();
 
     expect(await codeOf(harness.service.detail(OWNER_ID, testId('ses', 'z')))).toBe('NOT_FOUND');
+  });
+});
+
+describe('answering a question', () => {
+  async function asked(): Promise<{ harness: ReturnType<typeof sessionHarness>; id: string }> {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+
+    await harness.records.askQuestion(
+      created.session.sessionId,
+      'Which page should people land on?',
+      new Date(),
+    );
+
+    return { harness, id: created.session.sessionId };
+  }
+
+  it('is written onto the session, so the next run can read it', async () => {
+    const { harness, id } = await asked();
+    await harness.service.answer(OWNER_ID, id, 'the dashboard');
+
+    expect(harness.records.documents[0]?.clarificationAnswer).toBe('the dashboard');
+  });
+
+  it('is refused a second time, and the first answer stands', async () => {
+    const { harness, id } = await asked();
+    await harness.service.answer(OWNER_ID, id, 'the dashboard');
+
+    expect(await codeOf(harness.service.answer(OWNER_ID, id, 'somewhere else'))).toBe('CONFLICT');
+    expect(harness.records.documents[0]?.clarificationAnswer).toBe('the dashboard');
+  });
+
+  it('is refused when nothing was ever asked', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+
+    expect(await codeOf(harness.service.answer(OWNER_ID, created.session.sessionId, 'hi'))).toBe(
+      'SESSION_NOT_ACTIVE',
+    );
+  });
+
+  it('is refused for somebody else, and told it does not exist', async () => {
+    const { harness, id } = await asked();
+
+    expect(await codeOf(harness.service.answer(OTHER_ID, id, 'mine now'))).toBe('NOT_FOUND');
+    expect(harness.records.documents[0]?.clarificationAnswer).toBeNull();
+  });
+
+  it('is refused once the session has ended', async () => {
+    const { harness, id } = await asked();
+    await harness.service.cancel(OWNER_ID, id);
+
+    expect(await codeOf(harness.service.answer(OWNER_ID, id, 'too late'))).toBe('CONFLICT');
+  });
+});
+
+describe('sending a message', () => {
+  it('is kept on the session', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+
+    await harness.service.say(OWNER_ID, created.session.sessionId, 'try the other file');
+
+    expect(harness.records.documents[0]?.messages).toHaveLength(1);
+    expect(harness.records.documents[0]?.messages[0]?.text).toBe('try the other file');
+  });
+
+  it('is refused once the session has ended', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+    await harness.service.cancel(OWNER_ID, created.session.sessionId);
+
+    expect(await codeOf(harness.service.say(OWNER_ID, created.session.sessionId, 'hello'))).toBe(
+      'SESSION_NOT_ACTIVE',
+    );
+  });
+
+  it('is refused for somebody else', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+
+    expect(await codeOf(harness.service.say(OTHER_ID, created.session.sessionId, 'hello'))).toBe(
+      'NOT_FOUND',
+    );
+  });
+});
+
+describe('deciding an approval', () => {
+  const EFFECT = {
+    category: 'protected_path_change' as const,
+    summary: 'apply_patch: that path is protected',
+    paths: ['src/auth/session.ts'],
+    reason: 'that path is protected',
+    risk: 'high' as const,
+  };
+
+  const HASH = 'a'.repeat(64);
+
+  function decision(
+    approvalId: string,
+    actionHash: string,
+    choice: 'approved' | 'rejected' = 'approved',
+  ): ApprovalDecisionBody {
+    return ApprovalDecisionBodySchema.parse({ approvalId, actionHash, decision: choice });
+  }
+
+  async function waiting(): Promise<{
+    harness: ReturnType<typeof sessionHarness>;
+    id: string;
+    approvalId: string;
+  }> {
+    const approvals = new InMemoryApprovals();
+    const harness = sessionHarness({ approvals: () => approvals });
+    const created = await harness.service.create(OWNER_ID, newBody());
+    const card = await approvals.request(HASH, EFFECT);
+
+    return { harness, id: created.session.sessionId, approvalId: card.approvalId };
+  }
+
+  it('approves a card whose hash matches', async () => {
+    const held = await waiting();
+    const decided = await held.harness.service.decide(
+      OWNER_ID,
+      held.id,
+      decision(held.approvalId, HASH),
+    );
+
+    expect(decided.status).toBe('approved');
+  });
+
+  it('refuses one whose action was altered', async () => {
+    const held = await waiting();
+
+    expect(
+      await codeOf(
+        held.harness.service.decide(OWNER_ID, held.id, decision(held.approvalId, 'b'.repeat(64))),
+      ),
+    ).toBe('APPROVAL_MISMATCH');
+  });
+
+  it('refuses one nobody asked for', async () => {
+    const held = await waiting();
+
+    expect(
+      await codeOf(
+        held.harness.service.decide(OWNER_ID, held.id, decision('apr_zzzzzzzzzzzzzzzzzzzzz', HASH)),
+      ),
+    ).toBe('APPROVAL_NOT_FOUND');
+  });
+
+  it('refuses somebody else deciding it', async () => {
+    const held = await waiting();
+
+    expect(
+      await codeOf(held.harness.service.decide(OTHER_ID, held.id, decision(held.approvalId, HASH))),
+    ).toBe('NOT_FOUND');
+  });
+
+  it('refuses once the session has ended', async () => {
+    const held = await waiting();
+    await held.harness.service.cancel(OWNER_ID, held.id);
+
+    expect(
+      await codeOf(held.harness.service.decide(OWNER_ID, held.id, decision(held.approvalId, HASH))),
+    ).toBe('SESSION_NOT_ACTIVE');
   });
 });
 

@@ -1,8 +1,12 @@
 import {
+  ApprovalRecordSchema,
   LIMITS,
   SessionDetailResponseSchema,
   SessionListResponseSchema,
+  type ApprovalDecisionBody,
+  type ApprovalRecord,
   type CreateSessionBody,
+  type ErrorCode,
   type RepositorySummary,
   type SessionDetailResponse,
   type SessionListResponse,
@@ -10,6 +14,7 @@ import {
 } from '@nimbus/contracts';
 
 import { tooThinToJudge } from '../agent/nodes/scope.js';
+import { ApprovalError, InMemoryApprovals, type ApprovalStore } from '../agent/policy/approvals.js';
 import type { AttachmentRecords } from '../attachments/repository.js';
 import {
   SESSION_ID_PREFIX,
@@ -36,8 +41,28 @@ export interface AgentSessionServiceOptions {
   attachments: AttachmentRecords;
   repositories: RepositoryDirectory;
   logger: Logger;
+  approvalsFor?: (sessionId: string) => ApprovalStore;
   maxSteps?: number;
   now?: () => Date;
+}
+
+export const APPROVAL_ERROR_TO_API: Readonly<Record<string, ErrorCode>> = {
+  APPROVAL_NOT_FOUND: 'APPROVAL_NOT_FOUND',
+  APPROVAL_EXPIRED: 'APPROVAL_EXPIRED',
+  APPROVAL_MISMATCH: 'APPROVAL_MISMATCH',
+  APPROVAL_REJECTED: 'APPROVAL_MISMATCH',
+  APPROVAL_ALREADY_USED: 'APPROVAL_EXPIRED',
+  APPROVAL_LIMIT_REACHED: 'CONFLICT',
+};
+
+export function asApiError(error: unknown): ApiError {
+  if (!(error instanceof ApprovalError)) {
+    return error instanceof ApiError
+      ? error
+      : new ApiError('INTERNAL_ERROR', 'That approval could not be decided.');
+  }
+
+  return new ApiError(APPROVAL_ERROR_TO_API[error.code] ?? 'CONFLICT', error.message);
 }
 
 export interface CreatedSession {
@@ -56,6 +81,8 @@ export class AgentSessionService {
 
   readonly #maxSteps: number;
 
+  readonly #approvalsFor: (sessionId: string) => ApprovalStore;
+
   readonly #now: () => Date;
 
   constructor(options: AgentSessionServiceOptions) {
@@ -64,6 +91,7 @@ export class AgentSessionService {
     this.#repositories = options.repositories;
     this.#logger = options.logger;
     this.#maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
+    this.#approvalsFor = options.approvalsFor ?? ((): ApprovalStore => new InMemoryApprovals());
     this.#now = options.now ?? ((): Date => new Date());
   }
 
@@ -134,6 +162,78 @@ export class AgentSessionService {
 
     this.#logger.info({ sessionId, was: document.status }, 'a session was cancelled');
     return toSessionSummary(stopped);
+  }
+
+  async answer(userId: string, sessionId: string, text: string): Promise<SessionSummary> {
+    const document = await this.#owned(userId, sessionId);
+
+    if (document.clarificationQuestion === null) {
+      throw new ApiError('SESSION_NOT_ACTIVE', 'That session has not asked you anything.');
+    }
+
+    const written = await this.#records.answerOnce(userId, sessionId, text, this.#now());
+
+    if (!written) {
+      throw new ApiError(
+        'CONFLICT',
+        document.clarificationAnswer === null
+          ? 'That session is no longer waiting for an answer.'
+          : 'That question has already been answered.',
+      );
+    }
+
+    this.#logger.info({ sessionId }, 'a question was answered');
+    return toSessionSummary(await this.#owned(userId, sessionId));
+  }
+
+  async say(userId: string, sessionId: string, text: string): Promise<SessionSummary> {
+    await this.#owned(userId, sessionId);
+    const written = await this.#records.addMessage(userId, sessionId, text, this.#now());
+
+    if (!written) {
+      throw new ApiError('SESSION_NOT_ACTIVE', 'That session has already finished.');
+    }
+
+    return toSessionSummary(await this.#owned(userId, sessionId));
+  }
+
+  async decide(
+    userId: string,
+    sessionId: string,
+    body: ApprovalDecisionBody,
+  ): Promise<ApprovalRecord> {
+    const document = await this.#owned(userId, sessionId);
+
+    if (!isActiveSessionStatus(document.status)) {
+      throw new ApiError('SESSION_NOT_ACTIVE', 'That session has already finished.');
+    }
+
+    const approvals = this.#approvalsFor(sessionId);
+
+    try {
+      const decided = await approvals.decide(
+        body.approvalId,
+        body.actionHash,
+        body.decision === 'approved',
+      );
+
+      this.#logger.info(
+        { sessionId, approvalId: body.approvalId, decision: body.decision },
+        'an approval was decided by a person',
+      );
+
+      return ApprovalRecordSchema.parse({
+        approvalId: decided.approvalId,
+        actionHash: decided.actionHash,
+        effect: decided.effect,
+        status: decided.status,
+        requestedAt: decided.requestedAt,
+        expiresAt: decided.expiresAt,
+        ...(decided.decidedAt === undefined ? {} : { decidedAt: decided.decidedAt }),
+      });
+    } catch (error) {
+      throw asApiError(error);
+    }
   }
 
   async #owned(userId: string, sessionId: string): Promise<SessionDocument> {
@@ -242,6 +342,9 @@ export class AgentSessionService {
       branch: null,
       baseCommitSha: null,
       task: input.body.task,
+      clarificationQuestion: null,
+      clarificationAnswer: null,
+      messages: [],
       attachments: input.attachments,
       idempotencyKey: input.body.idempotencyKey,
       checkpointId: null,

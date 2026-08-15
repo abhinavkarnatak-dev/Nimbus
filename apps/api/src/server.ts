@@ -34,6 +34,7 @@ import { OctokitPullRequestClientFactory } from './pull-request/octokit-client.j
 import { TrustedPullRequestGateway } from './pull-request/gateway.js';
 import { OctokitGitDataFactory } from './push/octokit-git-data.js';
 import { TrustedPushGateway } from './push/gateway.js';
+import { MongoApprovals } from './sessions/approvals.js';
 import { MongoSessionRecords } from './sessions/repository.js';
 import { AgentSessionService } from './sessions/service.js';
 import { usersCollection } from './db/models/user.js';
@@ -254,6 +255,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
           attachments: new MongoAttachmentRecords(handle.db),
           repositories,
           logger,
+          approvalsFor: (sessionId) => new MongoApprovals({ db: handle.db, sessionId }),
         }),
       }),
     );
@@ -261,6 +263,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
 
   logger.info({ agentSessions: repositories !== null }, 'Agent sessions ready');
 
+  const sessionRecords = new MongoSessionRecords(handle.db);
   const eventStore = new MongoEventStore(handle.db);
   const events = new LiveEventPublisher({ store: eventStore, redis, logger });
 
@@ -273,6 +276,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
           logger,
           runner: new SessionRunner({
             workshop: new LiveSessionWorkshop({
+              db: handle.db,
               installations: repositories,
               tokens: githubTokens,
               sandboxes: createSandboxProvider(config, logger),
@@ -293,6 +297,9 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
             }),
             logger,
             events,
+            records: sessionRecords,
+            approvalsFor: (sessionId) => new MongoApprovals({ db: handle.db, sessionId }),
+            mail,
             notifyEmailFor: async (session) => emailOf(handle.db, session.userId),
           }),
         });
@@ -311,8 +318,6 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
 
   attachmentSweeper?.start();
   logger.info({ attachmentUploads: attachments !== null }, 'Attachment storage ready');
-
-  const sessionRecords = new MongoSessionRecords(handle.db);
 
   const sweeper =
     config.sandbox.provider === 'e2b' && config.sandbox.apiKey !== undefined

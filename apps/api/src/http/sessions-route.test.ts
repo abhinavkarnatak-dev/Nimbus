@@ -228,6 +228,143 @@ describe('GET /sessions/:sessionId', () => {
   });
 });
 
+describe('POST /sessions/:sessionId/answer', () => {
+  it('takes the answer to a question the session asked', async () => {
+    const app = harness();
+    const started = await start(app);
+    await records.askQuestion(started.sessionId, 'Which page?', new Date());
+
+    const response = await request(app)
+      .post(`/sessions/${started.sessionId}/answer`)
+      .set('Cookie', COOKIE)
+      .set(CSRF_HEADER, CSRF_TOKEN)
+      .send({ message: 'the dashboard' });
+
+    expect(response.status).toBe(202);
+    expect(records.documents[0]?.clarificationAnswer).toBe('the dashboard');
+  });
+
+  it('refuses a second answer', async () => {
+    const app = harness();
+    const started = await start(app);
+    await records.askQuestion(started.sessionId, 'Which page?', new Date());
+
+    const send = async (): Promise<number> =>
+      (
+        await request(app)
+          .post(`/sessions/${started.sessionId}/answer`)
+          .set('Cookie', COOKIE)
+          .set(CSRF_HEADER, CSRF_TOKEN)
+          .send({ message: 'the dashboard' })
+      ).status;
+
+    expect(await send()).toBe(202);
+    expect(await send()).toBe(409);
+  });
+
+  it('needs the csrf token', async () => {
+    const app = harness();
+    const started = await start(app);
+
+    const response = await request(app)
+      .post(`/sessions/${started.sessionId}/answer`)
+      .set('Cookie', COOKIE)
+      .send({ message: 'the dashboard' });
+
+    expect(response.status).toBe(403);
+  });
+
+  it('refuses an empty answer', async () => {
+    const app = harness();
+    const started = await start(app);
+
+    const response = await request(app)
+      .post(`/sessions/${started.sessionId}/answer`)
+      .set('Cookie', COOKIE)
+      .set(CSRF_HEADER, CSRF_TOKEN)
+      .send({ message: '   ' });
+
+    expect(response.status).toBe(400);
+  });
+});
+
+describe('POST /sessions/:sessionId/messages', () => {
+  it('keeps what the user said', async () => {
+    const app = harness();
+    const started = await start(app);
+
+    const response = await request(app)
+      .post(`/sessions/${started.sessionId}/messages`)
+      .set('Cookie', COOKIE)
+      .set(CSRF_HEADER, CSRF_TOKEN)
+      .send({ message: 'try the other file' });
+
+    expect(response.status).toBe(202);
+    expect(records.documents[0]?.messages[0]?.text).toBe('try the other file');
+  });
+
+  it('tells another person the session does not exist', async () => {
+    const started = await start(harness());
+
+    const response = await request(harness({ user: OTHER_USER }))
+      .post(`/sessions/${started.sessionId}/messages`)
+      .set('Cookie', COOKIE)
+      .set(CSRF_HEADER, CSRF_TOKEN)
+      .send({ message: 'hello' });
+
+    expect(response.status).toBe(404);
+  });
+});
+
+describe('POST /sessions/:sessionId/approvals', () => {
+  it('refuses a body that is not a decision', async () => {
+    const app = harness();
+    const started = await start(app);
+
+    const response = await request(app)
+      .post(`/sessions/${started.sessionId}/approvals`)
+      .set('Cookie', COOKIE)
+      .set(CSRF_HEADER, CSRF_TOKEN)
+      .send({ approvalId: 'nope', decision: 'approved' });
+
+    expect(response.status).toBe(400);
+  });
+
+  it('answers not found for an approval nobody asked for', async () => {
+    const app = harness();
+    const started = await start(app);
+
+    const response = await request(app)
+      .post(`/sessions/${started.sessionId}/approvals`)
+      .set('Cookie', COOKIE)
+      .set(CSRF_HEADER, CSRF_TOKEN)
+      .send({
+        approvalId: `apr_${'z'.repeat(21)}`,
+        actionHash: 'a'.repeat(64),
+        decision: 'approved',
+      });
+
+    expect(response.status).toBe(404);
+    expect(response.body).toMatchObject({ error: { code: 'APPROVAL_NOT_FOUND' } });
+  });
+
+  it('needs the csrf token', async () => {
+    const app = harness();
+    const started = await start(app);
+
+    const response = await request(app)
+      .post(`/sessions/${started.sessionId}/approvals`)
+      .set('Cookie', COOKIE)
+      .send({
+        approvalId: `apr_${'z'.repeat(21)}`,
+        actionHash: 'a'.repeat(64),
+        decision: 'approved',
+      });
+
+    expect(response.status).toBe(403);
+  });
+});
+
 describe('POST /sessions/:sessionId/cancel', () => {
   it('cancels one that is running', async () => {
     const app = harness();

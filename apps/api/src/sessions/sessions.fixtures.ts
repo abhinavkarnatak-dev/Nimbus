@@ -5,6 +5,7 @@ import {
   type RepositorySummary,
 } from '@nimbus/contracts';
 
+import type { ApprovalStore } from '../agent/policy/approvals.js';
 import { InMemoryAttachmentRecords } from '../attachments/repository.js';
 import type { AttachmentDocument } from '../db/models/attachment.js';
 import { capturingLogger } from '../llm/llm.fixtures.js';
@@ -111,7 +112,11 @@ export interface SessionHarness {
 }
 
 export function sessionHarness(
-  options: { repositories?: RepositorySummary[]; now?: () => Date } = {},
+  options: {
+    repositories?: RepositorySummary[];
+    now?: () => Date;
+    approvals?: (sessionId: string) => ApprovalStore;
+  } = {},
 ): SessionHarness {
   const captured = capturingLogger();
   const records = new InMemorySessionRecords();
@@ -124,6 +129,7 @@ export function sessionHarness(
       attachments,
       repositories: directory,
       logger: captured.logger,
+      ...(options.approvals === undefined ? {} : { approvalsFor: options.approvals }),
       ...(options.now === undefined ? {} : { now: options.now }),
     }),
     records,

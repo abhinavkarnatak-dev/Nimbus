@@ -9,6 +9,7 @@ import {
   pullRequestReadyTemplate,
   type PullRequestReadyData,
 } from './templates/pull-request-ready.js';
+import { sessionEndedTemplate, type SessionEndedData } from './templates/session-ended.js';
 
 export interface CreateMailerOptions {
   config: AppConfig;
@@ -48,6 +49,10 @@ export class MailService {
 
   async sendPullRequestReady(to: string, data: PullRequestReadyData): Promise<SendResult> {
     return this.sendTemplate(to, pullRequestReadyTemplate, data);
+  }
+
+  async sendSessionEnded(to: string, data: SessionEndedData): Promise<SendResult> {
+    return this.sendTemplate(to, sessionEndedTemplate, data);
   }
 
   async close(): Promise<void> {

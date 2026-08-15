@@ -51,6 +51,8 @@ import {
 
 export const SESSION_ID_PREFIX = 'ses';
 
+export const MAX_USER_MESSAGES = 50;
+
 const terminalStatuses = new Set<string>(TERMINAL_SESSION_STATUSES);
 
 export const ACTIVE_SESSION_STATUSES: readonly SessionStatus[] = SESSION_STATUSES.filter(
@@ -84,6 +86,12 @@ export interface SessionApprovalDocument {
   requestedAt: Date;
   expiresAt: Date;
   decidedAt?: Date;
+  usedAt?: Date;
+}
+
+export interface SessionMessageDocument {
+  text: string;
+  sentAt: Date;
 }
 
 export interface SessionToolEventDocument {
@@ -112,6 +120,9 @@ export interface SessionDocument {
   branch: string | null;
   baseCommitSha: string | null;
   task: string;
+  clarificationQuestion: string | null;
+  clarificationAnswer: string | null;
+  messages: SessionMessageDocument[];
   attachments: SessionAttachmentDocument[];
   idempotencyKey: string;
   checkpointId: string | null;
@@ -250,6 +261,9 @@ export const sessionModel: ModelDefinition = {
         'branch',
         'baseCommitSha',
         'task',
+        'clarificationQuestion',
+        'clarificationAnswer',
+        'messages',
         'attachments',
         'idempotencyKey',
         'checkpointId',
@@ -311,6 +325,27 @@ export const sessionModel: ModelDefinition = {
           bsonType: 'string',
           minLength: LIMITS.taskMinChars,
           maxLength: LIMITS.taskMaxChars,
+        },
+        clarificationQuestion: {
+          bsonType: ['string', 'null'],
+          maxLength: LIMITS.messageMaxChars,
+        },
+        clarificationAnswer: {
+          bsonType: ['string', 'null'],
+          maxLength: LIMITS.clarificationAnswerMaxChars,
+        },
+        messages: {
+          bsonType: 'array',
+          maxItems: MAX_USER_MESSAGES,
+          items: {
+            bsonType: 'object',
+            additionalProperties: false,
+            required: ['text', 'sentAt'],
+            properties: {
+              text: { bsonType: 'string', minLength: 1, maxLength: LIMITS.messageMaxChars },
+              sentAt: { bsonType: 'date' },
+            },
+          },
         },
         attachments: {
           bsonType: 'array',
@@ -388,6 +423,7 @@ export const sessionModel: ModelDefinition = {
               requestedAt: { bsonType: 'date' },
               expiresAt: { bsonType: 'date' },
               decidedAt: { bsonType: 'date' },
+              usedAt: { bsonType: 'date' },
             },
           },
         },

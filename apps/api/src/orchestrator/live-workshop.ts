@@ -4,11 +4,12 @@ import type { ModelPlan } from '@nimbus/contracts';
 import { GitHubRepositorySource } from '../agent/clone/github.js';
 import { CommandRunner } from '../agent/commands/runner.js';
 import { ActionExecutor } from '../agent/execute/executor.js';
-import { InMemoryApprovals } from '../agent/policy/approvals.js';
+import { MongoApprovals } from '../sessions/approvals.js';
 import { PolicyGate } from '../agent/policy/policy.js';
 import { ToolRegistry } from '../agent/registry/registry.js';
-import { createState } from '../agent/state/state.js';
+import { createState, parseState } from '../agent/state/state.js';
 import type { AppConfig } from '../config/load.js';
+import type { Db } from 'mongodb';
 import type { SessionDocument } from '../db/models/session.js';
 import type { InstallationService } from '../github/installation-service.js';
 import type { GitHubTokenProvider, InstallationToken } from '../github/token-provider.js';
@@ -22,6 +23,7 @@ import { ORCHESTRATOR_LIMITS } from './limits.js';
 import { WorkshopError, type PreparedRun, type SessionWorkshop } from './workshop.js';
 
 export interface LiveWorkshopOptions {
+  db: Db;
   installations: InstallationService;
   tokens: GitHubTokenProvider;
   sandboxes: SandboxProvider;
@@ -66,18 +68,21 @@ export class LiveSessionWorkshop implements SessionWorkshop {
       logger: this.#options.logger,
     });
 
-    const state = createState({
-      sessionId: session.sessionId,
-      userId: session.userId,
-      repositoryId: session.repository.repositoryId,
-      installationId,
-      task: session.task,
-      attachmentIds: session.attachments.map((one) => one.attachmentId),
-      baseCommitSha: base,
-      defaultBranch: session.repository.defaultBranch,
-      models: plan,
-      budgets: { maxSteps: session.maxSteps || (this.#options.maxSteps ?? 40) },
-    });
+    const state = resumedState(
+      {
+        sessionId: session.sessionId,
+        userId: session.userId,
+        repositoryId: session.repository.repositoryId,
+        installationId,
+        task: session.task,
+        attachmentIds: session.attachments.map((one) => one.attachmentId),
+        baseCommitSha: base,
+        defaultBranch: session.repository.defaultBranch,
+        models: plan,
+        budgets: { maxSteps: session.maxSteps || (this.#options.maxSteps ?? 40) },
+      },
+      session,
+    );
 
     return {
       installationId,
@@ -93,7 +98,10 @@ export class LiveSessionWorkshop implements SessionWorkshop {
         executor: new ActionExecutor({
           registry,
           policy: new PolicyGate({
-            approvals: new InMemoryApprovals(),
+            approvals: new MongoApprovals({
+              db: this.#options.db,
+              sessionId: session.sessionId,
+            }),
             logger: this.#options.logger,
           }),
           logger: this.#options.logger,
@@ -160,3 +168,20 @@ export class LiveSessionWorkshop implements SessionWorkshop {
 }
 
 export const WORKSHOP_LEASE_SECONDS = ORCHESTRATOR_LIMITS.leaseSeconds;
+
+export function resumedState(
+  input: Parameters<typeof createState>[0],
+  session: SessionDocument,
+): ReturnType<typeof createState> {
+  const fresh = createState(input);
+
+  if (session.clarificationQuestion === null) {
+    return fresh;
+  }
+
+  return parseState({
+    ...fresh,
+    clarificationQuestion: session.clarificationQuestion,
+    clarificationAnswer: session.clarificationAnswer,
+  });
+}

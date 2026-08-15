@@ -3,6 +3,7 @@ import type { Db } from 'mongodb';
 
 import {
   ACTIVE_SESSION_STATUSES,
+  MAX_USER_MESSAGES,
   isActiveSessionStatus,
   sessionsCollection,
   type SessionDocument,
@@ -45,6 +46,9 @@ export interface SessionRecords {
   recordOutcome(sessionId: string, outcome: RunOutcome, at: Date): Promise<SessionDocument | null>;
   bumpRetry(sessionId: string, at: Date): Promise<number>;
   isLive(sessionId: string): Promise<boolean>;
+  answerOnce(userId: string, sessionId: string, answer: string, at: Date): Promise<boolean>;
+  addMessage(userId: string, sessionId: string, text: string, at: Date): Promise<boolean>;
+  askQuestion(sessionId: string, question: string, at: Date): Promise<void>;
 }
 
 export function isDuplicateKey(error: unknown): boolean {
@@ -165,6 +169,34 @@ export class MongoSessionRecords implements SessionRecords {
     );
 
     return found > 0;
+  }
+
+  async answerOnce(userId: string, sessionId: string, answer: string, at: Date): Promise<boolean> {
+    const changed = await sessionsCollection(this.db).updateOne(
+      { sessionId, userId, clarificationAnswer: null, status: { $in: activeStatuses() } },
+      { $set: { clarificationAnswer: answer, updatedAt: at, lastActivityAt: at } },
+    );
+
+    return changed.modifiedCount === 1;
+  }
+
+  async addMessage(userId: string, sessionId: string, text: string, at: Date): Promise<boolean> {
+    const changed = await sessionsCollection(this.db).updateOne(
+      { sessionId, userId, status: { $in: activeStatuses() } },
+      {
+        $push: { messages: { $each: [{ text, sentAt: at }], $slice: -MAX_USER_MESSAGES } },
+        $set: { updatedAt: at, lastActivityAt: at },
+      },
+    );
+
+    return changed.modifiedCount === 1;
+  }
+
+  async askQuestion(sessionId: string, question: string, at: Date): Promise<void> {
+    await sessionsCollection(this.db).updateOne(
+      { sessionId },
+      { $set: { clarificationQuestion: question, updatedAt: at, lastActivityAt: at } },
+    );
   }
 }
 
@@ -296,6 +328,52 @@ export class InMemorySessionRecords implements SessionRecords {
         (one) => one.sessionId === sessionId && isActiveSessionStatus(one.status),
       ),
     );
+  }
+
+  async answerOnce(userId: string, sessionId: string, answer: string, at: Date): Promise<boolean> {
+    const held = this.documents.find(
+      (one) =>
+        one.sessionId === sessionId &&
+        one.userId === userId &&
+        one.clarificationAnswer === null &&
+        isActiveSessionStatus(one.status),
+    );
+
+    if (held === undefined) {
+      return Promise.resolve(false);
+    }
+
+    held.clarificationAnswer = answer;
+    held.updatedAt = at;
+    held.lastActivityAt = at;
+    return Promise.resolve(true);
+  }
+
+  async addMessage(userId: string, sessionId: string, text: string, at: Date): Promise<boolean> {
+    const held = this.documents.find(
+      (one) =>
+        one.sessionId === sessionId && one.userId === userId && isActiveSessionStatus(one.status),
+    );
+
+    if (held === undefined) {
+      return Promise.resolve(false);
+    }
+
+    held.messages = [...held.messages, { text, sentAt: at }].slice(-MAX_USER_MESSAGES);
+    held.updatedAt = at;
+    held.lastActivityAt = at;
+    return Promise.resolve(true);
+  }
+
+  async askQuestion(sessionId: string, question: string, at: Date): Promise<void> {
+    const held = this.documents.find((one) => one.sessionId === sessionId);
+
+    if (held !== undefined) {
+      held.clarificationQuestion = question;
+      held.updatedAt = at;
+      held.lastActivityAt = at;
+    }
+    return Promise.resolve();
   }
 }
 

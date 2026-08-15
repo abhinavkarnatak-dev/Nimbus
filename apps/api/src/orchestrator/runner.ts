@@ -1,4 +1,6 @@
+import { ApprovalRequestSchema } from '@nimbus/contracts';
 import type {
+  ApprovalRequest,
   FileChange,
   PatchValidationReport,
   PullRequestResult,
@@ -13,9 +15,11 @@ import { runAgent } from '../agent/graph/run.js';
 import type { EventPublisher } from '../events/publisher.js';
 import type { SessionDocument } from '../db/models/session.js';
 import type { Logger } from '../logging/logger.js';
+import type { MailService } from '../email/mail-service.js';
 import type { PullRequestGateway } from '../pull-request/gateway.js';
 import type { PushGateway } from '../push/gateway.js';
-import type { RunOutcome } from '../sessions/repository.js';
+import type { ApprovalStore } from '../agent/policy/approvals.js';
+import type { RunOutcome, SessionRecords } from '../sessions/repository.js';
 import { failureOf, failureForStop, isPaused } from './outcome.js';
 import { WorkshopError, type SessionWorkshop } from './workshop.js';
 
@@ -49,6 +53,9 @@ export interface SessionRunnerOptions {
   logger: Logger;
   notifyEmailFor: (session: SessionDocument) => Promise<string>;
   events?: EventPublisher;
+  records?: SessionRecords;
+  approvalsFor?: (sessionId: string) => ApprovalStore;
+  mail?: MailService;
 }
 
 export class SessionRunner {
@@ -64,6 +71,12 @@ export class SessionRunner {
 
   readonly #events: EventPublisher | null;
 
+  readonly #records: SessionRecords | null;
+
+  readonly #approvalsFor: ((sessionId: string) => ApprovalStore) | null;
+
+  readonly #mail: MailService | null;
+
   constructor(options: SessionRunnerOptions) {
     this.#workshop = options.workshop;
     this.#push = options.push;
@@ -71,6 +84,9 @@ export class SessionRunner {
     this.#logger = options.logger;
     this.#notifyEmailFor = options.notifyEmailFor;
     this.#events = options.events ?? null;
+    this.#records = options.records ?? null;
+    this.#approvalsFor = options.approvalsFor ?? null;
+    this.#mail = options.mail ?? null;
   }
 
   async run(session: SessionDocument, signal: AbortSignal): Promise<RunOutcome> {
@@ -113,6 +129,7 @@ export class SessionRunner {
           type: 'session.cancelled',
           cancelledAt: new Date().toISOString(),
         });
+        await this.#mailEnded(session, 'cancelled', 'Somebody cancelled it while it was running.');
         return { status: 'cancelled', currentActivity: null, ...progress };
       }
 
@@ -284,12 +301,21 @@ export class SessionRunner {
   ): Promise<void> {
     const question = result.state.clarificationQuestion;
 
-    if (question !== null) {
+    if (question !== null && session.clarificationQuestion === null) {
+      await this.#records?.askQuestion(session.sessionId, question, new Date());
+
       await this.#say(session, {
         type: 'agent.question',
         question,
         expiresAt: new Date(Date.now() + PAUSE_EXPIRY_MS).toISOString(),
       });
+      return;
+    }
+
+    const waiting = await this.#pendingApproval(session);
+
+    if (waiting !== null) {
+      await this.#say(session, { type: 'agent.approval_required', approval: waiting });
       return;
     }
 
@@ -304,11 +330,59 @@ export class SessionRunner {
     });
   }
 
+  async #pendingApproval(session: SessionDocument): Promise<ApprovalRequest | null> {
+    if (this.#approvalsFor === null) {
+      return null;
+    }
+
+    const open = (await this.#approvalsFor(session.sessionId).list()).find(
+      (one) => one.status === 'pending',
+    );
+
+    if (open === undefined) {
+      return null;
+    }
+
+    return ApprovalRequestSchema.parse({
+      approvalId: open.approvalId,
+      actionHash: open.actionHash,
+      effect: open.effect,
+      requestedAt: open.requestedAt,
+      expiresAt: open.expiresAt,
+    });
+  }
+
   async #sayFailed(session: SessionDocument, outcome: RunOutcome): Promise<void> {
     if (outcome.failure === undefined || outcome.failure === null) {
       return;
     }
+
     await this.#say(session, { type: 'session.failed', failure: outcome.failure });
+    await this.#mailEnded(session, 'failed', outcome.failure.message);
+  }
+
+  async #mailEnded(
+    session: SessionDocument,
+    outcome: 'failed' | 'cancelled',
+    reason: string,
+  ): Promise<void> {
+    if (this.#mail === null) {
+      return;
+    }
+
+    try {
+      await this.#mail.sendSessionEnded(await this.#notifyEmailFor(session), {
+        repository: `${session.repository.owner}/${session.repository.name}`,
+        task: session.task,
+        outcome,
+        reason,
+      });
+    } catch (error) {
+      this.#logger.warn(
+        { sessionId: session.sessionId, error: String(error) },
+        'a session could not be reported by email, which changes nothing about the run',
+      );
+    }
   }
 
   #couldNotStart(session: SessionDocument, error: unknown): RunOutcome {

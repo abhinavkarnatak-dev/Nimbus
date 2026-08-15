@@ -1,7 +1,9 @@
 import {
+  ApprovalDecisionBodySchema,
   CancelSessionResponseSchema,
   CreateSessionBodySchema,
   CreateSessionResponseSchema,
+  PostMessageBodySchema,
   SessionIdSchema,
 } from '@nimbus/contracts';
 import { Router } from 'express';
@@ -75,6 +77,51 @@ export function createSessionsRouter(options: SessionsRouterOptions): Router {
           status: cancelled.status,
         }),
       );
+    },
+  );
+
+  router.post(
+    '/sessions/:sessionId/messages',
+    requireAuth,
+    requireCsrf,
+    validateBody(PostMessageBodySchema),
+    async (request, response) => {
+      const account = requireSession(request);
+      const sessionId = readSessionId(request.params['sessionId']);
+      const body = validatedBody(request, PostMessageBodySchema);
+      const said = await options.sessions.say(account.user.userId, sessionId, body.message);
+
+      response.status(202).json(CreateSessionResponseSchema.parse({ session: said }));
+    },
+  );
+
+  router.post(
+    '/sessions/:sessionId/answer',
+    requireAuth,
+    requireCsrf,
+    validateBody(PostMessageBodySchema),
+    async (request, response) => {
+      const account = requireSession(request);
+      const sessionId = readSessionId(request.params['sessionId']);
+      const body = validatedBody(request, PostMessageBodySchema);
+      const answered = await options.sessions.answer(account.user.userId, sessionId, body.message);
+
+      response.status(202).json(CreateSessionResponseSchema.parse({ session: answered }));
+    },
+  );
+
+  router.post(
+    '/sessions/:sessionId/approvals',
+    requireAuth,
+    requireCsrf,
+    validateBody(ApprovalDecisionBodySchema),
+    async (request, response) => {
+      const account = requireSession(request);
+      const sessionId = readSessionId(request.params['sessionId']);
+      const body = validatedBody(request, ApprovalDecisionBodySchema);
+      const decided = await options.sessions.decide(account.user.userId, sessionId, body);
+
+      response.status(200).json({ approval: decided });
     },
   );
 

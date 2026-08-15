@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { CapturingMailer } from '../email/capturing-mailer.js';
+import { MailService } from '../email/mail-service.js';
 import { CollectingEventPublisher } from '../events/publisher.js';
 import { SANDBOX_ENV } from '../sandbox/spec.js';
 import { changedFiles, SessionRunner } from './runner.js';
@@ -250,6 +252,62 @@ describe('what a run says while it happens', () => {
     const outcome = await held.runner.run(sessionDocument(), new AbortController().signal);
 
     expect(outcome.status).toBe('pr_created');
+  });
+});
+
+describe('telling the person it ended badly', () => {
+  function mailing(options: { answers?: readonly { value: unknown }[] } = {}): {
+    runner: SessionRunner;
+    mailer: CapturingMailer;
+  } {
+    const captured = orchestratorLogger();
+    const mailer = new CapturingMailer();
+
+    return {
+      mailer,
+      runner: new SessionRunner({
+        workshop: new FakeWorkshop({
+          logger: captured.logger,
+          answers: options.answers ?? FINISHING_ANSWERS,
+        }),
+        push: new RecordingPushGateway(),
+        pullRequests: new RecordingPullRequestGateway(),
+        logger: captured.logger,
+        mail: new MailService(mailer, 'nimbus@example.com'),
+        notifyEmailFor: async () => Promise.resolve('person@example.com'),
+      }),
+    };
+  }
+
+  it('writes to the person when a run fails', async () => {
+    const held = mailing({ answers: [CLEAR_SCOPE] });
+    await held.runner.run(sessionDocument(), new AbortController().signal);
+
+    expect(held.mailer.sent).toHaveLength(1);
+    expect(held.mailer.sent[0]?.subject).toContain('could not finish');
+  });
+
+  it('says the repository is untouched, because it is', async () => {
+    const held = mailing({ answers: [CLEAR_SCOPE] });
+    await held.runner.run(sessionDocument(), new AbortController().signal);
+
+    expect(held.mailer.sent[0]?.text).toContain('your repository is unchanged');
+  });
+
+  it('writes nothing when a run reaches a pull request, since 023 already did', async () => {
+    const held = mailing();
+    await held.runner.run(sessionDocument(), new AbortController().signal);
+
+    expect(held.mailer.sent).toHaveLength(0);
+  });
+
+  it('carries on when the mailer is broken', async () => {
+    const held = mailing({ answers: [CLEAR_SCOPE] });
+    held.mailer.failNextSends(new Error('smtp is down'));
+
+    const outcome = await held.runner.run(sessionDocument(), new AbortController().signal);
+
+    expect(outcome.status).toBe('failed');
   });
 });
 
