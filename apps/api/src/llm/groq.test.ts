@@ -10,6 +10,7 @@ import {
   withJsonReminder,
 } from './groq.js';
 import { LLM_LIMITS } from './limits.js';
+import { DEFAULT_GROQ_TEXT_MODEL, ratesFor } from './models.js';
 import {
   ANSWER_JSON_SCHEMA,
   AnswerSchema,
@@ -184,9 +185,11 @@ describe('GroqTextProvider', () => {
 
     const result = await text.complete({ messages: ASK });
 
+    const rates = ratesFor(DEFAULT_GROQ_TEXT_MODEL);
+
     expect(result.text).toBe('it is in src/router.ts');
     expect(result.report.usage.totalTokens).toBe(140);
-    expect(result.report.cost.microCents).toBe(100 * 10 + 40 * 50);
+    expect(result.report.cost.microCents).toBe(100 * rates.input + 40 * rates.output);
     expect(result.report.attempts).toBe(1);
   });
 
@@ -302,7 +305,7 @@ describe('GroqTextProvider, structured answers', () => {
     expect(result.value).toEqual(GOOD_ANSWER);
   });
 
-  it('asks for json_object on a model that cannot do json_schema', async () => {
+  it('asks for json_object on a model it does not know can do better', async () => {
     stub = stubFetch([{ body: groqReply(JSON.stringify(GOOD_ANSWER)) }]);
     const { text } = provider();
 
@@ -311,7 +314,22 @@ describe('GroqTextProvider, structured answers', () => {
       schema: AnswerSchema,
       schemaName: 'answer',
       jsonSchema: ANSWER_JSON_SCHEMA,
-      model: 'llama-3.3-70b-versatile',
+      model: 'some-model-this-build-never-heard-of',
+    });
+
+    const sent = stub.calls[0]?.body as { response_format?: { type?: string } };
+    expect(sent.response_format?.type).toBe('json_object');
+  });
+
+  it('asks for json_object when no schema was given to send', async () => {
+    stub = stubFetch([{ body: groqReply(JSON.stringify(GOOD_ANSWER)) }]);
+    const { text } = provider();
+
+    await text.completeStructured({
+      messages: ASK,
+      schema: AnswerSchema,
+      schemaName: 'answer',
+      model: 'openai/gpt-oss-120b',
     });
 
     const sent = stub.calls[0]?.body as { response_format?: { type?: string } };
@@ -543,7 +561,7 @@ describe('what reaches the logs', () => {
 
     await text.complete({ messages: ASK });
 
-    expect(logs()).toContain('openai/gpt-oss-20b');
+    expect(logs()).toContain(DEFAULT_GROQ_TEXT_MODEL);
     expect(logs()).toContain('LLM_UNAVAILABLE');
   });
 });

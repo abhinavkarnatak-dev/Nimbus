@@ -779,22 +779,33 @@ that bills 138 reasoning tokens the user never sees.
 
 It also removed a model from the plan. Qwen 3.6 27B was going to be the second coding model, and it
 returns 400 for both structured output modes and wraps its answers in a `<think>` block. A coding
-agent asks for a schema at nearly every step, so a model that cannot hold one is not a fifth option,
-it is a trap. `llama-3.3-70b-versatile` took the slot.
+agent asks for a schema at nearly every step, so a model that cannot hold one is not another option,
+it is a trap.
 
-| Model                     | For                     | Structured | Sees images | Thinks |
-| ------------------------- | ----------------------- | ---------- | ----------- | ------ |
-| `gemini-3.6-flash`        | The default, and images | schema     | yes         | yes    |
-| `gemini-3.5-flash-lite`   | Small fast jobs         | schema     | yes         | no     |
-| `openai/gpt-oss-120b`     | Hard problems, on Groq  | schema     | no          | yes    |
-| `openai/gpt-oss-20b`      | General work, on Groq   | schema     | no          | yes    |
-| `llama-3.3-70b-versatile` | The Groq mid tier       | object     | no          | no     |
+| Model                   | For                     | Structured | Sees images | Thinks |
+| ----------------------- | ----------------------- | ---------- | ----------- | ------ |
+| `gemini-3.6-flash`      | The default, and images | schema     | yes         | yes    |
+| `gemini-3.5-flash-lite` | Small fast jobs         | schema     | yes         | no     |
+| `openai/gpt-oss-120b`   | Hard problems, on Groq  | schema     | no          | yes    |
+
+**The list stays short on purpose.** It held five until two were removed on the same day: Groq
+announced `llama-3.3-70b-versatile` was being decommissioned, and `openai/gpt-oss-20b` had just been
+shown to answer a repository task by calling a tool from its own training rather than the one it was
+offered, on every wording tried. Every model here is called before it is written down, and taken out
+again the moment it stops earning its place.
 
 **Thinking cannot be switched off on Gemini**, and thinking tokens compete with the answer for the
 output budget. Asked for 400 output tokens, a structured answer came back as `{"` after the model
 spent 568 tokens thinking; asked for 4096, the same call returned valid JSON. So every Gemini request
-adds a fixed headroom on top of what the caller asked for, and a model that does not think gets none.
-Without that rule, structured answers truncate at random.
+adds headroom on top of what the caller asked for, and a model that does not think gets none.
+
+**Asking for a thinking budget is not the same as getting one.** The request also sends
+`thinkingConfig.thinkingBudget`, which is the polite way to say how much of that headroom the thinking
+may use. On a real agent step the model was allowed 3548 tokens, spent 3404 of them thinking and wrote
+129, so the budget is a hint rather than a cap. The guarantee therefore lives on this side: a truncated
+structured answer is asked again once with four times the headroom, and only then given up on. Every
+truncation says which model ran out, how much it was allowed, and how it spent it, because
+`The model ran out of room` on its own is not something anyone can act on.
 
 **The schema is guaranteed here, not there.** The request asks for structured output in whatever form
 the chosen model supports, but the answer is always parsed and validated locally. On the first live run

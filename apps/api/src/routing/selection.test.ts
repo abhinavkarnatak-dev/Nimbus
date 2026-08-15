@@ -38,6 +38,23 @@ describe('SELECTABLE_TEXT_MODELS', () => {
       expect(typeof model.vision).toBe('boolean');
     }
   });
+
+  it('names a model for every role that this build still knows about', () => {
+    const plan = planFor();
+
+    for (const role of ['primary', 'light', 'reasoning', 'vision'] as const) {
+      expect(findModel(modelForRole(plan, role))).not.toBeNull();
+    }
+  });
+
+  it('offers nothing that has been taken away', () => {
+    for (const gone of ['llama-3.3-70b-versatile', 'openai/gpt-oss-20b']) {
+      expect(isSelectable(gone)).toBe(false);
+      expect(() => assertSelectableModel(gone)).toThrow(
+        expect.objectContaining({ code: 'LLM_MODEL_UNKNOWN' }) as Error,
+      );
+    }
+  });
 });
 
 describe('assertSelectableModel', () => {
@@ -112,13 +129,11 @@ describe('planFor', () => {
   });
 
   it('keeps the reasoning model out of the user choice', () => {
-    expect(planFor({ textModel: 'llama-3.3-70b-versatile' }).reasoning).toBe(
-      DEFAULT_REASONING_MODEL,
-    );
+    expect(planFor({ textModel: 'openai/gpt-oss-120b' }).reasoning).toBe(DEFAULT_REASONING_MODEL);
   });
 
   it('keeps the vision model out of the user choice', () => {
-    expect(planFor({ textModel: 'llama-3.3-70b-versatile' }).vision).toBe(DEFAULT_VISION_MODEL);
+    expect(planFor({ textModel: 'openai/gpt-oss-120b' }).vision).toBe(DEFAULT_VISION_MODEL);
   });
 
   it('never lets a model that cannot see become the vision model', () => {
@@ -134,9 +149,9 @@ describe('planFor', () => {
 
 describe('modelForRole', () => {
   it('answers for every role', () => {
-    const plan = planFor({ textModel: 'openai/gpt-oss-20b' });
+    const plan = planFor({ textModel: 'gemini-3.5-flash-lite' });
 
-    expect(modelForRole(plan, 'primary')).toBe('openai/gpt-oss-20b');
+    expect(modelForRole(plan, 'primary')).toBe('gemini-3.5-flash-lite');
     expect(modelForRole(plan, 'light')).toBe(DEFAULT_LIGHT_MODEL);
     expect(modelForRole(plan, 'reasoning')).toBe(DEFAULT_REASONING_MODEL);
     expect(modelForRole(plan, 'vision')).toBe(DEFAULT_VISION_MODEL);

@@ -12,7 +12,7 @@ const usage = { promptTokens: 100, completionTokens: 40, reasoningTokens: 5, tot
 
 const report = {
   provider: 'groq',
-  model: 'llama-3.3-70b-versatile',
+  model: 'openai/gpt-oss-120b',
   usage,
   cost: { microCents: 9_058, estimated: true },
   attempts: 1,
@@ -21,7 +21,7 @@ const report = {
 
 describe('ModelIdSchema', () => {
   it.each([
-    ['a plain name', 'llama-3.3-70b-versatile'],
+    ['a plain name, from a provider this build does not ship', 'mistral-large'],
     ['a namespaced name', 'openai/gpt-oss-120b'],
     ['a dotted name', 'gemini-3.5-flash'],
   ])('accepts %s', (_label, id) => {

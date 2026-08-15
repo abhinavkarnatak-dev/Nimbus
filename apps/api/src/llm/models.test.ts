@@ -65,11 +65,23 @@ describe('KNOWN_MODELS', () => {
     expect(modelsFor('gemini').every((model) => model.provider === 'gemini')).toBe(true);
     expect(modelsFor('groq').length + modelsFor('gemini').length).toBe(KNOWN_MODELS.length);
   });
+
+  it('carries no model that cannot hold a schema, because the agent asks for one every step', () => {
+    for (const model of KNOWN_MODELS) {
+      expect(model.structuredOutput).toBe('json_schema');
+    }
+  });
+
+  it('carries no model that has been taken away', () => {
+    for (const gone of ['llama-3.3-70b-versatile', 'openai/gpt-oss-20b', 'qwen/qwen3.6-27b']) {
+      expect(findModel(gone)).toBeNull();
+    }
+  });
 });
 
 describe('ratesFor', () => {
   it('returns the price of a model it knows', () => {
-    expect(ratesFor('llama-3.3-70b-versatile')).toEqual({ input: 59, output: 79, known: true });
+    expect(ratesFor('openai/gpt-oss-120b')).toEqual({ input: 15, output: 75, known: true });
   });
 
   it('charges an unknown model the highest rate it knows', () => {
@@ -89,29 +101,29 @@ describe('ratesFor', () => {
 
 describe('costOf', () => {
   it('multiplies tokens by the rate', () => {
-    const cost = costOf('llama-3.3-70b-versatile', {
+    const cost = costOf('openai/gpt-oss-120b', {
       promptTokens: 100,
       completionTokens: 40,
       reasoningTokens: 0,
       totalTokens: 140,
     });
 
-    expect(cost.microCents).toBe(100 * 59 + 40 * 79);
+    expect(cost.microCents).toBe(100 * 15 + 40 * 75);
   });
 
   it('bills thinking the same as speaking', () => {
-    const cost = costOf('llama-3.3-70b-versatile', {
+    const cost = costOf('openai/gpt-oss-120b', {
       promptTokens: 0,
       completionTokens: 0,
       reasoningTokens: 100,
       totalTokens: 100,
     });
 
-    expect(cost.microCents).toBe(100 * 79);
+    expect(cost.microCents).toBe(100 * 75);
   });
 
   it('always says it is an estimate', () => {
-    const cost = costOf('llama-3.3-70b-versatile', {
+    const cost = costOf('openai/gpt-oss-120b', {
       promptTokens: 1,
       completionTokens: 1,
       reasoningTokens: 0,
@@ -162,9 +174,12 @@ describe('the factory', () => {
 
   it('gives the fake the model that was configured', () => {
     const { logger } = capturingLogger();
-    const text = createTextProvider({ config: { defaultTextModel: 'openai/gpt-oss-20b' }, logger });
+    const text = createTextProvider({
+      config: { defaultTextModel: 'openai/gpt-oss-120b' },
+      logger,
+    });
 
-    expect(text.defaultModel).toBe('openai/gpt-oss-20b');
+    expect(text.defaultModel).toBe('openai/gpt-oss-120b');
     expect(text.name).toBe('groq');
   });
 
@@ -176,11 +191,11 @@ describe('the factory', () => {
   it('uses the configured model when it is one we know', () => {
     const { logger } = capturingLogger();
     const text = createTextProvider({
-      config: { groqApiKey: 'gsk_x'.repeat(6), defaultTextModel: 'llama-3.3-70b-versatile' },
+      config: { groqApiKey: 'gsk_x'.repeat(6), defaultTextModel: 'openai/gpt-oss-120b' },
       logger,
     });
 
-    expect(text.defaultModel).toBe('llama-3.3-70b-versatile');
+    expect(text.defaultModel).toBe('openai/gpt-oss-120b');
   });
 
   it('refuses a model it has never heard of', () => {

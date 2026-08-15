@@ -58,13 +58,21 @@ export function toGeminiParts(messages: readonly Message[]): GeminiRequestParts 
   };
 }
 
-export function outputBudget(requested: number | undefined, model: string): number {
-  const asked = requested ?? LLM_LIMITS.maxOutputTokens;
-  return findModel(model)?.thinks === false ? asked : asked + LLM_LIMITS.geminiThinkingHeadroom;
+export function headroomFor(stretched: boolean): number {
+  return stretched ? LLM_LIMITS.geminiStretchedThinkingHeadroom : LLM_LIMITS.geminiThinkingHeadroom;
 }
 
-export function thinkingBudget(model: string): number | null {
-  return findModel(model)?.thinks === false ? null : LLM_LIMITS.geminiThinkingHeadroom;
+export function outputBudget(
+  requested: number | undefined,
+  model: string,
+  stretched = false,
+): number {
+  const asked = requested ?? LLM_LIMITS.maxOutputTokens;
+  return findModel(model)?.thinks === false ? asked : asked + headroomFor(stretched);
+}
+
+export function thinkingBudget(model: string, stretched = false): number | null {
+  return findModel(model)?.thinks === false ? null : headroomFor(stretched);
 }
 
 export function truncationDetail(model: string, allowed: number, body: unknown): string {
@@ -134,17 +142,14 @@ export class GeminiTextProvider implements TextProvider {
     let lastCodes: string | undefined;
 
     for (let round = 0; round <= LLM_LIMITS.schemaRepairAttempts; round += 1) {
-      const { body, attempts, durationMs } = await this.send(model, messages, request, shape);
+      const { body, attempts, durationMs, text } = await this.#askWithRoom(
+        model,
+        messages,
+        request,
+        shape,
+      );
       const report = this.report(model, body, attempts, durationMs);
-      const found = readGeminiText(body);
-
-      if (found.hitLimit) {
-        throw new LlmError('LLM_TRUNCATED', 'The model ran out of room before it finished.', {
-          detail: truncationDetail(model, outputBudget(request.maxOutputTokens, model), body),
-        });
-      }
-
-      const parsed = parseJson(found.text);
+      const parsed = parseJson(text);
       let problem: string;
       let logged: string;
 
@@ -182,15 +187,48 @@ export class GeminiTextProvider implements TextProvider {
     });
   }
 
+  async #askWithRoom(
+    model: string,
+    messages: readonly Message[],
+    request: StructuredRequest<unknown>,
+    shape: Readonly<Record<string, unknown>>,
+  ): Promise<{ body: unknown; attempts: number; durationMs: number; text: string }> {
+    let last: { body: unknown; allowed: number } | null = null;
+
+    for (const stretched of [false, true]) {
+      const sent = await this.send(model, messages, request, shape, stretched);
+      const found = readGeminiText(sent.body);
+
+      if (!found.hitLimit) {
+        return { ...sent, text: found.text };
+      }
+
+      const allowed = outputBudget(request.maxOutputTokens, model, stretched);
+      last = { body: sent.body, allowed };
+
+      if (!stretched) {
+        this.logger.warn(
+          { provider: this.name, model, detail: truncationDetail(model, allowed, sent.body) },
+          'the model ran out of room, asking again with more',
+        );
+      }
+    }
+
+    throw new LlmError('LLM_TRUNCATED', 'The model ran out of room before it finished.', {
+      detail: truncationDetail(model, last?.allowed ?? 0, last?.body),
+    });
+  }
+
   private async send(
     model: string,
     messages: readonly Message[],
     request: CompleteRequest,
     shape: Readonly<Record<string, unknown>> | null,
+    stretched = false,
   ): Promise<{ body: unknown; attempts: number; durationMs: number }> {
     const runner = new ProviderRunner({ provider: this.name, model, logger: this.logger });
     const parts = toGeminiParts(messages);
-    const thinking = thinkingBudget(model);
+    const thinking = thinkingBudget(model, stretched);
 
     return await runner.send({
       url: `${this.baseUrl}/${model}:generateContent`,
@@ -200,7 +238,7 @@ export class GeminiTextProvider implements TextProvider {
         contents: parts.contents,
         generationConfig: {
           temperature: request.temperature ?? 0,
-          maxOutputTokens: outputBudget(request.maxOutputTokens, model),
+          maxOutputTokens: outputBudget(request.maxOutputTokens, model, stretched),
           ...(thinking === null ? {} : { thinkingConfig: { thinkingBudget: thinking } }),
           ...(shape ?? {}),
         },

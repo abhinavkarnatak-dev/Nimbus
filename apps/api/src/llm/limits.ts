@@ -14,7 +14,8 @@ export const LLM_LIMITS = {
   maxMessages: 60,
   maxOutputTokens: 4_096,
 
-  geminiThinkingHeadroom: 2_048,
+  geminiThinkingHeadroom: 4_096,
+  geminiStretchedThinkingHeadroom: 16_384,
 
   visionMaxBytes: 5_242_880,
   visionDescriptionMaxChars: 2_000,

@@ -14,8 +14,6 @@ export const SELECTABLE_TEXT_MODELS: readonly string[] = [
   'gemini-3.6-flash',
   'gemini-3.5-flash-lite',
   'openai/gpt-oss-120b',
-  'openai/gpt-oss-20b',
-  'llama-3.3-70b-versatile',
 ];
 
 export function selectableModels(): { id: string; provider: string; vision: boolean }[] {

@@ -24,6 +24,15 @@ afterEach(() => {
 
 const ASK = [{ role: 'user' as const, content: 'where is the router' }];
 
+async function failureOf(work: Promise<unknown>): Promise<LlmError> {
+  try {
+    await work;
+    throw new Error('that was supposed to fail');
+  } catch (error) {
+    return error as LlmError;
+  }
+}
+
 function provider(overrides: Record<string, unknown> = {}): {
   text: GeminiTextProvider;
   logs: () => string;
@@ -129,6 +138,70 @@ describe('thinkingBudget', () => {
 
   it('caps a model it has never heard of, because it may well think', () => {
     expect(thinkingBudget('some-new-model')).toBe(LLM_LIMITS.geminiThinkingHeadroom);
+  });
+});
+
+describe('when thinking eats the room anyway', () => {
+  const truncated = {
+    candidates: [{ content: { parts: [{ text: '{"file":' }] }, finishReason: 'MAX_TOKENS' }],
+    usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 4, thoughtsTokenCount: 3_404 },
+  };
+
+  it('asks again with far more room rather than ending the session', async () => {
+    stub = stubFetch([{ body: truncated }, { body: geminiReply(JSON.stringify(GOOD_ANSWER)) }]);
+    const { text } = provider();
+
+    const result = await text.completeStructured({
+      messages: ASK,
+      schema: AnswerSchema,
+      schemaName: 'answer',
+      maxOutputTokens: 1_500,
+    });
+
+    expect(result.value).toEqual(GOOD_ANSWER);
+    expect(stub.calls).toHaveLength(2);
+  });
+
+  it('gives the second attempt the stretched headroom, not the same room again', async () => {
+    stub = stubFetch([{ body: truncated }, { body: geminiReply(JSON.stringify(GOOD_ANSWER)) }]);
+    const { text } = provider();
+
+    await text.completeStructured({
+      messages: ASK,
+      schema: AnswerSchema,
+      schemaName: 'answer',
+      maxOutputTokens: 1_500,
+    });
+
+    const first = stub.calls[0]?.body as { generationConfig: { maxOutputTokens: number } };
+    const second = stub.calls[1]?.body as { generationConfig: { maxOutputTokens: number } };
+
+    expect(first.generationConfig.maxOutputTokens).toBe(1_500 + LLM_LIMITS.geminiThinkingHeadroom);
+    expect(second.generationConfig.maxOutputTokens).toBe(
+      1_500 + LLM_LIMITS.geminiStretchedThinkingHeadroom,
+    );
+  });
+
+  it('gives up after the stretched attempt, and says how the room went', async () => {
+    stub = stubFetch([{ body: truncated }, { body: truncated }]);
+    const { text } = provider();
+
+    const failure = await failureOf(
+      text.completeStructured({ messages: ASK, schema: AnswerSchema, schemaName: 'answer' }),
+    );
+
+    expect(failure.code).toBe('LLM_TRUNCATED');
+    expect(failure.detail).toContain('spent 3404 thinking');
+    expect(stub.calls).toHaveLength(2);
+  });
+
+  it('says it is asking again, so a slow call is explainable', async () => {
+    stub = stubFetch([{ body: truncated }, { body: geminiReply(JSON.stringify(GOOD_ANSWER)) }]);
+    const { text, logs } = provider();
+
+    await text.completeStructured({ messages: ASK, schema: AnswerSchema, schemaName: 'answer' });
+
+    expect(logs()).toContain('asking again with more');
   });
 });
 

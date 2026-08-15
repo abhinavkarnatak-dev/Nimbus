@@ -16,7 +16,7 @@ export const DEFAULT_VISION_MODEL = 'gemini-3.6-flash';
 export const DEFAULT_LIGHT_MODEL = 'gemini-3.5-flash-lite';
 export const DEFAULT_REASONING_MODEL = 'openai/gpt-oss-120b';
 
-export const DEFAULT_GROQ_TEXT_MODEL = 'openai/gpt-oss-20b';
+export const DEFAULT_GROQ_TEXT_MODEL = 'openai/gpt-oss-120b';
 export const DEFAULT_GEMINI_TEXT_MODEL = 'gemini-3.6-flash';
 
 export const KNOWN_MODELS: readonly ModelFacts[] = [
@@ -49,26 +49,6 @@ export const KNOWN_MODELS: readonly ModelFacts[] = [
     structuredOutput: 'json_schema',
     vision: false,
     thinks: true,
-  },
-  {
-    id: 'openai/gpt-oss-20b',
-    provider: 'groq',
-    contextTokens: 131_072,
-    inputMicroCentsPerToken: 10,
-    outputMicroCentsPerToken: 50,
-    structuredOutput: 'json_schema',
-    vision: false,
-    thinks: true,
-  },
-  {
-    id: 'llama-3.3-70b-versatile',
-    provider: 'groq',
-    contextTokens: 131_072,
-    inputMicroCentsPerToken: 59,
-    outputMicroCentsPerToken: 79,
-    structuredOutput: 'json_object',
-    vision: false,
-    thinks: false,
   },
 ];
 

@@ -47,7 +47,7 @@ describe('SessionRouter', () => {
   it('takes a whole plan, so a resumed session keeps the models it started with', async () => {
     const plan = {
       primary: 'openai/gpt-oss-120b',
-      light: 'openai/gpt-oss-20b',
+      light: 'gemini-3.5-flash-lite',
       reasoning: DEFAULT_REASONING_MODEL,
       vision: DEFAULT_TEXT_MODEL,
       chosenByUser: true,
@@ -57,13 +57,13 @@ describe('SessionRouter', () => {
     await session.complete({ messages: ASK, role: 'light' });
 
     expect(session.plan).toEqual(plan);
-    expect(text.calls[0]?.model).toBe('openai/gpt-oss-20b');
+    expect(text.calls[0]?.model).toBe('gemini-3.5-flash-lite');
   });
 
   it('prefers the plan it was given over working one out from a choice', () => {
     const plan = {
       primary: 'openai/gpt-oss-120b',
-      light: 'openai/gpt-oss-20b',
+      light: 'gemini-3.5-flash-lite',
       reasoning: DEFAULT_REASONING_MODEL,
       vision: DEFAULT_TEXT_MODEL,
       chosenByUser: true,
@@ -88,7 +88,7 @@ describe('SessionRouter', () => {
   });
 
   it('sends a hard job to the reasoning model', async () => {
-    const { session, text } = router({ selection: { textModel: 'llama-3.3-70b-versatile' } });
+    const { session, text } = router({ selection: { textModel: 'openai/gpt-oss-120b' } });
 
     await session.complete({ messages: ASK, role: 'reasoning' });
 
