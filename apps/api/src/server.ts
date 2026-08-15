@@ -21,6 +21,9 @@ import { GitHubAppTokenProvider } from './github/token-provider.js';
 import { GitHubWebhookService } from './github/webhook-service.js';
 import { createAttachSession } from './http/middleware/session.js';
 import { createAttachmentsRouter } from './http/routes/attachments.js';
+import { createSessionsRouter } from './http/routes/sessions.js';
+import { MongoSessionRecords } from './sessions/repository.js';
+import { AgentSessionService } from './sessions/service.js';
 import { createAuthRouter } from './http/routes/auth.js';
 import { createGitHubRouter } from './http/routes/github.js';
 import type { DependencyCheck } from './http/routes/health.js';
@@ -159,6 +162,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   });
 
   const routers = [authRouter];
+  let repositories: InstallationService | null = null;
 
   if (config.github !== null) {
     const tokens = new GitHubAppTokenProvider({ github: config.github, logger });
@@ -179,6 +183,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     });
 
     routers.push(createGitHubRouter({ installations, webhooks, webOrigin: config.api.webOrigin }));
+    repositories = installations;
   }
 
   logger.info({ githubConnect: config.github !== null }, 'GitHub connection ready');
@@ -203,6 +208,22 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
       }),
     );
   }
+
+  if (repositories !== null) {
+    routers.push(
+      createSessionsRouter({
+        auth: sessions,
+        sessions: new AgentSessionService({
+          records: new MongoSessionRecords(handle.db),
+          attachments: new MongoAttachmentRecords(handle.db),
+          repositories,
+          logger,
+        }),
+      }),
+    );
+  }
+
+  logger.info({ agentSessions: repositories !== null }, 'Agent sessions ready');
 
   const attachmentSweeper =
     attachments === null

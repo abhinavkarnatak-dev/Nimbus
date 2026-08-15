@@ -7,6 +7,7 @@ export type NewAttachment = AttachmentDocument;
 export interface AttachmentRecords {
   insert(document: NewAttachment): Promise<void>;
   findOwned(userId: string, attachmentId: string): Promise<AttachmentDocument | null>;
+  claim(attachmentId: string, sessionId: string): Promise<boolean>;
   countUnclaimed(userId: string): Promise<number>;
   remove(attachmentId: string): Promise<boolean>;
   findExpired(now: Date, limit: number): Promise<AttachmentDocument[]>;
@@ -33,6 +34,15 @@ export class MongoAttachmentRecords implements AttachmentRecords {
       { attachmentId },
       { $set: { description, describedByModel: model, describedAt: new Date() } },
     );
+  }
+
+  async claim(attachmentId: string, sessionId: string): Promise<boolean> {
+    const result = await attachmentsCollection(this.db).updateOne(
+      { attachmentId, sessionId: null },
+      { $set: { sessionId, expiresAt: null } },
+    );
+
+    return result.modifiedCount === 1;
   }
 
   async countUnclaimed(userId: string): Promise<number> {
@@ -80,6 +90,20 @@ export class InMemoryAttachmentRecords implements AttachmentRecords {
       (held) => held.attachmentId === attachmentId && held.userId === userId,
     );
     return Promise.resolve(found ?? null);
+  }
+
+  async claim(attachmentId: string, sessionId: string): Promise<boolean> {
+    const held = this.documents.find(
+      (one) => one.attachmentId === attachmentId && one.sessionId === null,
+    );
+
+    if (held === undefined) {
+      return Promise.resolve(false);
+    }
+
+    held.sessionId = sessionId;
+    held.expiresAt = null;
+    return Promise.resolve(true);
   }
 
   async countUnclaimed(userId: string): Promise<number> {

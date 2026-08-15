@@ -1,0 +1,360 @@
+import { describe, expect, it } from 'vitest';
+
+import { ApiError } from '../http/api-error.js';
+import {
+  CLEAR_TASK,
+  HIDDEN,
+  OTHER_ID,
+  OWNER_ID,
+  SHOPFRONT,
+  attachment,
+  newBody,
+  sessionHarness,
+  testId,
+} from './sessions.fixtures.js';
+
+async function codeOf(work: Promise<unknown>): Promise<string> {
+  try {
+    await work;
+  } catch (error) {
+    return error instanceof ApiError ? error.code : 'NOT_AN_API_ERROR';
+  }
+  return 'NO_ERROR';
+}
+
+describe('creating a session', () => {
+  it('starts one that is queued and belongs to the person who asked', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+
+    expect(created.created).toBe(true);
+    expect(created.session.status).toBe('queued');
+    expect(created.session.task).toBe(CLEAR_TASK);
+    expect(harness.records.documents[0]?.userId).toBe(OWNER_ID);
+  });
+
+  it('writes the repository into the session rather than only its number', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+
+    expect(created.session.repository.owner).toBe(SHOPFRONT.owner);
+    expect(created.session.repository.defaultBranch).toBe(SHOPFRONT.defaultBranch);
+  });
+
+  it('starts nothing until the work begins, so there is no branch or commit yet', async () => {
+    const harness = sessionHarness();
+    await harness.service.create(OWNER_ID, newBody());
+
+    const stored = harness.records.documents[0];
+
+    expect(stored?.branch).toBeNull();
+    expect(stored?.baseCommitSha).toBeNull();
+    expect(stored?.sandboxId).toBeNull();
+    expect(stored?.step).toBe(0);
+  });
+});
+
+describe('a repository the user cannot reach', () => {
+  it('is refused', async () => {
+    const harness = sessionHarness();
+
+    expect(
+      await codeOf(
+        harness.service.create(OWNER_ID, newBody({ repositoryId: HIDDEN.repositoryId })),
+      ),
+    ).toBe('REPOSITORY_NOT_AVAILABLE');
+  });
+
+  it('is refused in the same words as one that does not exist', async () => {
+    const harness = sessionHarness();
+
+    const missing = await codeOf(harness.service.create(OWNER_ID, newBody({ repositoryId: 1 })));
+    const hidden = await codeOf(
+      harness.service.create(OWNER_ID, newBody({ repositoryId: HIDDEN.repositoryId })),
+    );
+
+    expect(missing).toBe(hidden);
+  });
+
+  it('is checked against what the installation can see, for this user', async () => {
+    const harness = sessionHarness();
+    await harness.service.create(OWNER_ID, newBody());
+
+    expect(harness.directory.calls).toEqual([OWNER_ID]);
+  });
+
+  it('writes nothing when it refuses', async () => {
+    const harness = sessionHarness();
+    await codeOf(harness.service.create(OWNER_ID, newBody({ repositoryId: 1 })));
+
+    expect(harness.records.documents).toHaveLength(0);
+  });
+});
+
+describe('a task nobody could act on', () => {
+  it('is refused without a model call or a session row', async () => {
+    const harness = sessionHarness();
+
+    expect(await codeOf(harness.service.create(OWNER_ID, newBody({ task: 'fix it please' })))).toBe(
+      'TASK_TOO_BROAD',
+    );
+    expect(harness.records.documents).toHaveLength(0);
+  });
+
+  it('is refused when it is only filler words', async () => {
+    const harness = sessionHarness();
+
+    expect(
+      await codeOf(
+        harness.service.create(OWNER_ID, newBody({ task: 'please make the code a bit nicer' })),
+      ),
+    ).toBe('TASK_TOO_BROAD');
+  });
+
+  it('accepts one that names something specific', async () => {
+    const harness = sessionHarness();
+
+    expect((await harness.service.create(OWNER_ID, newBody())).created).toBe(true);
+  });
+});
+
+describe('the same request arriving twice', () => {
+  it('gives back the session that already exists', async () => {
+    const harness = sessionHarness();
+    const first = await harness.service.create(OWNER_ID, newBody());
+    const second = await harness.service.create(OWNER_ID, newBody());
+
+    expect(second.created).toBe(false);
+    expect(second.session.sessionId).toBe(first.session.sessionId);
+  });
+
+  it('writes only one row', async () => {
+    const harness = sessionHarness();
+    await harness.service.create(OWNER_ID, newBody());
+    await harness.service.create(OWNER_ID, newBody());
+
+    expect(harness.records.documents).toHaveLength(1);
+  });
+
+  it('is told apart from a different request by the same person', async () => {
+    const harness = sessionHarness();
+    await harness.service.create(OWNER_ID, newBody());
+
+    const other = await codeOf(
+      harness.service.create(OWNER_ID, newBody({ idempotencyKey: testId('idk', 'c') })),
+    );
+
+    expect(other).toBe('ACTIVE_SESSION_EXISTS');
+  });
+});
+
+describe('one session at a time', () => {
+  it('refuses a second one and names the one already running', async () => {
+    const harness = sessionHarness();
+    const first = await harness.service.create(OWNER_ID, newBody());
+
+    try {
+      await harness.service.create(OWNER_ID, newBody({ idempotencyKey: testId('idk', 'd') }));
+      expect.unreachable('a second session should not start');
+    } catch (error) {
+      const failure = error as ApiError;
+
+      expect(failure.code).toBe('ACTIVE_SESSION_EXISTS');
+      expect(failure.details?.['activeSessionId']).toBe(first.session.sessionId);
+    }
+  });
+
+  it('lets another one start once the first has finished', async () => {
+    const harness = sessionHarness();
+    const first = await harness.service.create(OWNER_ID, newBody());
+
+    await harness.service.cancel(OWNER_ID, first.session.sessionId);
+
+    const second = await harness.service.create(
+      OWNER_ID,
+      newBody({ idempotencyKey: testId('idk', 'e') }),
+    );
+
+    expect(second.created).toBe(true);
+  });
+
+  it('counts one session per person, not one for everybody', async () => {
+    const harness = sessionHarness();
+    await harness.service.create(OWNER_ID, newBody());
+
+    const other = await harness.service.create(OTHER_ID, newBody());
+
+    expect(other.created).toBe(true);
+  });
+});
+
+describe('attachments', () => {
+  it('are copied into the session and marked as taken', async () => {
+    const harness = sessionHarness();
+    const one = attachment();
+    await harness.attachments.insert(one);
+
+    const created = await harness.service.create(
+      OWNER_ID,
+      newBody({ attachmentIds: [one.attachmentId] }),
+    );
+
+    expect(harness.records.documents[0]?.attachments).toHaveLength(1);
+    expect(harness.attachments.documents[0]?.sessionId).toBe(created.session.sessionId);
+  });
+
+  it('are refused when they belong to somebody else', async () => {
+    const harness = sessionHarness();
+    const theirs = attachment({ userId: OTHER_ID });
+    await harness.attachments.insert(theirs);
+
+    expect(
+      await codeOf(
+        harness.service.create(OWNER_ID, newBody({ attachmentIds: [theirs.attachmentId] })),
+      ),
+    ).toBe('ATTACHMENT_REJECTED');
+  });
+
+  it('are refused when another session already has them', async () => {
+    const harness = sessionHarness();
+    const taken = attachment({ sessionId: testId('ses', 'f') });
+    await harness.attachments.insert(taken);
+
+    expect(
+      await codeOf(
+        harness.service.create(OWNER_ID, newBody({ attachmentIds: [taken.attachmentId] })),
+      ),
+    ).toBe('ATTACHMENT_REJECTED');
+  });
+
+  it('stop expiring once a session holds them', async () => {
+    const harness = sessionHarness();
+    const one = attachment();
+    await harness.attachments.insert(one);
+
+    await harness.service.create(OWNER_ID, newBody({ attachmentIds: [one.attachmentId] }));
+
+    expect(harness.attachments.documents[0]?.expiresAt).toBeNull();
+  });
+});
+
+describe('reading sessions back', () => {
+  it('lists the newest first and names the active one', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+
+    const listed = await harness.service.list(OWNER_ID);
+
+    expect(listed.sessions).toHaveLength(1);
+    expect(listed.activeSessionId).toBe(created.session.sessionId);
+  });
+
+  it('names no active session once everything has finished', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+    await harness.service.cancel(OWNER_ID, created.session.sessionId);
+
+    expect((await harness.service.list(OWNER_ID)).activeSessionId).toBeNull();
+  });
+
+  it('keeps finished sessions in the history', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+    await harness.service.cancel(OWNER_ID, created.session.sessionId);
+
+    expect((await harness.service.list(OWNER_ID)).sessions).toHaveLength(1);
+  });
+
+  it('shows nobody else their sessions', async () => {
+    const harness = sessionHarness();
+    await harness.service.create(OWNER_ID, newBody());
+
+    expect((await harness.service.list(OTHER_ID)).sessions).toHaveLength(0);
+  });
+
+  it('gives the detail with the sequence a stream can replay from', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+
+    const detail = await harness.service.detail(OWNER_ID, created.session.sessionId);
+
+    expect(detail.session.sessionId).toBe(created.session.sessionId);
+    expect(detail.lastEventSequence).toBe(0);
+    expect(detail.session.progress.step).toBe(0);
+  });
+});
+
+describe('somebody else asking', () => {
+  it('cannot read a session that is not theirs, and is told it does not exist', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+
+    expect(await codeOf(harness.service.detail(OTHER_ID, created.session.sessionId))).toBe(
+      'NOT_FOUND',
+    );
+  });
+
+  it('cannot cancel a session that is not theirs', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+
+    expect(await codeOf(harness.service.cancel(OTHER_ID, created.session.sessionId))).toBe(
+      'NOT_FOUND',
+    );
+  });
+
+  it('leaves that session exactly as it was', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+    await codeOf(harness.service.cancel(OTHER_ID, created.session.sessionId));
+
+    expect(harness.records.documents[0]?.status).toBe('queued');
+    expect(harness.records.documents[0]?.completedAt).toBeNull();
+  });
+
+  it('is refused the same way for a session id nobody has', async () => {
+    const harness = sessionHarness();
+
+    expect(await codeOf(harness.service.detail(OWNER_ID, testId('ses', 'z')))).toBe('NOT_FOUND');
+  });
+});
+
+describe('cancelling', () => {
+  it('moves the session to cancelled and stamps when it ended', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+
+    const cancelled = await harness.service.cancel(OWNER_ID, created.session.sessionId);
+
+    expect(cancelled.status).toBe('cancelled');
+    expect(cancelled.completedAt).not.toBeNull();
+  });
+
+  it('refuses to cancel something that has already ended', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+    await harness.service.cancel(OWNER_ID, created.session.sessionId);
+
+    expect(await codeOf(harness.service.cancel(OWNER_ID, created.session.sessionId))).toBe(
+      'SESSION_NOT_ACTIVE',
+    );
+  });
+
+  it('leaves a terminal session exactly as it was', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+    const first = await harness.service.cancel(OWNER_ID, created.session.sessionId);
+
+    await codeOf(harness.service.cancel(OWNER_ID, created.session.sessionId));
+
+    expect(harness.records.documents[0]?.completedAt?.toISOString()).toBe(first.completedAt);
+  });
+
+  it('clears whatever it was doing, so nothing reads as still running', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+    await harness.service.cancel(OWNER_ID, created.session.sessionId);
+
+    expect(harness.records.documents[0]?.currentActivity).toBeNull();
+  });
+});
