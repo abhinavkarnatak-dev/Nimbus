@@ -27,6 +27,8 @@ export function keepGoing(): StopVerdict {
 export class RunGuard {
   private readonly failures = new Map<string, number>();
 
+  private readonly repeats = new Map<string, number>();
+
   private readonly order: string[] = [];
 
   beforeStep(state: AgentState, nowMs: number, cancelled = false): StopVerdict {
@@ -43,19 +45,30 @@ export class RunGuard {
   }
 
   afterStep(result: ExecutionResult): StopVerdict {
-    if (!countsAsFailure(result)) {
+    const seen = (this.repeats.get(result.actionHash) ?? 0) + 1;
+    this.remember(result.actionHash);
+    this.repeats.set(result.actionHash, seen);
+
+    if (countsAsFailure(result)) {
+      const failed = (this.failures.get(result.actionHash) ?? 0) + 1;
+      this.failures.set(result.actionHash, failed);
+
+      if (failed >= EXECUTE_LIMITS.sameActionFailuresMax) {
+        return {
+          stop: true,
+          reason: 'repeated_action',
+          detail: `${result.event.tool} failed the same way ${String(failed)} times`,
+        };
+      }
+    } else {
       this.failures.delete(result.actionHash);
-      return keepGoing();
     }
 
-    const seen = (this.failures.get(result.actionHash) ?? 0) + 1;
-    this.remember(result.actionHash, seen);
-
-    if (seen >= EXECUTE_LIMITS.sameActionFailuresMax) {
+    if (seen >= EXECUTE_LIMITS.sameActionRepeatsMax) {
       return {
         stop: true,
         reason: 'repeated_action',
-        detail: `${result.event.tool} failed the same way ${String(seen)} times`,
+        detail: `${result.event.tool} was asked for exactly the same thing ${String(seen)} times`,
       };
     }
     return keepGoing();
@@ -65,20 +78,34 @@ export class RunGuard {
     return this.failures.get(actionHash) ?? 0;
   }
 
-  private remember(actionHash: string, seen: number): void {
-    if (!this.failures.has(actionHash)) {
+  timesSeen(actionHash: string): number {
+    return this.repeats.get(actionHash) ?? 0;
+  }
+
+  private remember(actionHash: string): void {
+    if (!this.repeats.has(actionHash)) {
       this.order.push(actionHash);
     }
-    this.failures.set(actionHash, seen);
 
     while (this.order.length > EXECUTE_LIMITS.recentActionsTracked) {
       const oldest = this.order.shift();
 
       if (oldest !== undefined) {
         this.failures.delete(oldest);
+        this.repeats.delete(oldest);
       }
     }
   }
+}
+
+export function repeatNotice(tool: string, summary: string, seen: number): string {
+  if (seen <= 1) {
+    return `${tool}: ${summary}`;
+  }
+
+  return `${tool}: ${summary} (you have already asked for exactly this ${String(
+    seen,
+  )} times and the answer has not changed, so asking again tells you nothing. Do something else.)`;
 }
 
 export function countsAsFailure(result: ExecutionResult): boolean {

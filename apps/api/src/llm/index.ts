@@ -10,5 +10,6 @@ export * from './groq.js';
 export * from './gemini.js';
 export * from './gemini-text.js';
 export * from './fake-text.js';
+export * from './routed-text.js';
 export * from './fake-vision.js';
 export * from './factory.js';

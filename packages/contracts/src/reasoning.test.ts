@@ -5,6 +5,7 @@ import {
   MAX_ARGUMENTS_CHARS,
   MAX_INTENT_CHARS,
   NextActionSchema,
+  NextActionWireSchema,
   SCOPE_OUTCOMES,
   ScopeResultSchema,
   ScopeVerdictSchema,
@@ -71,6 +72,47 @@ describe('NextActionSchema', () => {
     });
 
     expect(parsed.toolArguments).toEqual({ path: 'a.ts', nested: { deep: [1, 2] } });
+  });
+});
+
+describe('NextActionWireSchema', () => {
+  const WIRE = {
+    intent: ACTION.intent,
+    tool: ACTION.tool,
+    toolArgumentsJson: JSON.stringify(ACTION.toolArguments),
+  };
+
+  it('accepts one action with the arguments written out as a string', () => {
+    expect(NextActionWireSchema.parse(WIRE)).toEqual(WIRE);
+  });
+
+  it('takes the arguments only as a string, because a strict provider cannot send an object', () => {
+    expect(
+      NextActionWireSchema.safeParse({ ...WIRE, toolArgumentsJson: { path: 'a.ts' } }).success,
+    ).toBe(false);
+  });
+
+  it('does not read the string, leaving that to the node that calls the tool', () => {
+    const parsed = NextActionWireSchema.safeParse({ ...WIRE, toolArgumentsJson: 'not json' });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it('refuses a written out arguments string too large to be a real call', () => {
+    const long = 'a'.repeat(MAX_ARGUMENTS_CHARS + 1);
+
+    expect(NextActionWireSchema.safeParse({ ...WIRE, toolArgumentsJson: long }).success).toBe(
+      false,
+    );
+  });
+
+  it('holds the same intent and tool rules as the action it becomes', () => {
+    expect(NextActionWireSchema.safeParse({ ...WIRE, intent: '' }).success).toBe(false);
+    expect(NextActionWireSchema.safeParse({ ...WIRE, tool: 'push_branch' }).success).toBe(false);
+  });
+
+  it('refuses a field the model adds of its own', () => {
+    expect(NextActionWireSchema.safeParse({ ...WIRE, toolArguments: {} }).success).toBe(false);
   });
 });
 

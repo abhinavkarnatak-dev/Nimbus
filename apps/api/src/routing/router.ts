@@ -14,6 +14,7 @@ import { planFor, modelForRole } from './selection.js';
 export interface SessionRouterOptions {
   text: TextProvider;
   logger: Logger;
+  plan?: ModelPlan;
   selection?: { textModel?: string };
   budget?: SessionBudget;
   budgetLimits?: Partial<BudgetLimits>;
@@ -37,7 +38,7 @@ export class SessionRouter {
   private readonly budget: SessionBudget;
 
   constructor(options: SessionRouterOptions) {
-    this.plan = planFor(options.selection);
+    this.plan = options.plan ?? planFor(options.selection);
     this.text = options.text;
     this.logger = options.logger;
     this.budget = options.budget ?? new SessionBudget(options.budgetLimits ?? {});
@@ -49,6 +50,10 @@ export class SessionRouter {
 
   budgetState(): BudgetState {
     return this.budget.state();
+  }
+
+  restoreBudget(state: BudgetState): void {
+    this.budget.restore(state);
   }
 
   async complete(request: RoleRequest): Promise<CompleteResult> {

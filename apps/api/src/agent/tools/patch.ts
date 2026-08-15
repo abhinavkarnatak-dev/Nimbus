@@ -69,9 +69,8 @@ function finishFile(file: PatchFile | null, files: PatchFile[]): void {
   for (const hunk of file.hunks) {
     const counted = countedLines(hunk);
 
-    if (counted.before !== hunk.beforeCount || counted.after !== hunk.afterCount) {
-      throw malformed('a hunk header did not match its contents');
-    }
+    hunk.beforeCount = counted.before;
+    hunk.afterCount = counted.after;
   }
   files.push(file);
 }

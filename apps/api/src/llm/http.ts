@@ -59,6 +59,24 @@ function extractMessage(body: unknown): string | null {
   return null;
 }
 
+export function providerCode(body: unknown): string | undefined {
+  if (typeof body !== 'object' || body === null) {
+    return undefined;
+  }
+
+  const inner = (body as { error?: unknown }).error;
+
+  if (typeof inner !== 'object' || inner === null) {
+    return undefined;
+  }
+
+  const code = (inner as { code?: unknown }).code;
+
+  return typeof code === 'string' && code !== ''
+    ? code.slice(0, LLM_LIMITS.errorDetailMaxChars)
+    : undefined;
+}
+
 async function readBody(response: Response): Promise<unknown> {
   const text = await response.text();
 
@@ -144,6 +162,7 @@ export class ProviderRunner {
 
         const detail = safeDetail(result.body);
         const retryAfterMs = parseRetryAfter(result.headers.get('retry-after'), Date.now());
+        const fromProvider = providerCode(result.body);
         const options: LlmErrorOptions = { status: result.status };
 
         if (detail !== undefined) {
@@ -152,6 +171,10 @@ export class ProviderRunner {
 
         if (retryAfterMs !== null) {
           options.retryAfterMs = retryAfterMs;
+        }
+
+        if (fromProvider !== undefined) {
+          options.providerCode = fromProvider;
         }
 
         throw new LlmError(

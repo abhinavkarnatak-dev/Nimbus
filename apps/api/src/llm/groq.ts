@@ -2,7 +2,7 @@ import type { CallReport, TokenUsage } from '@nimbus/contracts';
 
 import type { Logger } from '../logging/logger.js';
 import { prepareMessages } from './context.js';
-import { LlmError } from './errors.js';
+import { LlmError, isLlmError } from './errors.js';
 import { ProviderRunner } from './http.js';
 import { LLM_LIMITS } from './limits.js';
 import { DEFAULT_GROQ_TEXT_MODEL, findModel } from './models.js';
@@ -115,6 +115,23 @@ export function withJsonReminder(messages: readonly Message[]): Message[] {
   return copy;
 }
 
+export const UNUSABLE_ANSWER_REPAIRS: Readonly<Record<string, string>> = {
+  tool_use_failed:
+    'That answer tried to call a tool. There are no tools attached to this request, and no tool name you may remember from anywhere else exists here. Send the whole answer again as one JSON object matching the required shape, and call nothing.',
+  json_validate_failed:
+    'That answer was not one JSON object of the required shape. Send it again as one JSON object, with every required field, no field that is not in the shape, and nothing written outside the object.',
+};
+
+export function unusableAnswer(error: unknown): { code: string; repair: string } | null {
+  if (!isLlmError(error) || error.providerCode === null) {
+    return null;
+  }
+
+  const repair = UNUSABLE_ANSWER_REPAIRS[error.providerCode];
+
+  return repair === undefined ? null : { code: error.providerCode, repair };
+}
+
 export class GroqTextProvider implements TextProvider {
   readonly name = 'groq' as const;
 
@@ -175,7 +192,29 @@ export class GroqTextProvider implements TextProvider {
     let lastCodes: string | undefined;
 
     for (let round = 0; round <= LLM_LIMITS.schemaRepairAttempts; round += 1) {
-      const { body, attempts, durationMs } = await this.send(model, messages, request, format);
+      let sent: { body: unknown; attempts: number; durationMs: number };
+
+      try {
+        sent = await this.send(model, messages, request, format);
+      } catch (error) {
+        const unusable = unusableAnswer(error);
+
+        if (unusable === null) {
+          throw error;
+        }
+
+        lastCodes = unusable.code;
+
+        this.logger.warn(
+          { provider: this.name, model, round, problem: unusable.code },
+          'the model answered in a way the provider could not return',
+        );
+
+        messages = [...messages, { role: 'user', content: unusable.repair }];
+        continue;
+      }
+
+      const { body, attempts, durationMs } = sent;
       const report = this.report(model, body, attempts, durationMs);
       const parsed = parseJson(readText(body));
 

@@ -7,6 +7,9 @@ import {
   IGNORE_SCRIPTS_FLAG,
   PACKAGE_MANAGERS,
   PROGRAM_RULES,
+  PYTHON_MODULES,
+  PYTHON_MODULE_FLAG,
+  PYTHON_PROGRAMS,
   SCRIPT_NAME_PATTERN,
   type CommandCategory,
 } from './catalogue.js';
@@ -145,6 +148,27 @@ function classifyPackageManager(program: string, argv: readonly string[]): Comma
   return denied(program, subcommand, 'that subcommand is not on the allowlist');
 }
 
+function classifyPython(program: string, argv: readonly string[]): CommandClassification {
+  const moduleAt = argv.indexOf(PYTHON_MODULE_FLAG);
+
+  if (moduleAt !== -1) {
+    const wanted = argv[moduleAt + 1] ?? '';
+    const category = PYTHON_MODULES[wanted];
+
+    if (category === undefined) {
+      return denied(program, wanted === '' ? null : wanted, 'that module is not on the allowlist');
+    }
+    return allowed(program, wanted, category);
+  }
+
+  const script = firstPositional(argv, 1);
+
+  if (script === null) {
+    return denied(program, null, 'a script or a module has to be named, or this waits for input');
+  }
+  return allowed(program, script, 'script');
+}
+
 export function classifyCommand(argv: readonly string[]): CommandClassification {
   if (argv.length === 0 || argv.length > SANDBOX_LIMITS.maxArgvEntries) {
     return denied('', null, 'that command could not be read');
@@ -182,6 +206,10 @@ export function classifyCommand(argv: readonly string[]): CommandClassification 
 
   if (PACKAGE_MANAGERS.includes(program)) {
     return classifyPackageManager(program, argv);
+  }
+
+  if (PYTHON_PROGRAMS.includes(program)) {
+    return classifyPython(program, argv);
   }
 
   const subcommand = firstPositional(argv, 1);

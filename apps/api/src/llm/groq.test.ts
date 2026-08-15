@@ -48,6 +48,23 @@ function provider(overrides: Record<string, unknown> = {}): {
 
 const ASK = [{ role: 'user' as const, content: 'where is the router' }];
 
+const TOOL_USE_FAILED = {
+  error: {
+    message: 'Tool choice is none, but model called a tool',
+    type: 'invalid_request_error',
+    code: 'tool_use_failed',
+    failed_generation: '{"name": "repo_browser.list_files", "arguments": {"path": ""}}',
+  },
+};
+
+const JSON_VALIDATE_FAILED = {
+  error: {
+    message: 'Failed to validate JSON. Please adjust your prompt.',
+    type: 'invalid_request_error',
+    code: 'json_validate_failed',
+  },
+};
+
 async function failureOf(work: Promise<unknown>): Promise<LlmError> {
   try {
     await work;
@@ -359,6 +376,97 @@ describe('GroqTextProvider, structured answers', () => {
     await expect(
       text.completeStructured({ messages: ASK, schema: AnswerSchema, schemaName: 'answer' }),
     ).rejects.toThrow(expect.objectContaining({ code: 'LLM_SCHEMA_REFUSED' }) as Error);
+  });
+
+  it('tries again when the model called a tool instead of answering', async () => {
+    stub = stubFetch([
+      { status: 400, body: TOOL_USE_FAILED },
+      { body: groqReply(JSON.stringify(GOOD_ANSWER)) },
+    ]);
+    const { text } = provider();
+
+    const result = await text.completeStructured({
+      messages: ASK,
+      schema: AnswerSchema,
+      schemaName: 'answer',
+    });
+
+    expect(result.value).toEqual(GOOD_ANSWER);
+    expect(stub.calls).toHaveLength(2);
+  });
+
+  it('tells the model there is no tool to call, so it stops reaching for one', async () => {
+    stub = stubFetch([
+      { status: 400, body: TOOL_USE_FAILED },
+      { body: groqReply(JSON.stringify(GOOD_ANSWER)) },
+    ]);
+    const { text } = provider();
+
+    await text.completeStructured({ messages: ASK, schema: AnswerSchema, schemaName: 'answer' });
+
+    const sent = stub.calls[1]?.body as { messages: { content: string }[] };
+    const last = sent.messages[sent.messages.length - 1]?.content ?? '';
+
+    expect(last).toContain('There are no tools attached to this request');
+    expect(last).toContain('call nothing');
+  });
+
+  it('tries again when the provider could not validate the answer', async () => {
+    stub = stubFetch([
+      { status: 400, body: JSON_VALIDATE_FAILED },
+      { body: groqReply(JSON.stringify(GOOD_ANSWER)) },
+    ]);
+    const { text } = provider();
+
+    const result = await text.completeStructured({
+      messages: ASK,
+      schema: AnswerSchema,
+      schemaName: 'answer',
+    });
+
+    expect(result.value).toEqual(GOOD_ANSWER);
+  });
+
+  it('gives up on an unusable answer the same way as on a wrong shape', async () => {
+    stub = stubFetch([
+      { status: 400, body: TOOL_USE_FAILED },
+      { status: 400, body: TOOL_USE_FAILED },
+    ]);
+    const { text } = provider();
+
+    const failure = await failureOf(
+      text.completeStructured({ messages: ASK, schema: AnswerSchema, schemaName: 'answer' }),
+    );
+
+    expect(failure.code).toBe('LLM_SCHEMA_REFUSED');
+    expect(failure.detail).toBe('tool_use_failed');
+  });
+
+  it('still fails outright on a request the provider genuinely refused', async () => {
+    stub = stubFetch([
+      {
+        status: 400,
+        body: { error: { message: 'model is decommissioned', code: 'model_decommissioned' } },
+      },
+      { body: groqReply(JSON.stringify(GOOD_ANSWER)) },
+    ]);
+    const { text } = provider();
+
+    const failure = await failureOf(
+      text.completeStructured({ messages: ASK, schema: AnswerSchema, schemaName: 'answer' }),
+    );
+
+    expect(failure.code).toBe('LLM_REQUEST_INVALID');
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it('leaves a plain answer alone, because there is nothing there to repair', async () => {
+    stub = stubFetch([{ status: 400, body: TOOL_USE_FAILED }]);
+    const { text } = provider();
+
+    const failure = await failureOf(text.complete({ messages: ASK }));
+
+    expect(failure.code).toBe('LLM_REQUEST_INVALID');
   });
 
   it('names the failing fields without quoting the answer', async () => {

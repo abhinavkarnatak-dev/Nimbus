@@ -19,6 +19,8 @@ function terminationFor(result: RunResult): SandboxTerminationReason {
 }
 
 export async function runAgent(input: RunInput): Promise<RunResult> {
+  input.router.restoreBudget(input.state.budgets.llm);
+
   const graph = buildAgentGraph(input);
   const config = {
     recursionLimit: input.state.budgets.maxSteps * 3 + RECURSION_HEADROOM,
@@ -42,7 +44,7 @@ export async function runAgent(input: RunInput): Promise<RunResult> {
     };
   } catch (error) {
     input.logger.error(
-      { sessionId: input.state.sessionId, error: String(error) },
+      { sessionId: input.state.sessionId, ...describeFailure(error) },
       'an agent run did not finish',
     );
 
@@ -59,6 +61,24 @@ export async function runAgent(input: RunInput): Promise<RunResult> {
   }
 
   return result;
+}
+
+export function describeFailure(error: unknown): {
+  error: string;
+  code: string | null;
+  detail: string | null;
+} {
+  if (typeof error !== 'object' || error === null) {
+    return { error: String(error), code: null, detail: null };
+  }
+
+  const held = error as { code?: unknown; detail?: unknown; message?: unknown };
+
+  return {
+    error: typeof held.message === 'string' ? held.message : 'something with no message was thrown',
+    code: typeof held.code === 'string' ? held.code : null,
+    detail: typeof held.detail === 'string' ? held.detail : null,
+  };
 }
 
 async function tearDown(input: RunInput, result: RunResult | null): Promise<void> {

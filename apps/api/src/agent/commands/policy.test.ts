@@ -33,6 +33,49 @@ describe('commands that are simply allowed', () => {
   });
 });
 
+describe('python, because a repository is not always JavaScript', () => {
+  it('runs a script file, which is the whole check in a small repository', () => {
+    expect(classifyCommand(['python', 'stringFormatting.py']).decision).toBe('allowed');
+    expect(classifyCommand(['python3', 'main.py']).decision).toBe('allowed');
+  });
+
+  it('runs a module that is on the list', () => {
+    expect(classifyCommand(['python', '-m', 'pytest']).decision).toBe('allowed');
+    expect(classifyCommand(['python', '-m', 'py_compile', 'a.py']).category).toBe('typecheck');
+    expect(classifyCommand(['python', '-m', 'unittest']).category).toBe('test');
+  });
+
+  it('refuses a module that installs things, which no check needs', () => {
+    expect(classifyCommand(['python', '-m', 'pip', 'install', 'requests']).decision).toBe('denied');
+    expect(classifyCommand(['python', '-m', 'ensurepip']).decision).toBe('denied');
+    expect(classifyCommand(['python', '-m', 'venv', '.venv']).decision).toBe('denied');
+  });
+
+  it('refuses a module nobody wrote down', () => {
+    const outcome = classifyCommand(['python', '-m', 'http.server']);
+
+    expect(outcome.decision).toBe('denied');
+    expect(outcome.reason).toBe('that module is not on the allowlist');
+  });
+
+  it('still refuses code given as a string, the same as everywhere else', () => {
+    expect(classifyCommand(['python', '-c', 'print(1)']).decision).toBe('denied');
+    expect(classifyCommand(['python3', '-c', 'import os']).decision).toBe('denied');
+  });
+
+  it('refuses a bare interpreter, which would sit waiting for input', () => {
+    const outcome = classifyCommand(['python']);
+
+    expect(outcome.decision).toBe('denied');
+    expect(outcome.reason).toContain('waits for input');
+  });
+
+  it('names what it ran, so a log says more than the program', () => {
+    expect(classifyCommand(['python', 'main.py']).subcommand).toBe('main.py');
+    expect(classifyCommand(['python', '-m', 'pytest']).subcommand).toBe('pytest');
+  });
+});
+
 describe('the allowlist is the whole defence', () => {
   it('refuses a program nobody wrote down, even a harmless one', () => {
     expect(decisionOf(['ls', '-la'])).toBe('denied');

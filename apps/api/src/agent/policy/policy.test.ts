@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { capturingLogger } from '../../llm/llm.fixtures.js';
+import { parsePatch } from '../tools/patch.js';
+import { canBeApproved } from './rules.js';
 import { InMemoryApprovals } from './approvals.js';
 import { POLICY_LIMITS } from './limits.js';
 import { PolicyGate, type ProposedTool } from './policy.js';
@@ -167,13 +169,6 @@ describe('what is never allowed, however nicely it is asked', () => {
     expect(outcome.decision).toBe('denied');
   });
 
-  it('denies a patch it cannot even read', async () => {
-    const { policy } = gate();
-    expect(
-      (await policy.authorize({ tool: 'apply_patch', input: { patch: 'not a patch' } })).decision,
-    ).toBe('denied');
-  });
-
   it('offers no approval path for something denied', async () => {
     const { policy } = gate();
     const action = { tool: 'run_command', input: { argv: ['curl', 'https://x.com'] } };
@@ -181,6 +176,115 @@ describe('what is never allowed, however nicely it is asked', () => {
 
     expect(outcome.decision).toBe('denied');
     expect(outcome.effect).toBeNull();
+  });
+});
+
+describe('a patch the gate cannot read', () => {
+  it('is not denied, because being unreadable is not the same as being forbidden', async () => {
+    const { policy } = gate();
+    const outcome = await policy.authorize({
+      tool: 'apply_patch',
+      input: { patch: 'not a patch' },
+    });
+
+    expect(outcome.decision).not.toBe('denied');
+  });
+
+  it('is let through to the tool, which refuses it and says what was wrong', async () => {
+    const { policy } = gate();
+    const outcome = await policy.authorize({
+      tool: 'apply_patch',
+      input: { patch: 'not a patch' },
+    });
+
+    expect(outcome.decision).toBe('allowed');
+    expect(() => parsePatch('not a patch')).toThrow(
+      expect.objectContaining({ code: 'PATCH_MALFORMED' }) as Error,
+    );
+  });
+
+  it('changes nothing, because the tool reads it with the same parser as the gate', () => {
+    expect(() => parsePatch('not a patch')).toThrow();
+  });
+
+  it('still asks a person about a patch it can read that touches a protected file', async () => {
+    const { policy } = gate();
+    const outcome = await policy.authorize({
+      tool: 'apply_patch',
+      input: {
+        patch: [
+          '--- a/src/auth/session.ts',
+          '+++ b/src/auth/session.ts',
+          '@@ -1,1 +1,1 @@',
+          '-old',
+          '+new',
+          '',
+        ].join('\n'),
+      },
+    });
+
+    expect(outcome.decision).toBe('approval_required');
+  });
+});
+
+describe('a path no approval could ever cover', () => {
+  const GIT_PATCH = [
+    '--- a/.git/config',
+    '+++ b/.git/config',
+    '@@ -1,1 +1,1 @@',
+    '-old',
+    '+new',
+    '',
+  ].join('\n');
+
+  it('is denied rather than sent to a person who could not approve it', async () => {
+    const { policy } = gate();
+    const outcome = await policy.authorize({ tool: 'apply_patch', input: { patch: GIT_PATCH } });
+
+    expect(outcome.decision).toBe('denied');
+    expect(outcome.effect).toBeNull();
+  });
+
+  it('answers instead of throwing, so one bad patch cannot end the session', async () => {
+    const { policy } = gate();
+
+    await expect(
+      policy.authorize({ tool: 'apply_patch', input: { patch: GIT_PATCH } }),
+    ).resolves.toBeDefined();
+  });
+
+  it('denies a new file there too', async () => {
+    const { policy } = gate();
+    const outcome = await policy.authorize({
+      tool: 'create_file',
+      input: { path: '.git/hooks/pre-commit', contents: 'echo hi\n' },
+    });
+
+    expect(outcome.decision).toBe('denied');
+  });
+
+  it('denies a patch that hides one such path among ordinary ones', async () => {
+    const { policy } = gate();
+    const outcome = await policy.authorize({
+      tool: 'apply_patch',
+      input: {
+        patch: [
+          '--- a/README.md',
+          '+++ b/README.md',
+          '@@ -1,1 +1,1 @@',
+          '-old',
+          '+new',
+          GIT_PATCH,
+        ].join('\n'),
+      },
+    });
+
+    expect(outcome.decision).toBe('denied');
+  });
+
+  it('asks the approval schema itself, so the two can never disagree', () => {
+    expect(canBeApproved('.git/config')).toBe(false);
+    expect(canBeApproved('src/auth/session.ts')).toBe(true);
   });
 });
 

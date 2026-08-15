@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { LlmError } from './errors.js';
-import { GeminiTextProvider, outputBudget, toGeminiParts } from './gemini-text.js';
+import { GeminiTextProvider, outputBudget, thinkingBudget, toGeminiParts } from './gemini-text.js';
 import { LLM_LIMITS } from './limits.js';
 import {
   ANSWER_JSON_SCHEMA,
@@ -108,6 +108,74 @@ describe('outputBudget', () => {
 
   it('has a default of its own', () => {
     expect(outputBudget(undefined, 'gemini-3.5-flash-lite')).toBe(LLM_LIMITS.maxOutputTokens);
+  });
+});
+
+describe('thinkingBudget', () => {
+  it('caps thinking at the same room the budget added for it', () => {
+    expect(thinkingBudget('gemini-3.6-flash')).toBe(LLM_LIMITS.geminiThinkingHeadroom);
+  });
+
+  it('leaves the room asked for untouched, which is the whole point of capping', () => {
+    const asked = 1_500;
+    const total = outputBudget(asked, 'gemini-3.6-flash');
+
+    expect(total - (thinkingBudget('gemini-3.6-flash') ?? 0)).toBe(asked);
+  });
+
+  it('caps nothing on a model that does not think', () => {
+    expect(thinkingBudget('gemini-3.5-flash-lite')).toBeNull();
+  });
+
+  it('caps a model it has never heard of, because it may well think', () => {
+    expect(thinkingBudget('some-new-model')).toBe(LLM_LIMITS.geminiThinkingHeadroom);
+  });
+});
+
+describe('what the request asks Gemini for', () => {
+  it('caps thinking so the answer always has room left', async () => {
+    stub = stubFetch([{ body: geminiReply('an answer') }]);
+    const { text } = provider();
+
+    await text.complete({ messages: ASK, model: 'gemini-3.6-flash', maxOutputTokens: 1_500 });
+
+    const sent = stub.calls[0]?.body as {
+      generationConfig: { maxOutputTokens: number; thinkingConfig?: { thinkingBudget: number } };
+    };
+
+    expect(sent.generationConfig.thinkingConfig?.thinkingBudget).toBe(
+      LLM_LIMITS.geminiThinkingHeadroom,
+    );
+    expect(sent.generationConfig.maxOutputTokens).toBe(1_500 + LLM_LIMITS.geminiThinkingHeadroom);
+  });
+
+  it('says nothing about thinking to a model that does not think', async () => {
+    stub = stubFetch([{ body: geminiReply('an answer') }]);
+    const { text } = provider();
+
+    await text.complete({ messages: ASK, model: 'gemini-3.5-flash-lite' });
+
+    const sent = stub.calls[0]?.body as { generationConfig: Record<string, unknown> };
+
+    expect(sent.generationConfig['thinkingConfig']).toBeUndefined();
+  });
+
+  it('still asks for the shape it wanted alongside the cap', async () => {
+    stub = stubFetch([{ body: geminiReply(JSON.stringify(GOOD_ANSWER)) }]);
+    const { text } = provider();
+
+    await text.completeStructured({
+      messages: ASK,
+      schema: AnswerSchema,
+      schemaName: 'answer',
+      jsonSchema: ANSWER_JSON_SCHEMA,
+      model: 'gemini-3.6-flash',
+    });
+
+    const sent = stub.calls[0]?.body as { generationConfig: Record<string, unknown> };
+
+    expect(sent.generationConfig['thinkingConfig']).toBeDefined();
+    expect(sent.generationConfig['responseJsonSchema']).toBeDefined();
   });
 });
 

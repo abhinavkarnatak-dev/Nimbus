@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { parseState } from '../state/state.js';
 import { actionFor, executeHarness } from './execute.fixtures.js';
 import { EXECUTE_LIMITS } from './limits.js';
-import { RunGuard, applyExecution, countsAsFailure, stopWith } from './loop.js';
+import { RunGuard, applyExecution, countsAsFailure, repeatNotice, stopWith } from './loop.js';
 
 const READ = actionFor('read_file', { path: 'src/auth/login.ts' });
 const MISSING = actionFor('read_file', { path: 'src/auth/nowhere.ts' });
@@ -85,6 +85,78 @@ describe('the same failing action twice', () => {
     }
 
     expect(harness.guard.failuresFor('nothing-like-a-hash')).toBe(0);
+  });
+});
+
+describe('the same succeeding action over and over', () => {
+  it('stops, because reading the same file again tells it nothing new', async () => {
+    const harness = await executeHarness();
+    const verdicts = [];
+
+    for (let index = 0; index < EXECUTE_LIMITS.sameActionRepeatsMax; index += 1) {
+      verdicts.push(harness.guard.afterStep(await harness.executor.execute(READ)));
+    }
+
+    expect(verdicts.slice(0, -1).every((verdict) => !verdict.stop)).toBe(true);
+    expect(verdicts[verdicts.length - 1]?.stop).toBe(true);
+    expect(verdicts[verdicts.length - 1]?.reason).toBe('repeated_action');
+  });
+
+  it('says what it kept asking for', async () => {
+    const harness = await executeHarness();
+    let verdict = harness.guard.afterStep(await harness.executor.execute(READ));
+
+    while (!verdict.stop) {
+      verdict = harness.guard.afterStep(await harness.executor.execute(READ));
+    }
+
+    expect(verdict.detail).toContain('read_file');
+    expect(verdict.detail).toContain('same thing');
+  });
+
+  it('counts each different action on its own', async () => {
+    const harness = await executeHarness();
+
+    for (let index = 0; index < EXECUTE_LIMITS.sameActionRepeatsMax + 2; index += 1) {
+      const verdict = harness.guard.afterStep(
+        await harness.executor.execute(
+          actionFor('read_file', { path: `src/auth/file${String(index)}.ts` }),
+        ),
+      );
+
+      expect(verdict.stop).toBe(false);
+    }
+  });
+
+  it('counts how many times it has seen one action', async () => {
+    const harness = await executeHarness();
+    const result = await harness.executor.execute(READ);
+
+    harness.guard.afterStep(result);
+    harness.guard.afterStep(await harness.executor.execute(READ));
+
+    expect(harness.guard.timesSeen(result.actionHash)).toBe(2);
+  });
+
+  it('still stops sooner on a repeated failure than on a repeated success', () => {
+    expect(EXECUTE_LIMITS.sameActionFailuresMax).toBeLessThan(EXECUTE_LIMITS.sameActionRepeatsMax);
+  });
+});
+
+describe('repeatNotice', () => {
+  it('says nothing extra the first time', () => {
+    expect(repeatNotice('read_file', 'eight lines', 1)).toBe('read_file: eight lines');
+  });
+
+  it('tells the model plainly that it is going in a circle', () => {
+    const line = repeatNotice('read_file', 'eight lines', 2);
+
+    expect(line).toContain('already asked for exactly this');
+    expect(line).toContain('Do something else');
+  });
+
+  it('keeps the summary, so the answer is still there to use', () => {
+    expect(repeatNotice('read_file', 'eight lines', 3)).toContain('eight lines');
   });
 });
 

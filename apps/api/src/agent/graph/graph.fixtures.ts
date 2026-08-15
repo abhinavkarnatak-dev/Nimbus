@@ -57,8 +57,8 @@ export function action(
   tool: string,
   toolArguments: Record<string, unknown>,
   intent = `do ${tool}`,
-): { value: { intent: string; tool: string; toolArguments: Record<string, unknown> } } {
-  return { value: { intent, tool, toolArguments } };
+): { value: { intent: string; tool: string; toolArgumentsJson: string } } {
+  return { value: { intent, tool, toolArgumentsJson: JSON.stringify(toolArguments) } };
 }
 
 export const REDIRECT_PATCH = [

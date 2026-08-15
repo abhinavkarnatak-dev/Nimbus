@@ -7,7 +7,13 @@ import type { SessionRouter } from '../../routing/router.js';
 import type { Sandbox } from '../../sandbox/index.js';
 import type { RepositoryReference, RepositorySource } from '../clone/index.js';
 import type { ActionExecutor } from '../execute/executor.js';
-import { RunGuard, applyExecution, stopWith, type StopVerdict } from '../execute/loop.js';
+import {
+  RunGuard,
+  applyExecution,
+  repeatNotice,
+  stopWith,
+  type StopVerdict,
+} from '../execute/loop.js';
 import { chooseNextAction } from '../nodes/reason.js';
 import { gatherContext } from '../nodes/retrieve.js';
 import { validateScope } from '../nodes/scope.js';
@@ -62,6 +68,12 @@ const RunAnnotation = Annotation.Root({
 export function buildAgentGraph(input: RunInput) {
   const guard = new RunGuard();
 
+  const spent = (state: AgentState): AgentState =>
+    parseState({
+      ...state,
+      budgets: { ...state.budgets, llm: input.router.budgetState() },
+    });
+
   const clone = async (current: Carried): Promise<Partial<Carried>> => {
     if (current.state.filesRead.length > 0 || current.cloned > 0) {
       return {};
@@ -83,16 +95,18 @@ export function buildAgentGraph(input: RunInput) {
     const verdict = await validateScope(current.state, { router: input.router });
 
     if (verdict.outcome !== 'needs_clarification') {
-      return { state: withPhase(current.state, 'retrieving') };
+      return { state: spent(withPhase(current.state, 'retrieving')) };
     }
 
     return {
       done: true,
-      state: parseState({
-        ...current.state,
-        phase: 'clarifying',
-        clarificationQuestion: verdict.question,
-      }),
+      state: spent(
+        parseState({
+          ...current.state,
+          phase: 'clarifying',
+          clarificationQuestion: verdict.question,
+        }),
+      ),
     };
   };
 
@@ -136,21 +150,23 @@ export function buildAgentGraph(input: RunInput) {
       });
 
       return {
-        state: refused,
+        state: spent(refused),
         history: [...current.history, `refused: ${chosen.refusal ?? ''}`],
       };
     }
 
     return {
-      state: parseState({
-        ...current.state,
-        proposedAction: {
-          tool: chosen.action.tool,
-          reason: chosen.action.intent,
-          argumentsJson: JSON.stringify(chosen.action.toolArguments),
-          actionHash: '0'.repeat(64),
-        },
-      }),
+      state: spent(
+        parseState({
+          ...current.state,
+          proposedAction: {
+            tool: chosen.action.tool,
+            reason: chosen.action.intent,
+            argumentsJson: JSON.stringify(chosen.action.toolArguments),
+            actionHash: '0'.repeat(64),
+          },
+        }),
+      ),
     };
   };
 
@@ -171,8 +187,11 @@ export function buildAgentGraph(input: RunInput) {
     });
 
     const next = applyExecution(current.state, result);
-    const history = [...current.history, `${proposed.tool}: ${result.observation.summary}`];
     const after = guard.afterStep(result);
+    const history = [
+      ...current.history,
+      repeatNotice(proposed.tool, result.observation.summary, guard.timesSeen(result.actionHash)),
+    ];
 
     if (after.stop) {
       return { done: true, verdict: after, history, state: stopWith(next, after) };

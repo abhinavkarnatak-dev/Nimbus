@@ -44,6 +44,35 @@ describe('SessionRouter', () => {
     expect(text.calls[0]?.model).toBe('openai/gpt-oss-120b');
   });
 
+  it('takes a whole plan, so a resumed session keeps the models it started with', async () => {
+    const plan = {
+      primary: 'openai/gpt-oss-120b',
+      light: 'openai/gpt-oss-20b',
+      reasoning: DEFAULT_REASONING_MODEL,
+      vision: DEFAULT_TEXT_MODEL,
+      chosenByUser: true,
+    };
+    const { session, text } = router({ plan });
+
+    await session.complete({ messages: ASK, role: 'light' });
+
+    expect(session.plan).toEqual(plan);
+    expect(text.calls[0]?.model).toBe('openai/gpt-oss-20b');
+  });
+
+  it('prefers the plan it was given over working one out from a choice', () => {
+    const plan = {
+      primary: 'openai/gpt-oss-120b',
+      light: 'openai/gpt-oss-20b',
+      reasoning: DEFAULT_REASONING_MODEL,
+      vision: DEFAULT_TEXT_MODEL,
+      chosenByUser: true,
+    };
+    const { session } = router({ plan, selection: { textModel: DEFAULT_TEXT_MODEL } });
+
+    expect(session.modelFor('primary')).toBe('openai/gpt-oss-120b');
+  });
+
   it('refuses a model the user may not choose, before anything is asked', () => {
     expect(() => router({ selection: { textModel: 'gpt-9-ultra' } })).toThrow(
       expect.objectContaining({ code: 'LLM_MODEL_UNKNOWN' }) as Error,

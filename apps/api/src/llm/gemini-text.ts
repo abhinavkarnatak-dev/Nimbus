@@ -63,6 +63,18 @@ export function outputBudget(requested: number | undefined, model: string): numb
   return findModel(model)?.thinks === false ? asked : asked + LLM_LIMITS.geminiThinkingHeadroom;
 }
 
+export function thinkingBudget(model: string): number | null {
+  return findModel(model)?.thinks === false ? null : LLM_LIMITS.geminiThinkingHeadroom;
+}
+
+export function truncationDetail(model: string, allowed: number, body: unknown): string {
+  const usage = readGeminiUsage((body as { usageMetadata?: unknown } | null)?.usageMetadata);
+
+  return `${model} was allowed ${String(allowed)} tokens, spent ${String(
+    usage.reasoningTokens,
+  )} thinking and wrote ${String(usage.completionTokens)}`;
+}
+
 export class GeminiTextProvider implements TextProvider {
   readonly name = 'gemini' as const;
 
@@ -103,7 +115,9 @@ export class GeminiTextProvider implements TextProvider {
     const found = readGeminiText(body);
 
     if (found.hitLimit) {
-      throw new LlmError('LLM_TRUNCATED', 'The model ran out of room before it finished.');
+      throw new LlmError('LLM_TRUNCATED', 'The model ran out of room before it finished.', {
+        detail: truncationDetail(model, outputBudget(request.maxOutputTokens, model), body),
+      });
     }
 
     return { text: found.text, report: this.report(model, body, attempts, durationMs) };
@@ -125,7 +139,9 @@ export class GeminiTextProvider implements TextProvider {
       const found = readGeminiText(body);
 
       if (found.hitLimit) {
-        throw new LlmError('LLM_TRUNCATED', 'The model ran out of room before it finished.');
+        throw new LlmError('LLM_TRUNCATED', 'The model ran out of room before it finished.', {
+          detail: truncationDetail(model, outputBudget(request.maxOutputTokens, model), body),
+        });
       }
 
       const parsed = parseJson(found.text);
@@ -174,6 +190,7 @@ export class GeminiTextProvider implements TextProvider {
   ): Promise<{ body: unknown; attempts: number; durationMs: number }> {
     const runner = new ProviderRunner({ provider: this.name, model, logger: this.logger });
     const parts = toGeminiParts(messages);
+    const thinking = thinkingBudget(model);
 
     return await runner.send({
       url: `${this.baseUrl}/${model}:generateContent`,
@@ -184,6 +201,7 @@ export class GeminiTextProvider implements TextProvider {
         generationConfig: {
           temperature: request.temperature ?? 0,
           maxOutputTokens: outputBudget(request.maxOutputTokens, model),
+          ...(thinking === null ? {} : { thinkingConfig: { thinkingBudget: thinking } }),
           ...(shape ?? {}),
         },
       },

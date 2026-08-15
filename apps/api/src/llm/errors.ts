@@ -29,6 +29,7 @@ export interface LlmErrorOptions {
   status?: number;
   detail?: string;
   retryAfterMs?: number;
+  providerCode?: string;
 }
 
 export class LlmError extends Error {
@@ -40,6 +41,8 @@ export class LlmError extends Error {
 
   readonly retryAfterMs: number | null;
 
+  readonly providerCode: string | null;
+
   constructor(code: LlmErrorCode, message: string, options: LlmErrorOptions = {}) {
     super(message, options.cause === undefined ? undefined : { cause: options.cause });
     this.name = 'LlmError';
@@ -47,6 +50,7 @@ export class LlmError extends Error {
     this.status = options.status ?? null;
     this.detail = options.detail ?? null;
     this.retryAfterMs = options.retryAfterMs ?? null;
+    this.providerCode = options.providerCode ?? null;
   }
 
   get retryable(): boolean {

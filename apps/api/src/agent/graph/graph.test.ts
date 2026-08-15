@@ -8,7 +8,8 @@ import {
   action,
   graphHarness,
 } from './graph.fixtures.js';
-import { runAgent } from './run.js';
+import { parseState } from '../state/state.js';
+import { describeFailure, runAgent } from './run.js';
 
 const READ = action('read_file', { path: 'src/routing/redirect.ts' });
 const PATCH = action('apply_patch', { patch: REDIRECT_PATCH });
@@ -207,11 +208,22 @@ describe('a change that needs a person', () => {
   });
 });
 
+const WANDERING = [
+  action('read_file', { path: 'README.md' }),
+  action('read_file', { path: 'src/routing/login.ts' }),
+  action('read_file', { path: 'src/routing/redirect.ts' }),
+  action('list_tree', { path: 'src' }),
+  action('list_tree', { path: '.' }),
+  action('search_code', { query: 'redirect' }),
+  action('search_code', { query: 'login' }),
+  action('git_status', {}),
+];
+
 describe('a model that will not converge', () => {
   it('is stopped by a budget, with the reason recorded', async () => {
     const harness = await graphHarness({
       budgets: { maxSteps: 4 },
-      answers: [CLEAR_SCOPE, READ, READ, READ, READ, READ, READ, READ, READ],
+      answers: [CLEAR_SCOPE, ...WANDERING],
     });
 
     const result = await runAgent(harness);
@@ -230,10 +242,22 @@ describe('a model that will not converge', () => {
     expect(result.state.stopReason).toBe('repeated_action');
   });
 
+  it('is stopped when it keeps asking for the same file it already has', async () => {
+    const harness = await graphHarness({
+      budgets: { maxSteps: 20 },
+      answers: [CLEAR_SCOPE, READ, READ, READ, READ, READ, READ],
+    });
+
+    const result = await runAgent(harness);
+
+    expect(result.state.stopReason).toBe('repeated_action');
+    expect(result.steps).toBeLessThan(20);
+  });
+
   it('tears the sandbox down when a budget runs out', async () => {
     const harness = await graphHarness({
       budgets: { maxSteps: 3 },
-      answers: [CLEAR_SCOPE, READ, READ, READ, READ, READ],
+      answers: [CLEAR_SCOPE, ...WANDERING],
     });
 
     await runAgent(harness);
@@ -274,5 +298,90 @@ describe('when something goes wrong', () => {
 
     expect(result.state.stopReason).toBe('failed');
     expect(harness.sandbox.status().state).toBe('terminated');
+  });
+
+  it('writes down why, so a failed run can be read afterwards', async () => {
+    const harness = await graphHarness({ truncated: true, answers: [CLEAR_SCOPE] });
+    await runAgent(harness);
+
+    expect(harness.logs()).toContain('an agent run did not finish');
+  });
+});
+
+describe('what a session spent', () => {
+  it('is written into the state, so it survives the run that spent it', async () => {
+    const harness = await graphHarness({ answers: [CLEAR_SCOPE, READ, PATCH, CHECKS, COMMIT] });
+    const result = await runAgent(harness);
+
+    expect(result.state.budgets.llm.tokensUsed).toBeGreaterThan(0);
+    expect(result.state.budgets.llm.calls).toBeGreaterThan(0);
+  });
+
+  it('matches what the router actually charged', async () => {
+    const harness = await graphHarness({ answers: [CLEAR_SCOPE, READ, PATCH, CHECKS, COMMIT] });
+    const result = await runAgent(harness);
+
+    expect(result.state.budgets.llm.tokensUsed).toBe(harness.router.budgetState().tokensUsed);
+  });
+
+  it('is counted even when the run stops early', async () => {
+    const harness = await graphHarness({
+      budgets: { maxSteps: 2 },
+      answers: [CLEAR_SCOPE, ...WANDERING],
+    });
+    const result = await runAgent(harness);
+
+    expect(result.state.budgets.llm.calls).toBeGreaterThan(0);
+  });
+
+  it('starts a resumed run from what was already spent, not from nothing', async () => {
+    const first = await graphHarness({ answers: [CLEAR_SCOPE, READ, PATCH, CHECKS, COMMIT] });
+    const spent = (await runAgent(first)).state.budgets.llm;
+
+    const second = await graphHarness({ answers: [CLEAR_SCOPE, READ, PATCH, CHECKS, COMMIT] });
+    const resumed = {
+      ...second,
+      state: parseState({
+        ...second.state,
+        budgets: { ...second.state.budgets, llm: spent },
+      }),
+    };
+
+    const result = await runAgent(resumed);
+
+    expect(result.state.budgets.llm.tokensUsed).toBeGreaterThan(spent.tokensUsed);
+  });
+});
+
+describe('describeFailure', () => {
+  it('keeps the code and the detail, not just the message', () => {
+    const thrown = Object.assign(new Error('the model refused the schema'), {
+      code: 'LLM_REQUEST_INVALID',
+      detail: 'additionalProperties:false must be set on every object',
+    });
+
+    expect(describeFailure(thrown)).toEqual({
+      error: 'the model refused the schema',
+      code: 'LLM_REQUEST_INVALID',
+      detail: 'additionalProperties:false must be set on every object',
+    });
+  });
+
+  it('leaves the code and the detail empty when there are none', () => {
+    expect(describeFailure(new Error('plain'))).toEqual({
+      error: 'plain',
+      code: null,
+      detail: null,
+    });
+  });
+
+  it('reads something that was thrown without being an error', () => {
+    expect(describeFailure('a string was thrown').error).toBe('a string was thrown');
+    expect(describeFailure(null).error).toBe('null');
+    expect(describeFailure({ code: 'ODD' })).toEqual({
+      error: 'something with no message was thrown',
+      code: 'ODD',
+      detail: null,
+    });
   });
 });

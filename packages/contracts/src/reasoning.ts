@@ -23,6 +23,12 @@ export const NextActionSchema = z.strictObject({
   toolArguments: ToolArgumentsSchema,
 });
 
+export const NextActionWireSchema = z.strictObject({
+  intent: z.string().min(1).max(MAX_INTENT_CHARS),
+  tool: ToolNameSchema,
+  toolArgumentsJson: z.string().max(MAX_ARGUMENTS_CHARS),
+});
+
 export const SCOPE_OUTCOMES = ['clear', 'needs_clarification', 'already_asked'] as const;
 
 export const ScopeOutcomeSchema = z.enum(SCOPE_OUTCOMES);
@@ -36,5 +42,6 @@ export const ScopeResultSchema = z.strictObject({
 
 export type ScopeVerdict = z.infer<typeof ScopeVerdictSchema>;
 export type NextAction = z.infer<typeof NextActionSchema>;
+export type NextActionWire = z.infer<typeof NextActionWireSchema>;
 export type ScopeOutcome = z.infer<typeof ScopeOutcomeSchema>;
 export type ScopeResult = z.infer<typeof ScopeResultSchema>;

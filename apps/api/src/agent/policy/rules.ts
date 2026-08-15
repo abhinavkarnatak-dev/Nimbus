@@ -1,4 +1,10 @@
-import type { ApprovalCategory, PolicyDecision, RiskLevel, ToolName } from '@nimbus/contracts';
+import {
+  WorkspacePathSchema,
+  type ApprovalCategory,
+  type PolicyDecision,
+  type RiskLevel,
+  type ToolName,
+} from '@nimbus/contracts';
 
 import { classifyCommand } from '../commands/policy.js';
 import { parsePatch } from '../tools/patch.js';
@@ -61,7 +67,15 @@ export function isDependencyFile(path: string): boolean {
   return DEPENDENCY_FILES.includes(name);
 }
 
+export function canBeApproved(path: string): boolean {
+  return WorkspacePathSchema.safeParse(path).success;
+}
+
 export function classifyPath(path: string): Classification | null {
+  if (!canBeApproved(path)) {
+    return denied('that path can never be written to, so no approval could allow it');
+  }
+
   if (isDependencyFile(path)) {
     return needsApproval(
       'dependency_change',
@@ -83,12 +97,16 @@ function classifyPatch(patch: string): Classification {
   try {
     files = parsePatch(patch);
   } catch {
-    return denied('that patch could not be read');
+    return allowed('that patch cannot be read, so the tool will refuse it and say why');
   }
 
   const paths = files
     .map((file) => file.newPath ?? file.oldPath ?? '')
     .filter((path) => path !== '');
+
+  if (paths.some((path) => !canBeApproved(path))) {
+    return denied('that patch writes to a path that can never be written to');
+  }
 
   const deleted = files.filter((file) => file.changeKind === 'deleted');
   const renamed = files.filter((file) => file.changeKind === 'renamed');
