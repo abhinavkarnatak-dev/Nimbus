@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 
 import type { LogLevel } from '../logging/logger.js';
+import { missingProviderIssues, modelCatalogueIssues } from '../routing/requirements.js';
 import { environmentSchema, type RawEnvironment } from './schema.js';
 
 export interface GoogleConfig {
@@ -242,8 +243,11 @@ function productionIssues(config: AppConfig): string[] {
   if (config.storage !== null && !config.storage.endpoint.startsWith('https://')) {
     issues.push('S3_ENDPOINT: must use https in production');
   }
-  if (config.llm.groqApiKey === undefined) {
-    issues.push('GROQ_API_KEY: required in production');
+  for (const issue of missingProviderIssues(config.llm, {
+    gemini: config.llm.geminiApiKey !== undefined,
+    groq: config.llm.groqApiKey !== undefined,
+  })) {
+    issues.push(issue);
   }
   if (config.sandbox.allowInternet) {
     issues.push('SANDBOX_ALLOW_INTERNET: must be false in production');
@@ -326,7 +330,7 @@ export function loadConfig(source: Record<string, string | undefined> = process.
   }
 
   const config = toAppConfig(parsed.data);
-  const issues = productionIssues(config);
+  const issues = [...modelCatalogueIssues(config.llm), ...productionIssues(config)];
 
   if (issues.length > 0) {
     throw new ConfigError(issues.sort((a, b) => a.localeCompare(b)));

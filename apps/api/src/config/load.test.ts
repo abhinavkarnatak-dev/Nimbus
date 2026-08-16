@@ -274,3 +274,66 @@ describe('production rules', () => {
     expect(error.issues.join()).toContain('QDRANT_URL');
   });
 });
+
+describe('production needs a provider for every model the plan can reach', () => {
+  it('refuses production with Groq alone, because most roles are Gemini', () => {
+    const error = expectConfigError({ ...productionEnv(), GEMINI_API_KEY: undefined });
+
+    expect(error.issues.join('\n')).toContain('GEMINI_API_KEY');
+  });
+
+  it('refuses production with Gemini alone, because the reasoning role is Groq', () => {
+    const error = expectConfigError({ ...productionEnv(), GROQ_API_KEY: undefined });
+
+    expect(error.issues.join('\n')).toContain('GROQ_API_KEY');
+  });
+
+  it('says which role needs the provider it is asking for', () => {
+    const error = expectConfigError({ ...productionEnv(), GEMINI_API_KEY: undefined });
+    const said = error.issues.find((issue) => issue.startsWith('GEMINI_API_KEY'));
+
+    expect(said).toBeDefined();
+    expect(said).toContain('role uses');
+  });
+
+  it('refuses an unknown default text model in every environment', () => {
+    const development = expectConfigError({ ...minimalEnv(), DEFAULT_TEXT_MODEL: 'made-up-model' });
+    const production = expectConfigError({
+      ...productionEnv(),
+      DEFAULT_TEXT_MODEL: 'made-up-model',
+    });
+
+    expect(development.issues.join()).toContain('DEFAULT_TEXT_MODEL');
+    expect(development.issues.join()).toContain('does not know about');
+    expect(production.issues.join()).toContain('DEFAULT_TEXT_MODEL');
+  });
+
+  it('refuses a vision model that cannot look at images', () => {
+    const error = expectConfigError({
+      ...productionEnv(),
+      DEFAULT_VISION_MODEL: 'openai/gpt-oss-120b',
+    });
+
+    expect(error.issues.join()).toContain('DEFAULT_VISION_MODEL');
+  });
+
+  it('leaves development alone when no provider key exists at all', () => {
+    const config = loadConfig(minimalEnv());
+
+    expect(config.llm.geminiApiKey).toBeUndefined();
+    expect(config.llm.groqApiKey).toBeUndefined();
+  });
+
+  it('names the setting and the model but never a key value', () => {
+    const key = 'gsk_a-real-looking-secret-value';
+    const error = expectConfigError({
+      ...productionEnv(),
+      GROQ_API_KEY: key,
+      GEMINI_API_KEY: undefined,
+    });
+
+    expect(error.issues.join('\n')).toContain('GEMINI_API_KEY');
+    expect(error.message).not.toContain(key);
+    expect(error.issues.join('\n')).not.toContain(key);
+  });
+});

@@ -1,5 +1,6 @@
 import type { LlmConfig } from '../config/load.js';
 import type { Logger } from '../logging/logger.js';
+import { PROVIDER_SETTINGS, providersForPlan } from '../routing/requirements.js';
 import { LlmError } from './errors.js';
 import { FakeTextProvider, type FakeTextOptions } from './fake-text.js';
 import { FakeVisionProvider, type FakeVisionOptions } from './fake-vision.js';
@@ -13,8 +14,21 @@ import { RoutedTextProvider } from './routed-text.js';
 export interface LlmFactoryOptions {
   config: LlmConfig;
   logger: Logger;
+  isProduction: boolean;
   fakeText?: FakeTextOptions;
   fakeVision?: FakeVisionOptions;
+}
+
+function refuseFakeInProduction(options: LlmFactoryOptions, setting: string, what: string): void {
+  if (!options.isProduction) {
+    return;
+  }
+
+  throw new LlmError(
+    'LLM_NOT_CONFIGURED',
+    `Nimbus never uses a fake ${what} in production and no real provider is configured.`,
+    { detail: `${setting} is missing` },
+  );
 }
 
 function chosenModel(configured: string | undefined, fallback: string): string {
@@ -48,8 +62,9 @@ export function createTextProvider(options: LlmFactoryOptions): TextProvider {
   const key = keyFor(config, facts.provider);
 
   if (key === null) {
+    refuseFakeInProduction(options, PROVIDER_SETTINGS[facts.provider], 'text model');
     logger.warn(
-      { provider: facts.provider },
+      { provider: facts.provider, adapter: 'fake', developmentOnly: true },
       'the text provider has no API key, using the fake text provider',
     );
     return new FakeTextProvider({ defaultModel: model, ...options.fakeText });
@@ -76,16 +91,32 @@ export function createRoutedTextProvider(options: LlmFactoryOptions): TextProvid
     providers.push(new GroqTextProvider({ apiKey: groq, logger }));
   }
 
+  const needed = providersForPlan(config);
+  const absent = needed.filter((provider) => keyFor(config, provider) === null);
+
+  if (providers.length === 0 || absent.length > 0) {
+    refuseFakeInProduction(
+      options,
+      absent.map((provider) => PROVIDER_SETTINGS[provider]).join(', '),
+      'text model',
+    );
+  }
+
   if (providers.length === 0) {
     logger.warn(
-      { model },
+      { model, adapter: 'fake', developmentOnly: true },
       'no model provider has an API key, using the fake text provider for every role',
     );
     return new FakeTextProvider({ defaultModel: model, ...options.fakeText });
   }
 
   logger.info(
-    { providers: providers.map((one) => one.name), defaultModel: model },
+    {
+      providers: providers.map((one) => one.name),
+      defaultModel: model,
+      plannedProviders: needed,
+      missingProviders: absent,
+    },
     'model providers ready',
   );
 
@@ -99,8 +130,9 @@ export function createVisionProvider(options: LlmFactoryOptions): VisionProvider
   const key = keyFor(config, facts.provider);
 
   if (key === null) {
+    refuseFakeInProduction(options, PROVIDER_SETTINGS[facts.provider], 'image describer');
     logger.warn(
-      { provider: facts.provider },
+      { provider: facts.provider, adapter: 'fake', developmentOnly: true },
       'the vision provider has no API key, using the fake vision provider',
     );
     return new FakeVisionProvider({ defaultModel: model, ...options.fakeVision });

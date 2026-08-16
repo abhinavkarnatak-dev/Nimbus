@@ -5,14 +5,21 @@ import { FakeSandboxProvider, type FakeSandboxOptions } from './fake-provider.js
 import { SandboxError, type SandboxProvider } from './provider.js';
 
 export interface SandboxProviderOptions {
+  isProduction: boolean;
   fake?: FakeSandboxOptions;
 }
 
 export function createSandboxProvider(
   config: SandboxConfig,
-  options: SandboxProviderOptions = {},
+  options: SandboxProviderOptions,
 ): SandboxProvider {
   if (config.provider === 'fake') {
+    if (options.isProduction) {
+      throw new SandboxError(
+        'SANDBOX_SPEC_INVALID',
+        'Nimbus never uses a fake sandbox in production. SANDBOX_PROVIDER must be e2b.',
+      );
+    }
     return new FakeSandboxProvider(options.fake ?? {});
   }
 

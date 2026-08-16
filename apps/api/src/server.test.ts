@@ -1,6 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import express from 'express';
 import { describe, expect, it } from 'vitest';
 
+import type { AppConfig } from './config/load.js';
+import { capturingLogger } from './llm/llm.fixtures.js';
 import {
   HEADERS_TIMEOUT_MS,
   KEEP_ALIVE_TIMEOUT_MS,
@@ -8,6 +13,7 @@ import {
   closeHttpServer,
   createHttpServer,
   listenAsync,
+  sandboxProviderFor,
 } from './server.js';
 
 interface Deferred {
@@ -117,5 +123,70 @@ describe('listenAsync', () => {
     await expect(listenAsync(second, port, '127.0.0.1')).rejects.toThrow();
 
     await closeHttpServer(first);
+  });
+});
+
+describe('the sandbox the server builds', () => {
+  const config = (overrides: Partial<AppConfig['sandbox']> = {}, isProduction = false): AppConfig =>
+    ({
+      isProduction,
+      sandbox: {
+        provider: 'fake',
+        maxSeconds: 600,
+        allowInternet: false,
+        templateId: 'nimbus-sandbox',
+        ...overrides,
+      },
+    }) as AppConfig;
+
+  it('uses the fake outside production and says so in the log', () => {
+    const captured = capturingLogger();
+    const provider = sandboxProviderFor(config(), captured.logger);
+
+    expect(provider.real).toBe(false);
+    expect(captured.text()).toContain('using a fake');
+    expect(captured.text()).toContain('developmentOnly');
+  });
+
+  it('refuses the fake in production rather than quietly using it', () => {
+    const captured = capturingLogger();
+
+    expect(() => sandboxProviderFor(config({}, true), captured.logger)).toThrow();
+  });
+
+  it('builds the real one in production', () => {
+    const captured = capturingLogger();
+    const provider = sandboxProviderFor(
+      config({ provider: 'e2b', apiKey: 'e2b_key_value' }, true),
+      captured.logger,
+    );
+
+    expect(provider.real).toBe(true);
+  });
+});
+
+describe('what the server is allowed to import', () => {
+  const FAKE_MODULES = [
+    './auth/google-fake.js',
+    './github/fake-directory.js',
+    './github/fake-token-provider.js',
+    './attachments/fake-store.js',
+    './pull-request/fake-gateway.js',
+    './pull-request/fake-client.js',
+    './push/fake-gateway.js',
+    './push/fake-git-data.js',
+    './sandbox/fake-provider.js',
+    './llm/fake-text.js',
+    './llm/fake-vision.js',
+    './sandbox/e2b-fake-client.js',
+    './email/capturing-mailer.js',
+  ];
+
+  it('imports no development adapter directly, so none can reach production by accident', () => {
+    const source = readFileSync(fileURLToPath(new URL('./server.ts', import.meta.url)), 'utf8');
+
+    for (const module of FAKE_MODULES) {
+      expect(source, module).not.toContain(module);
+    }
   });
 });

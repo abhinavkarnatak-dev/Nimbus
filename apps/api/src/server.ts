@@ -30,6 +30,8 @@ import { MongoEventStore } from './events/store.js';
 import { createRoutedTextProvider, createVisionProvider } from './llm/factory.js';
 import { SessionAttachments } from './routing/attached.js';
 import { ImageDescriber } from './routing/describe.js';
+import { providersForPlan } from './routing/requirements.js';
+import { planFor, SELECTABLE_TEXT_MODELS } from './routing/selection.js';
 import { Orchestrator } from './orchestrator/orchestrator.js';
 import { LiveSessionWorkshop } from './orchestrator/live-workshop.js';
 import { SessionRunner } from './orchestrator/runner.js';
@@ -42,8 +44,7 @@ import { MongoApprovals } from './sessions/approvals.js';
 import { MongoSessionRecords } from './sessions/repository.js';
 import { AgentSessionService } from './sessions/service.js';
 import { usersCollection } from './db/models/user.js';
-import { E2bSandboxProvider } from './sandbox/e2b-provider.js';
-import { FakeSandboxProvider } from './sandbox/fake-provider.js';
+import { createSandboxProvider } from './sandbox/factory.js';
 import type { SandboxProvider } from './sandbox/provider.js';
 import { createAuthRouter } from './http/routes/auth.js';
 import { createGitHubRouter } from './http/routes/github.js';
@@ -133,13 +134,20 @@ export function createHttpServer(app: Express): Server {
   return server;
 }
 
-export function createSandboxProvider(config: AppConfig, logger: Logger): SandboxProvider {
-  if (config.sandbox.provider === 'e2b' && config.sandbox.apiKey !== undefined) {
-    return new E2bSandboxProvider(new LiveE2bClient(config.sandbox.apiKey));
+export function sandboxProviderFor(config: AppConfig, logger: Logger): SandboxProvider {
+  const provider = createSandboxProvider(config.sandbox, {
+    isProduction: config.isProduction,
+    fake: { files: {} },
+  });
+
+  if (!provider.real) {
+    logger.warn(
+      { provider: config.sandbox.provider, adapter: provider.name, developmentOnly: true },
+      'no real sandbox is configured, using a fake',
+    );
   }
 
-  logger.warn({ provider: config.sandbox.provider }, 'no real sandbox is configured, using a fake');
-  return new FakeSandboxProvider({ files: {} });
+  return provider;
 }
 
 export async function emailOf(db: Db, userId: string): Promise<string> {
@@ -153,6 +161,20 @@ export async function emailOf(db: Db, userId: string): Promise<string> {
 
 export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   const { config, logger } = options;
+
+  const plan = planFor();
+
+  logger.info(
+    {
+      primary: plan.primary,
+      light: plan.light,
+      reasoning: plan.reasoning,
+      vision: plan.vision,
+      selectable: SELECTABLE_TEXT_MODELS,
+      plannedProviders: providersForPlan(config.llm),
+    },
+    'Model routing plan ready',
+  );
 
   const handle = await connectDatabase({ uri: config.mongo.uri, logger });
   await ensureDatabaseSchema(handle.db, logger);
@@ -248,7 +270,11 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
           records: attachmentRecords,
           bytes: new StoredAttachmentBytes(attachmentStore),
           describer: new ImageDescriber({
-            vision: createVisionProvider({ config: config.llm, logger }),
+            vision: createVisionProvider({
+              config: config.llm,
+              logger,
+              isProduction: config.isProduction,
+            }),
             records: attachmentRecords,
             bytes: new StoredAttachmentBytes(attachmentStore),
             logger,
@@ -299,8 +325,12 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
               db: handle.db,
               installations: repositories,
               tokens: githubTokens,
-              sandboxes: createSandboxProvider(config, logger),
-              text: createRoutedTextProvider({ config: config.llm, logger }),
+              sandboxes: sandboxProviderFor(config, logger),
+              text: createRoutedTextProvider({
+                config: config.llm,
+                logger,
+                isProduction: config.isProduction,
+              }),
               config,
               logger,
               events,

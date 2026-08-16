@@ -43,6 +43,7 @@ export function productionEnv(): Record<string, string | undefined> {
     S3_ACCESS_KEY_ID: 's3-access-key-id',
     S3_SECRET_ACCESS_KEY: 's3-secret-access-key',
     GROQ_API_KEY: 'groq-api-key',
+    GEMINI_API_KEY: 'gemini-api-key',
     SMTP_HOST: 'smtp.example.com',
   };
 }
