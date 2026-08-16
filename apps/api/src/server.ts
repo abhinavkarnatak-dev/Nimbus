@@ -341,6 +341,9 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
           leases: new LeaseManager(redis),
           logger,
           cancellations: cancelWatcher,
+          events,
+          mail,
+          notifyEmailFor: async (session) => emailOf(handle.db, session.userId),
           runner: new SessionRunner({
             workshop: new LiveSessionWorkshop({
               db: handle.db,
@@ -355,6 +358,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
               config,
               logger,
               events,
+              records: sessionRecords,
               ...(attachedToRuns === null ? {} : { attachments: attachedToRuns }),
             }),
             push: new TrustedPushGateway({

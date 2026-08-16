@@ -557,7 +557,8 @@ describe('a worker shutting down with a session in its hands', () => {
     const stored = await sessionsCollection(testDatabase.db).findOne({});
 
     expect(report).toStrictEqual({ finished: 0, stopped: 1, abandoned: 0 });
-    expect(stored?.status).toBe('queued');
+    expect(stored?.status).toBe('working');
+    expect(stored?.completedAt).toBeNull();
     expect(stored?.pullRequest).toBeNull();
     expect(pullRequests.calls).toHaveLength(0);
   });
@@ -595,5 +596,137 @@ describe('a worker shutting down with a session in its hands', () => {
 
     expect((await sessionsCollection(testDatabase.db).findOne({}))?.status).toBe('pr_created');
     await next.orchestrator.stop();
+  });
+});
+
+describe('what the database says while a run is happening', () => {
+  it('says a worker is working on it, and the validator accepts that', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+
+    const worker = workerWith();
+    await worker.orchestrator.take(session);
+
+    const stored = await sessionsCollection(testDatabase.db).findOne({});
+
+    expect(stored?.status).toBe('working');
+    expect(stored?.currentActivity).not.toBeNull();
+    expect(stored?.completedAt).toBeNull();
+
+    await settle();
+    await worker.orchestrator.stop();
+  });
+
+  it('writes the step and what it is doing as the run goes', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+    await records.startRun(session.sessionId, new Date());
+
+    await records.recordProgress(
+      session.sessionId,
+      { step: 7, currentActivity: 'reading the redirect' },
+      new Date(),
+    );
+
+    const stored = await sessionsCollection(testDatabase.db).findOne({});
+
+    expect(stored?.step).toBe(7);
+    expect(stored?.currentActivity).toBe('reading the redirect');
+  });
+
+  it('never lowers the step, however late a smaller number arrives', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+    await records.startRun(session.sessionId, new Date());
+
+    await records.recordProgress(
+      session.sessionId,
+      { step: 9, currentActivity: 'running the tests' },
+      new Date(),
+    );
+    await records.recordProgress(
+      session.sessionId,
+      { step: 2, currentActivity: 'reading again' },
+      new Date(),
+    );
+
+    expect((await sessionsCollection(testDatabase.db).findOne({}))?.step).toBe(9);
+  });
+
+  it('never lets a short second attempt erase what a long first attempt spent', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+    await records.startRun(session.sessionId, new Date());
+    await records.recordProgress(
+      session.sessionId,
+      { step: 21, currentActivity: 'working' },
+      new Date(),
+    );
+
+    await records.recordOutcome(
+      session.sessionId,
+      { status: 'failed', step: 3, currentActivity: null },
+      new Date(),
+    );
+
+    const stored = await sessionsCollection(testDatabase.db).findOne({});
+
+    expect(stored?.step).toBe(21);
+    expect(stored?.status).toBe('failed');
+  });
+
+  it('writes nothing about a session that has already ended', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+    await records.finish(session.userId, session.sessionId, 'cancelled', new Date());
+
+    await records.recordProgress(
+      session.sessionId,
+      { step: 4, currentActivity: 'still going' },
+      new Date(),
+    );
+
+    const stored = await sessionsCollection(testDatabase.db).findOne({});
+
+    expect(stored?.step).toBe(0);
+    expect(stored?.status).toBe('cancelled');
+  });
+});
+
+describe('a session whose worker died', () => {
+  it('is counted, retried, and eventually given up on', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+
+    let signal: AbortSignal | null = null;
+
+    push.justAfter(async () => {
+      if (signal !== null) {
+        await whenAborted(signal);
+      }
+    });
+
+    const counted: number[] = [];
+
+    for (let round = 0; round < 5; round += 1) {
+      const worker = workerWith({
+        drainMs: 20,
+        onPrepare: (_one, given) => {
+          signal = given;
+        },
+      });
+
+      await worker.orchestrator.tick();
+      await settle();
+      await worker.orchestrator.stop();
+
+      counted.push((await sessionsCollection(testDatabase.db).findOne({}))?.retryCount ?? -1);
+    }
+
+    const ended = await sessionsCollection(testDatabase.db).findOne({});
+
+    expect(counted).toStrictEqual([0, 1, 2, 3, 4]);
+    expect(ended?.status).toBe('failed');
+    expect(ended?.failure?.code).toBe('INTERNAL_ERROR');
   });
 });

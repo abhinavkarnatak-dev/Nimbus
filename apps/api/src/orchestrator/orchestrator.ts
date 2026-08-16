@@ -1,7 +1,11 @@
+import type { SessionFailure } from '@nimbus/contracts';
+
 import type { SessionDocument } from '../db/models/session.js';
+import type { MailService } from '../email/mail-service.js';
+import type { EventPublisher } from '../events/publisher.js';
 import type { Logger } from '../logging/logger.js';
 import type { Lease } from '../redis/lease.js';
-import type { RunOutcome, SessionRecords } from '../sessions/repository.js';
+import { wasLeftMidRun, type RunOutcome, type SessionRecords } from '../sessions/repository.js';
 import type { CancelWatcher } from './cancellation.js';
 import { Heartbeat, claimSession, type SessionLeases } from './claim.js';
 import { ORCHESTRATOR_LIMITS } from './limits.js';
@@ -24,6 +28,9 @@ export interface OrchestratorOptions {
   drainGraceMs?: number;
   drainPollMs?: number;
   cancellations?: CancelWatcher;
+  events?: EventPublisher;
+  mail?: MailService;
+  notifyEmailFor?: (session: SessionDocument) => Promise<string>;
   now?: () => Date;
 }
 
@@ -64,6 +71,12 @@ export class Orchestrator {
 
   readonly #cancellations: CancelWatcher | null;
 
+  readonly #events: EventPublisher | null;
+
+  readonly #mail: MailService | null;
+
+  readonly #notifyEmailFor: ((session: SessionDocument) => Promise<string>) | null;
+
   readonly #running = new Map<string, AbortController>();
 
   readonly #drained = new Set<string>();
@@ -90,6 +103,9 @@ export class Orchestrator {
     this.#drainGraceMs = options.drainGraceMs ?? ORCHESTRATOR_LIMITS.drainGraceMs;
     this.#drainPollMs = options.drainPollMs ?? ORCHESTRATOR_LIMITS.drainPollMs;
     this.#cancellations = options.cancellations ?? null;
+    this.#events = options.events ?? null;
+    this.#mail = options.mail ?? null;
+    this.#notifyEmailFor = options.notifyEmailFor ?? null;
     this.#now = options.now ?? ((): Date => new Date());
   }
 
@@ -235,9 +251,20 @@ export class Orchestrator {
       return false;
     }
 
-    const recovering = session.status !== 'queued';
+    const recovering = wasLeftMidRun(session.status);
 
     if (recovering && !(await this.#mayRecover(session))) {
+      await claim.release();
+      return false;
+    }
+
+    const started = await this.#records.startRun(session.sessionId, this.#now());
+
+    if (started === null) {
+      this.#logger.info(
+        { sessionId: session.sessionId },
+        'a session ended between being looked at and being taken, so this worker starts nothing',
+      );
       await claim.release();
       return false;
     }
@@ -245,7 +272,7 @@ export class Orchestrator {
     const controller = new AbortController();
 
     this.#running.set(session.sessionId, controller);
-    void this.#work(session, claim.lease, claim.release, recovering, controller);
+    void this.#work(started, claim.lease, claim.release, recovering, controller);
     return true;
   }
 
@@ -265,12 +292,53 @@ export class Orchestrator {
       'a session has been picked up too many times, ending it',
     );
 
-    await this.#records.recordOutcome(
+    const failure = failureOf('INTERNAL_ERROR');
+    const ended = await this.#records.recordOutcome(
       session.sessionId,
-      { status: 'failed', failure: failureOf('INTERNAL_ERROR'), currentActivity: null },
+      { status: 'failed', failure, currentActivity: null },
       this.#now(),
     );
+
+    if (ended !== null) {
+      await this.#announceGivenUp(session, failure);
+    }
     return false;
+  }
+
+  async #announceGivenUp(session: SessionDocument, failure: SessionFailure): Promise<void> {
+    await this.#safely(session, 'announced', async () => {
+      await this.#events?.publish(session.sessionId, session.userId, {
+        type: 'session.failed',
+        failure,
+      });
+    });
+
+    await this.#safely(session, 'reported by email', async () => {
+      const mail = this.#mail;
+      const emailFor = this.#notifyEmailFor;
+
+      if (mail === null || emailFor === null) {
+        return;
+      }
+
+      await mail.sendSessionEnded(await emailFor(session), {
+        repository: `${session.repository.owner}/${session.repository.name}`,
+        task: session.task,
+        outcome: 'failed',
+        reason: failure.message,
+      });
+    });
+  }
+
+  async #safely(session: SessionDocument, what: string, work: () => Promise<void>): Promise<void> {
+    try {
+      await work();
+    } catch (error) {
+      this.#logger.warn(
+        { sessionId: session.sessionId, error: String(error) },
+        `a session that was given up on could not be ${what}, which changes nothing about the session`,
+      );
+    }
   }
 
   async #work(

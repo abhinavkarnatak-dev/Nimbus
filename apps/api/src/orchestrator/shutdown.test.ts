@@ -213,10 +213,11 @@ describe('shutting down while a run is still working', () => {
     expect(held.logs()).toContain('told to stop so this worker can shut down');
   });
 
-  it('writes nothing, because nobody cancelled this session', async () => {
+  it('writes no outcome, because nobody cancelled this session', async () => {
     const { held } = await stopping();
 
-    expect(held.records.documents[0]?.status).toBe('queued');
+    expect(held.records.documents[0]?.status).toBe('working');
+    expect(held.records.documents[0]?.completedAt).toBeNull();
     expect(held.records.documents[0]?.pullRequest).toBeNull();
     expect(held.logs()).toContain('a shutdown interrupted this session');
   });

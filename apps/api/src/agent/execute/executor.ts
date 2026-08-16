@@ -226,6 +226,7 @@ export class ActionExecutor {
     await this.#safely(async () => {
       await this.#reporter?.completed({
         toolCallId: request.toolCallId,
+        step: request.step,
         tool: request.tool as ToolName,
         outcome: REPORTED_OUTCOME[event.outcome],
         durationMs,

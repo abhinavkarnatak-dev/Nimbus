@@ -47,8 +47,9 @@ The only component that holds secrets. Internally divided into:
 - **HTTP API**: authentication, GitHub connection, session lifecycle, attachments.
 - **Socket gateway**: authenticated handshake, per session rooms, sequenced events, replay on
   reconnect.
-- **Agent orchestrator**: a LangGraph graph with durable checkpoints that advances one session at a
-  time under a lease.
+- **Agent orchestrator**: a LangGraph graph that advances one session at a time under a lease, with
+  the session's status, step and activity written down as it goes so a worker that dies can be
+  recovered from and counted.
 - **Policy engine**: deterministic pre-execution authorization. Not a model. Not overridable by
   model output.
 - **GitHub gateway**: App JWT creation, just in time installation tokens, patch validation, branch
@@ -122,9 +123,24 @@ never reached.
 - One active session per user, enforced atomically on the server with a lease, not in the UI.
 - Only one worker advances a session at a time, guarded by a Redis lease with renewal.
 - Every external effect is idempotent: branch creation, push, pull request creation, and email.
-- While waiting for a clarification or approval, the graph checkpoints and the sandbox is torn down
-  if the wait may outlive its lifetime. Resume recreates the sandbox from the verified remote state
-  plus the checkpoint.
+- Taking a session writes `working` before any work begins, and each finished action writes the step
+  and what the run is doing, so the session document is true while a run is happening rather than only
+  after it ends. Without that, a worker that dies leaves a session that reads as freshly queued and is
+  retried forever.
+- While waiting for a clarification or approval the sandbox is torn down, and resuming rebuilds it from
+  the verified remote state. The question, the answer, and the steps already spent are carried across.
+  The files a previous attempt read or changed are deliberately not carried across, because they lived
+  in a machine that no longer exists and claiming otherwise would make the agent skip work.
+- Recovery is bounded. A session found in one of the statuses a run passes through was left behind by a
+  worker, and each such pickup is counted. Past the ceiling the session fails, is announced, and is
+  posted, rather than being retried by every worker forever. A session waiting for a person is not a
+  recovery however many times it is answered.
+- The step count never goes backwards, so a short second attempt cannot erase what a long first attempt
+  spent, and four crashes cannot cost four full budgets.
+- `MongoCheckpointSaver` implements the LangGraph checkpoint interface and is deliberately not wired
+  in. A graph checkpoint refers to a sandbox filesystem, and the sandbox does not survive the worker,
+  so resuming the graph would hand the agent an empty machine while its state said a patch had already
+  been applied. Recovery is therefore explicit at the session level rather than implicit in the graph.
 - A local commit inside a sandbox is not durable. Only material exported to the backend counts.
 - Session events carry a monotonically increasing sequence number so a reconnecting client can ask
   for everything after `lastEventSequence`.
@@ -191,17 +207,17 @@ a server drift into disagreeing about what was sent.
 
 ## 10. Technology and why
 
-| Choice                | Reason                                                                                 |
-| --------------------- | -------------------------------------------------------------------------------------- |
-| pnpm workspaces       | Strict dependency isolation and a single lockfile across apps and packages             |
-| TypeScript, strict    | Type errors at boundaries are the cheapest class of bug to prevent                     |
-| Zod at every boundary | One definition drives both runtime validation and static types                         |
-| Express and Socket.IO | Long-lived authenticated WebSockets with per-event authorization                       |
-| LangGraph             | Durable checkpointing and resumable graphs, which a plain loop would have to reinvent  |
-| MongoDB               | Document shaped session state with the indexes the access patterns need                |
-| Redis                 | Expiring state, atomic counters, and leases, none of which belong in the durable store |
-| E2B                   | Managed isolated execution behind a `SandboxProvider` interface with a local fake      |
-| Vitest and Playwright | Fast unit and integration runs, plus a real browser journey                            |
+| Choice                | Reason                                                                                    |
+| --------------------- | ----------------------------------------------------------------------------------------- |
+| pnpm workspaces       | Strict dependency isolation and a single lockfile across apps and packages                |
+| TypeScript, strict    | Type errors at boundaries are the cheapest class of bug to prevent                        |
+| Zod at every boundary | One definition drives both runtime validation and static types                            |
+| Express and Socket.IO | Long-lived authenticated WebSockets with per-event authorization                          |
+| LangGraph             | A graph whose nodes and edges are the agent loop, rather than one hand written while loop |
+| MongoDB               | Document shaped session state with the indexes the access patterns need                   |
+| Redis                 | Expiring state, atomic counters, and leases, none of which belong in the durable store    |
+| E2B                   | Managed isolated execution behind a `SandboxProvider` interface with a local fake         |
+| Vitest and Playwright | Fast unit and integration runs, plus a real browser journey                               |
 
 ## 11. Deployment shape
 

@@ -17,6 +17,7 @@ export interface ReportedChunk {
 
 export interface ReportedCompletion {
   toolCallId: string;
+  step: number;
   tool: ToolName;
   outcome: ToolOutcome;
   durationMs: number;

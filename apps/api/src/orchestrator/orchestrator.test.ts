@@ -201,7 +201,8 @@ describe('a worker that loses its lease', () => {
     expect(taken).toBe(true);
     await settle();
 
-    expect(held.records.documents[0]?.status).toBe('queued');
+    expect(held.records.documents[0]?.status).toBe('working');
+    expect(held.records.documents[0]?.completedAt).toBeNull();
   });
 
   it('checks one last time before writing, not only between heartbeats', async () => {
@@ -214,7 +215,7 @@ describe('a worker that loses its lease', () => {
     await settle();
 
     expect(held.logs()).toContain('nothing was written about this session');
-    expect((await held.records.findById(session.sessionId))?.status).toBe('queued');
+    expect((await held.records.findById(session.sessionId))?.status).toBe('working');
   });
 
   it('never pushes anything once another worker holds the lease', async () => {

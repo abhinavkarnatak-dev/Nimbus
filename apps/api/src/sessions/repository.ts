@@ -18,6 +18,25 @@ export const DUPLICATE_KEY = 11_000;
 
 export const WAITING_STATUS: SessionStatus = 'awaiting_user';
 
+export const RUNNING_STATUS: SessionStatus = 'working';
+
+export const RUNNING_SESSION_STATUSES: readonly SessionStatus[] = [
+  'provisioning',
+  'indexing',
+  'working',
+  'validating',
+  'pushing',
+];
+
+export function wasLeftMidRun(status: SessionStatus): boolean {
+  return RUNNING_SESSION_STATUSES.includes(status);
+}
+
+export interface RunProgress {
+  step: number;
+  currentActivity: string | null;
+}
+
 export interface RunOutcome {
   status: SessionStatus;
   failure?: SessionFailure | null;
@@ -46,6 +65,8 @@ export interface SessionRecords {
   findClaimable(limit: number): Promise<SessionDocument[]>;
   findWaitingSince(cutoff: Date, limit: number): Promise<SessionDocument[]>;
   findById(sessionId: string): Promise<SessionDocument | null>;
+  startRun(sessionId: string, at: Date): Promise<SessionDocument | null>;
+  recordProgress(sessionId: string, progress: RunProgress, at: Date): Promise<void>;
   recordOutcome(sessionId: string, outcome: RunOutcome, at: Date): Promise<SessionDocument | null>;
   bumpRetry(sessionId: string, at: Date): Promise<number>;
   isLive(sessionId: string): Promise<boolean>;
@@ -152,14 +173,37 @@ export class MongoSessionRecords implements SessionRecords {
     return sessionsCollection(this.db).findOne({ sessionId });
   }
 
+  async startRun(sessionId: string, at: Date): Promise<SessionDocument | null> {
+    const result = await sessionsCollection(this.db).findOneAndUpdate(
+      { sessionId, status: { $in: activeStatuses() } },
+      { $set: startedFields(at) },
+      { returnDocument: 'after' },
+    );
+
+    return result ?? null;
+  }
+
+  async recordProgress(sessionId: string, progress: RunProgress, at: Date): Promise<void> {
+    await sessionsCollection(this.db).updateOne(
+      { sessionId, status: { $in: activeStatuses() } },
+      {
+        $set: { currentActivity: progress.currentActivity, updatedAt: at, lastActivityAt: at },
+        $max: { step: progress.step },
+      },
+    );
+  }
+
   async recordOutcome(
     sessionId: string,
     outcome: RunOutcome,
     at: Date,
   ): Promise<SessionDocument | null> {
+    const written = outcomeFields(outcome, at);
     const result = await sessionsCollection(this.db).findOneAndUpdate(
       { sessionId, status: { $in: activeStatuses() } },
-      { $set: outcomeFields(outcome, at) },
+      outcome.step === undefined
+        ? { $set: written }
+        : { $set: written, $max: { step: outcome.step } },
       { returnDocument: 'after' },
     );
 
@@ -335,21 +379,54 @@ export class InMemorySessionRecords implements SessionRecords {
     return Promise.resolve(this.documents.find((held) => held.sessionId === sessionId) ?? null);
   }
 
+  async startRun(sessionId: string, at: Date): Promise<SessionDocument | null> {
+    const held = this.#activeOne(sessionId);
+
+    if (held === undefined) {
+      return Promise.resolve(null);
+    }
+
+    Object.assign(held, startedFields(at));
+    return Promise.resolve({ ...held });
+  }
+
+  async recordProgress(sessionId: string, progress: RunProgress, at: Date): Promise<void> {
+    const held = this.#activeOne(sessionId);
+
+    if (held === undefined) {
+      return Promise.resolve();
+    }
+
+    held.step = Math.max(held.step, progress.step);
+    held.currentActivity = progress.currentActivity;
+    held.updatedAt = at;
+    held.lastActivityAt = at;
+    return Promise.resolve();
+  }
+
   async recordOutcome(
     sessionId: string,
     outcome: RunOutcome,
     at: Date,
   ): Promise<SessionDocument | null> {
-    const held = this.documents.find(
-      (one) => one.sessionId === sessionId && isActiveSessionStatus(one.status),
-    );
+    const held = this.#activeOne(sessionId);
 
     if (held === undefined) {
       return Promise.resolve(null);
     }
 
     Object.assign(held, outcomeFields(outcome, at));
+
+    if (outcome.step !== undefined) {
+      held.step = Math.max(held.step, outcome.step);
+    }
     return Promise.resolve({ ...held });
+  }
+
+  #activeOne(sessionId: string): SessionDocument | undefined {
+    return this.documents.find(
+      (one) => one.sessionId === sessionId && isActiveSessionStatus(one.status),
+    );
   }
 
   async bumpRetry(sessionId: string, at: Date): Promise<number> {
@@ -424,6 +501,16 @@ function activeStatuses(): SessionStatus[] {
   return [...ACTIVE_SESSION_STATUSES];
 }
 
+export function startedFields(at: Date): Partial<SessionDocument> {
+  return {
+    status: RUNNING_STATUS,
+    currentActivity: 'starting a machine',
+    updatedAt: at,
+    lastActivityAt: at,
+    completedAt: null,
+  };
+}
+
 export function outcomeFields(outcome: RunOutcome, at: Date): Partial<SessionDocument> {
   const terminal = !isActiveSessionStatus(outcome.status);
 
@@ -438,7 +525,6 @@ export function outcomeFields(outcome: RunOutcome, at: Date): Partial<SessionDoc
     ...(outcome.baseCommitSha === undefined ? {} : { baseCommitSha: outcome.baseCommitSha }),
     ...(outcome.sandboxId === undefined ? {} : { sandboxId: outcome.sandboxId }),
     ...(outcome.pullRequest === undefined ? {} : { pullRequest: outcome.pullRequest }),
-    ...(outcome.step === undefined ? {} : { step: outcome.step }),
     ...(outcome.currentActivity === undefined ? {} : { currentActivity: outcome.currentActivity }),
     ...(outcome.filesChanged === undefined ? {} : { filesChanged: outcome.filesChanged }),
     ...(outcome.checks === undefined ? {} : { checks: outcome.checks }),

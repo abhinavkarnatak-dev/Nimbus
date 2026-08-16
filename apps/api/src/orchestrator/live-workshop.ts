@@ -13,7 +13,9 @@ import type { Db } from 'mongodb';
 import type { SessionDocument } from '../db/models/session.js';
 import type { EventPublisher } from '../events/publisher.js';
 import type { GitHubTokenProvider, InstallationToken } from '../github/token-provider.js';
-import { LiveActionReporter } from './reporter.js';
+import type { ActionReporter } from '../agent/execute/reporter.js';
+import { DurableProgressReporter, EveryReporter, LiveActionReporter } from './reporter.js';
+import type { SessionRecords } from '../sessions/repository.js';
 import { OctokitGitDataClient } from '../push/octokit-git-data.js';
 import type { Logger } from '../logging/logger.js';
 import {
@@ -42,6 +44,7 @@ export interface LiveWorkshopOptions {
   logger: Logger;
   attachments?: SessionAttachments;
   events?: EventPublisher;
+  records?: SessionRecords;
   checkpointer?: BaseCheckpointSaver;
   maxSteps?: number;
 }
@@ -126,16 +129,7 @@ export class LiveSessionWorkshop implements SessionWorkshop {
             logger: this.#options.logger,
           }),
           logger: this.#options.logger,
-          ...(this.#options.events === undefined
-            ? {}
-            : {
-                reporter: new LiveActionReporter({
-                  events: this.#options.events,
-                  sessionId: session.sessionId,
-                  userId: session.userId,
-                  logger: this.#options.logger,
-                }),
-              }),
+          ...this.#reporting(session),
         }),
         source: new GitHubRepositorySource({ logger: this.#options.logger }),
         reference: {
@@ -162,6 +156,38 @@ export class LiveSessionWorkshop implements SessionWorkshop {
         }
       },
     };
+  }
+
+  #reporting(session: SessionDocument): { reporter?: ActionReporter } {
+    const reporters: ActionReporter[] = [];
+
+    if (this.#options.events !== undefined) {
+      reporters.push(
+        new LiveActionReporter({
+          events: this.#options.events,
+          sessionId: session.sessionId,
+          userId: session.userId,
+          logger: this.#options.logger,
+        }),
+      );
+    }
+
+    if (this.#options.records !== undefined) {
+      reporters.push(
+        new DurableProgressReporter({
+          records: this.#options.records,
+          sessionId: session.sessionId,
+          logger: this.#options.logger,
+        }),
+      );
+    }
+
+    const only = reporters[0];
+
+    if (only === undefined) {
+      return {};
+    }
+    return { reporter: reporters.length === 1 ? only : new EveryReporter(reporters) };
   }
 
   async #attached(session: SessionDocument, router: SessionRouter): Promise<LoadedAttachments> {
@@ -263,13 +289,15 @@ export function resumedState(
   session: SessionDocument,
 ): ReturnType<typeof createState> {
   const fresh = createState(input);
+  const spent = Math.min(Math.max(session.step, 0), fresh.budgets.maxSteps);
 
-  if (session.clarificationQuestion === null) {
+  if (session.clarificationQuestion === null && spent === 0) {
     return fresh;
   }
 
   return parseState({
     ...fresh,
+    budgets: { ...fresh.budgets, steps: spent },
     clarificationQuestion: session.clarificationQuestion,
     clarificationAnswer: session.clarificationAnswer,
   });

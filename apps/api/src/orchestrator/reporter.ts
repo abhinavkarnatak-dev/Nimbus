@@ -7,6 +7,7 @@ import type {
 } from '../agent/execute/reporter.js';
 import type { EventPublisher } from '../events/publisher.js';
 import type { Logger } from '../logging/logger.js';
+import type { SessionRecords } from '../sessions/repository.js';
 
 export interface LiveReporterOptions {
   events: EventPublisher;
@@ -55,6 +56,77 @@ export class LiveActionReporter implements ActionReporter {
         { sessionId: this.#options.sessionId, type: event.type, error: String(error) },
         'a live tool update could not be published, the run carries on without it',
       );
+    }
+  }
+}
+
+export interface DurableProgressOptions {
+  records: SessionRecords;
+  sessionId: string;
+  logger: Logger;
+  now?: () => Date;
+}
+
+export class DurableProgressReporter implements ActionReporter {
+  readonly #options: DurableProgressOptions;
+
+  readonly #now: () => Date;
+
+  constructor(options: DurableProgressOptions) {
+    this.#options = options;
+    this.#now = options.now ?? ((): Date => new Date());
+  }
+
+  async started(invocation: ToolInvocation): Promise<void> {
+    await this.#write(0, invocation.summary);
+  }
+
+  async output(): Promise<void> {
+    await Promise.resolve();
+  }
+
+  async completed(completion: ReportedCompletion): Promise<void> {
+    await this.#write(completion.step, completion.summary);
+  }
+
+  async #write(step: number, activity: string): Promise<void> {
+    try {
+      await this.#options.records.recordProgress(
+        this.#options.sessionId,
+        { step, currentActivity: activity },
+        this.#now(),
+      );
+    } catch (error) {
+      this.#options.logger.warn(
+        { sessionId: this.#options.sessionId, error: String(error) },
+        'the progress of a run could not be written down, the run carries on without it',
+      );
+    }
+  }
+}
+
+export class EveryReporter implements ActionReporter {
+  readonly #reporters: readonly ActionReporter[];
+
+  constructor(reporters: readonly ActionReporter[]) {
+    this.#reporters = reporters;
+  }
+
+  async started(invocation: ToolInvocation): Promise<void> {
+    for (const reporter of this.#reporters) {
+      await reporter.started(invocation);
+    }
+  }
+
+  async output(chunk: ReportedChunk): Promise<void> {
+    for (const reporter of this.#reporters) {
+      await reporter.output(chunk);
+    }
+  }
+
+  async completed(completion: ReportedCompletion): Promise<void> {
+    for (const reporter of this.#reporters) {
+      await reporter.completed(completion);
     }
   }
 }
