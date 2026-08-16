@@ -73,7 +73,7 @@ patch becomes a branch. That is a boundary a reviewer can actually verify.
 
 | Threat                           | Mitigation                                                                                                                   | Feature       |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| Session theft via XSS            | No token in local storage or URLs; opaque `HttpOnly` cookie; restrictive CSP; never render raw HTML from model or repository | 011, 038, 044 |
+| Session theft via XSS            | No token in local storage or URLs; opaque `HttpOnly` cookie; restrictive CSP; never render raw HTML from model or repository | 011, 039, 045 |
 | CSRF on state changing requests  | CSRF token on cookie authenticated mutations; exact CORS origin allowlist with credentials                                   | 007, 011      |
 | Session fixation                 | Rotate the session identifier after authentication and after privilege changes                                               | 011           |
 | Stale authorization after logout | Server side revocation; sockets revalidate periodically and disconnect                                                       | 011, 036      |
@@ -115,7 +115,7 @@ patch becomes a branch. That is a boundary a reviewer can actually verify.
 | Orphaned sandboxes after a crash             | Teardown in `finally` plus a periodic sweeper                                                            | 019      |
 | Command injection through model or user text | Typed operations and argv arrays. Model and user text is never interpolated into a shell string          | 018      |
 | Malicious dependency lifecycle scripts       | Prefer the existing lockfile with `npm ci --ignore-scripts`. Lifecycle scripts require explicit approval | 018      |
-| Terminal escape sequences in output          | Control sequences stripped and secrets redacted before streaming                                         | 018, 044 |
+| Terminal escape sequences in output          | Control sequences stripped and secrets redacted before streaming                                         | 018, 045 |
 
 ### 5.5 Filesystem
 

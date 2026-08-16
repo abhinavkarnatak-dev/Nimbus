@@ -50,7 +50,7 @@ Owned by features 009 through 012.
   Markdown, diffs, filenames, and URLs are all escaped or sanitized, and external links carry safe
   relationship attributes.
 
-Owned by features 007, 011, 038, and 044.
+Owned by features 007, 011, 039, and 045.
 
 ## 4. Authorization and tenancy
 
@@ -324,7 +324,7 @@ authorization headers, or secret values.
 
 Documented deletion behavior exists for sessions, attachments, indexes, and account data.
 
-Owned by features 004, 006, and 046.
+Owned by features 004, 006, and 047.
 
 ## 10a. Model providers
 
@@ -674,7 +674,7 @@ headers. A kill switch disables new agent sessions without breaking login or acc
 Operational alerts fire on repeated authentication failures, policy denials, sandbox cleanup
 failures, budget spikes, webhook failures, and push or pull request anomalies.
 
-Owned by features 008 and 046.
+Owned by features 008 and 047.
 
 ## 12. Secrets management
 
@@ -684,7 +684,7 @@ Secrets reach production through injected environment variables, never through a
 `.gitignore` excludes `.env` files, key material, and local data. `pnpm audit` runs in
 `pnpm security:check`, and secret scanning is part of the final quality gate.
 
-Owned by features 004 and 049.
+Owned by features 004 and 050.
 
 ## 13. Testing as a control
 
@@ -696,4 +696,4 @@ sessions on open sockets, duplicate session starts and duplicate webhook, push, 
 events, terminal escape sequences and secret-like tool output, unapproved changes to workflows and
 deployment configuration, sandbox timeouts, and a backend restart while waiting on the user.
 
-Owned by feature 049, with each control tested in the feature that introduces it.
+Owned by feature 050, with each control tested in the feature that introduces it.
