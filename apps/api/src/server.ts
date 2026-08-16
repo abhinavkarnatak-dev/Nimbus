@@ -4,6 +4,7 @@ import type { Express } from 'express';
 import type { Db } from 'mongodb';
 
 import { createApp } from './app.js';
+import { StoredAttachmentBytes } from './attachments/bytes.js';
 import { MongoAttachmentRecords } from './attachments/repository.js';
 import { S3AttachmentStore } from './attachments/s3-store.js';
 import { AttachmentService } from './attachments/service.js';
@@ -26,7 +27,9 @@ import { createSessionsRouter } from './http/routes/sessions.js';
 import { EventHub, listenForEvents } from './events/hub.js';
 import { LiveEventPublisher } from './events/publisher.js';
 import { MongoEventStore } from './events/store.js';
-import { createRoutedTextProvider } from './llm/factory.js';
+import { createRoutedTextProvider, createVisionProvider } from './llm/factory.js';
+import { SessionAttachments } from './routing/attached.js';
+import { ImageDescriber } from './routing/describe.js';
 import { Orchestrator } from './orchestrator/orchestrator.js';
 import { LiveSessionWorkshop } from './orchestrator/live-workshop.js';
 import { SessionRunner } from './orchestrator/runner.js';
@@ -226,14 +229,30 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   logger.info({ githubConnect: config.github !== null }, 'GitHub connection ready');
 
   const attachmentStore = config.storage === null ? null : new S3AttachmentStore(config.storage);
+  const attachmentRecords = new MongoAttachmentRecords(handle.db);
 
   const attachments =
     attachmentStore === null
       ? null
       : new AttachmentService({
-          records: new MongoAttachmentRecords(handle.db),
+          records: attachmentRecords,
           store: attachmentStore,
           maxBytes: config.limits.maxAttachmentBytes,
+        });
+
+  const attachedToRuns =
+    attachmentStore === null
+      ? null
+      : new SessionAttachments({
+          records: attachmentRecords,
+          bytes: new StoredAttachmentBytes(attachmentStore),
+          describer: new ImageDescriber({
+            vision: createVisionProvider({ config: config.llm, logger }),
+            records: attachmentRecords,
+            bytes: new StoredAttachmentBytes(attachmentStore),
+            logger,
+          }),
+          logger,
         });
 
   if (attachments !== null) {
@@ -252,7 +271,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
         auth: sessions,
         sessions: new AgentSessionService({
           records: new MongoSessionRecords(handle.db),
-          attachments: new MongoAttachmentRecords(handle.db),
+          attachments: attachmentRecords,
           repositories,
           logger,
           approvalsFor: (sessionId) => new MongoApprovals({ db: handle.db, sessionId }),
@@ -283,6 +302,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
               text: createRoutedTextProvider({ config: config.llm, logger }),
               config,
               logger,
+              ...(attachedToRuns === null ? {} : { attachments: attachedToRuns }),
             }),
             push: new TrustedPushGateway({
               tokens: githubTokens,

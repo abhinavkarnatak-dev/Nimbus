@@ -1,8 +1,9 @@
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 import type { BaseCheckpointSaver } from '@langchain/langgraph';
-import type { AgentState, PatchValidationReport } from '@nimbus/contracts';
+import type { AgentState, DescribedImage, PatchValidationReport } from '@nimbus/contracts';
 
 import type { Logger } from '../../logging/logger.js';
+import type { AttachedText } from '../../routing/context.js';
 import type { SessionRouter } from '../../routing/router.js';
 import type { Sandbox } from '../../sandbox/index.js';
 import type { RepositoryReference, RepositorySource } from '../clone/index.js';
@@ -32,6 +33,8 @@ export interface RunInput {
   source: RepositorySource;
   reference: RepositoryReference;
   logger: Logger;
+  images?: readonly DescribedImage[];
+  attachments?: readonly AttachedText[];
   checkpointer?: BaseCheckpointSaver;
   signal?: AbortSignal;
 }
@@ -111,7 +114,12 @@ export function buildAgentGraph(input: RunInput) {
   };
 
   const retrieve = async (current: Carried): Promise<Partial<Carried>> => {
-    const gathered = await gatherContext({ state: current.state, source: input.sandbox });
+    const gathered = await gatherContext({
+      state: current.state,
+      source: input.sandbox,
+      ...(input.images === undefined ? {} : { images: input.images }),
+      ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
+    });
 
     return {
       context: gathered.context,

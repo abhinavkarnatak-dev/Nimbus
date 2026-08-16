@@ -1,5 +1,7 @@
+import { DescribedImageSchema, type DescribedImage } from '@nimbus/contracts';
 import { describe, expect, it } from 'vitest';
 
+import type { AttachedText } from '../../routing/context.js';
 import {
   CLEAR_SCOPE,
   HOSTILE_REPOSITORY,
@@ -350,6 +352,52 @@ describe('what a session spent', () => {
     const result = await runAgent(resumed);
 
     expect(result.state.budgets.llm.tokensUsed).toBeGreaterThan(spent.tokensUsed);
+  });
+});
+
+describe('what a person attached is in front of the model', () => {
+  const SHOT = DescribedImageSchema.parse({
+    attachmentId: 'att_attachedattachedattac',
+    name: 'error.png',
+    description: 'a browser showing the dashboard after signing in',
+    model: 'gemini-3.5-flash-lite',
+    reused: false,
+  });
+
+  const LOG = { name: 'build.log', contents: 'TypeError: returnTo is undefined' };
+
+  async function ran(extra: { images?: readonly DescribedImage[]; attachments?: AttachedText[] }) {
+    const harness = await graphHarness({
+      answers: [CLEAR_SCOPE, READ, PATCH, CHECKS, COMMIT],
+    });
+
+    await runAgent({ ...harness, ...extra });
+    return JSON.stringify(harness.text.calls);
+  }
+
+  it('shows the description of a picture it can never see itself', async () => {
+    expect(await ran({ images: [SHOT] })).toContain(SHOT.description);
+  });
+
+  it('shows an attached file under the name it was uploaded with', async () => {
+    const sent = await ran({ attachments: [LOG] });
+
+    expect(sent).toContain(LOG.contents);
+    expect(sent).toContain('build.log');
+  });
+
+  it('fences both of them, because neither was written by the user', async () => {
+    const sent = await ran({ images: [SHOT], attachments: [LOG] });
+
+    expect(sent).toContain('kind=image path=error.png');
+    expect(sent).toContain('kind=attachment path=build.log');
+  });
+
+  it('reads exactly as it does today when nothing was attached', async () => {
+    const sent = await ran({});
+
+    expect(sent).not.toContain('kind=image');
+    expect(sent).not.toContain('kind=attachment');
   });
 });
 

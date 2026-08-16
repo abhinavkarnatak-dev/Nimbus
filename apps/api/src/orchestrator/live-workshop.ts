@@ -11,10 +11,14 @@ import { createState, parseState } from '../agent/state/state.js';
 import type { AppConfig } from '../config/load.js';
 import type { Db } from 'mongodb';
 import type { SessionDocument } from '../db/models/session.js';
-import type { InstallationService } from '../github/installation-service.js';
 import type { GitHubTokenProvider, InstallationToken } from '../github/token-provider.js';
 import { OctokitGitDataClient } from '../push/octokit-git-data.js';
 import type { Logger } from '../logging/logger.js';
+import {
+  NOTHING_ATTACHED,
+  type LoadedAttachments,
+  type SessionAttachments,
+} from '../routing/attached.js';
 import { SessionRouter } from '../routing/router.js';
 import { planFor } from '../routing/selection.js';
 import type { TextProvider } from '../llm/provider.js';
@@ -22,14 +26,19 @@ import { buildSandboxSpec, type Sandbox, type SandboxProvider } from '../sandbox
 import { ORCHESTRATOR_LIMITS } from './limits.js';
 import { WorkshopError, type PreparedRun, type SessionWorkshop } from './workshop.js';
 
+export interface InstallationDirectory {
+  activeInstallation(userId: string): Promise<{ installationId: number } | null>;
+}
+
 export interface LiveWorkshopOptions {
   db: Db;
-  installations: InstallationService;
+  installations: InstallationDirectory;
   tokens: GitHubTokenProvider;
   sandboxes: SandboxProvider;
   text: TextProvider;
   config: AppConfig;
   logger: Logger;
+  attachments?: SessionAttachments;
   checkpointer?: BaseCheckpointSaver;
   maxSteps?: number;
 }
@@ -84,17 +93,23 @@ export class LiveSessionWorkshop implements SessionWorkshop {
       session,
     );
 
+    const router = new SessionRouter({
+      text: this.#options.text,
+      logger: this.#options.logger,
+      plan,
+    });
+
+    const attached = await this.#attached(session, router);
+
     return {
       installationId,
       input: {
         state,
         sandbox,
         registry,
-        router: new SessionRouter({
-          text: this.#options.text,
-          logger: this.#options.logger,
-          plan,
-        }),
+        router,
+        images: attached.images,
+        attachments: attached.texts,
         executor: new ActionExecutor({
           registry,
           policy: new PolicyGate({
@@ -130,6 +145,46 @@ export class LiveSessionWorkshop implements SessionWorkshop {
         }
       },
     };
+  }
+
+  async #attached(session: SessionDocument, router: SessionRouter): Promise<LoadedAttachments> {
+    const loader = this.#options.attachments;
+
+    if (loader === undefined || session.attachments.length === 0) {
+      return NOTHING_ATTACHED;
+    }
+
+    let loaded: LoadedAttachments;
+
+    try {
+      loaded = await loader.load({
+        userId: session.userId,
+        attachmentIds: session.attachments.map((one) => one.attachmentId),
+      });
+    } catch (error) {
+      this.#options.logger.error(
+        { sessionId: session.sessionId, error: String(error) },
+        'nothing a person attached could be read, the run carries on without any of it',
+      );
+      return NOTHING_ATTACHED;
+    }
+
+    for (const report of loaded.reports) {
+      router.charge(report);
+    }
+
+    this.#options.logger.info(
+      {
+        sessionId: session.sessionId,
+        images: loaded.images.length,
+        texts: loaded.texts.length,
+        described: loaded.reports.length,
+        lost: loaded.lost,
+      },
+      'what a person attached was made readable for the run',
+    );
+
+    return loaded;
   }
 
   async #baseCommit(session: SessionDocument, token: InstallationToken): Promise<string> {

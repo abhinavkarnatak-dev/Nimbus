@@ -12,7 +12,7 @@ export interface ModelFacts {
 }
 
 export const DEFAULT_TEXT_MODEL = 'gemini-3.6-flash';
-export const DEFAULT_VISION_MODEL = 'gemini-3.6-flash';
+export const DEFAULT_VISION_MODEL = 'gemini-3.5-flash-lite';
 export const DEFAULT_LIGHT_MODEL = 'gemini-3.5-flash-lite';
 export const DEFAULT_REASONING_MODEL = 'openai/gpt-oss-120b';
 
