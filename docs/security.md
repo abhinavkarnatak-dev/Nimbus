@@ -221,6 +221,40 @@ the port rather than merely disallowed by policy.
 
 Owned by features 021, 022, and 023.
 
+## 8a. Cancellation and the liveness of an external write
+
+A cancellation is durable the moment the session row moves to `cancelled`, which is a conditional
+update with exactly one winner. From that moment two things happen in parallel: the cancellation is
+announced on a Redis channel so whichever process is running the session aborts it promptly, and the
+worker's own checks will catch it even if that announcement is never delivered, because Redis pub sub
+is a speed improvement and never the mechanism of record.
+
+Immediately before every trusted external write, and again between the branch push and the pull
+request, the worker asks five questions and stops unless all five still hold: the session exists, it
+is still in an active status, it is still owned by the same user, this worker still holds the lease,
+and the run has not been aborted. Failing any of them, the worker performs no further external write.
+For a lost lease or a vanished session it also writes nothing to the database at all, because another
+worker may legitimately own the session now.
+
+An HTTP request that has already left the process cannot be recalled, so the guarantee is stated in
+terms of what is started rather than what completes:
+
+- No external write is ever started after a cancellation is durable.
+- The remaining window is one HTTP round trip, because the check sits immediately before the call.
+- If a cancellation wins between the push and the pull request, the branch exists and no pull request
+  is opened. The worst case is an orphan branch, never a pull request on somebody's repository.
+- A retry cannot duplicate an effect, because the branch name is derived from the session and the pull
+  request gateway looks before it creates.
+
+Deleting an orphan branch is deliberately not done. Feature 022's gateway has no delete operation at
+all, and adding one to tidy up a rare case would widen the trusted surface for no security gain.
+
+Cancellation is announced exactly once. The API owns the durable event and the notification because it
+owns the decision and the conditional update guarantees a single winner; a worker that finds itself
+cancelled tears down its sandbox, releases its lease, and announces nothing.
+
+Owned by features 034, 035, and 038e.
+
 ## 9. Input validation
 
 Every request, response, and socket event is validated against a Zod schema from

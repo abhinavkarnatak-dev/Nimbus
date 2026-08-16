@@ -4,6 +4,7 @@ import { CapturingMailer } from '../email/capturing-mailer.js';
 import { MailService } from '../email/mail-service.js';
 import { CollectingEventPublisher } from '../events/publisher.js';
 import { SANDBOX_ENV } from '../sandbox/spec.js';
+import type { RunOutcome } from '../sessions/repository.js';
 import { changedFiles, SessionRunner } from './runner.js';
 import {
   BACKEND_ONLY_TOKEN,
@@ -17,6 +18,15 @@ import {
   sessionDocument,
 } from './orchestrator.fixtures.js';
 import { WorkshopError } from './workshop.js';
+
+async function ran(work: Promise<RunOutcome | null>): Promise<RunOutcome> {
+  const outcome = await work;
+
+  if (outcome === null) {
+    throw new Error('the run wrote nothing, which this test did not expect');
+  }
+  return outcome;
+}
 
 function runnerFor(options: { answers?: readonly { value: unknown }[]; failWith?: Error } = {}): {
   runner: SessionRunner;
@@ -53,7 +63,7 @@ function runnerFor(options: { answers?: readonly { value: unknown }[]; failWith?
 describe('a run that reaches a pull request', () => {
   it('pushes the patch the validator allowed', async () => {
     const held = runnerFor();
-    const outcome = await held.runner.run(sessionDocument(), new AbortController().signal);
+    const outcome = await ran(held.runner.run(sessionDocument(), new AbortController().signal));
 
     expect(outcome.status).toBe('pr_created');
     expect(held.push.calls[0]?.patch).toContain('DEFAULT_DESTINATION');
@@ -61,7 +71,7 @@ describe('a run that reaches a pull request', () => {
 
   it('opens the pull request against the branch that was pushed', async () => {
     const held = runnerFor();
-    const outcome = await held.runner.run(sessionDocument(), new AbortController().signal);
+    const outcome = await ran(held.runner.run(sessionDocument(), new AbortController().signal));
 
     expect(held.pullRequests.calls[0]?.branch).toBe(outcome.branch);
     expect(outcome.pullRequest?.branch).toBe(outcome.branch);
@@ -78,7 +88,7 @@ describe('a run that reaches a pull request', () => {
 describe('nothing reaches GitHub unless the change is real', () => {
   it('pushes nothing when the model never finished', async () => {
     const held = runnerFor({ answers: [CLEAR_SCOPE, answer('read_file', { path: 'README.md' })] });
-    const outcome = await held.runner.run(sessionDocument(), new AbortController().signal);
+    const outcome = await ran(held.runner.run(sessionDocument(), new AbortController().signal));
 
     expect(outcome.status).toBe('failed');
     expect(held.push.calls).toHaveLength(0);
@@ -86,7 +96,7 @@ describe('nothing reaches GitHub unless the change is real', () => {
 
   it('pushes nothing when the sandbox never started', async () => {
     const held = runnerFor({ failWith: new WorkshopError('sandbox', 'no machine') });
-    const outcome = await held.runner.run(sessionDocument(), new AbortController().signal);
+    const outcome = await ran(held.runner.run(sessionDocument(), new AbortController().signal));
 
     expect(outcome.failure?.code).toBe('SANDBOX_FAILED');
     expect(held.push.calls).toHaveLength(0);
@@ -94,7 +104,7 @@ describe('nothing reaches GitHub unless the change is real', () => {
 
   it('says the account has no GitHub app when that is the reason', async () => {
     const held = runnerFor({ failWith: new WorkshopError('no_installation', 'gone') });
-    const outcome = await held.runner.run(sessionDocument(), new AbortController().signal);
+    const outcome = await ran(held.runner.run(sessionDocument(), new AbortController().signal));
 
     expect(outcome.failure?.code).toBe('PROVIDER_UNAVAILABLE');
   });
@@ -112,7 +122,7 @@ describe('when GitHub refuses', () => {
     const held = runnerFor();
     held.push.failWith(new Error('branch conflict'));
 
-    const outcome = await held.runner.run(sessionDocument(), new AbortController().signal);
+    const outcome = await ran(held.runner.run(sessionDocument(), new AbortController().signal));
 
     expect(outcome.failure?.code).toBe('PUSH_FAILED');
     expect(held.pullRequests.calls).toHaveLength(0);
@@ -122,7 +132,7 @@ describe('when GitHub refuses', () => {
     const held = runnerFor();
     held.pullRequests.failWith(new Error('pull requests are off'));
 
-    const outcome = await held.runner.run(sessionDocument(), new AbortController().signal);
+    const outcome = await ran(held.runner.run(sessionDocument(), new AbortController().signal));
 
     expect(outcome.failure?.code).toBe('PULL_REQUEST_FAILED');
     expect(outcome.branch).not.toBeUndefined();
@@ -138,7 +148,7 @@ describe('a cancelled run', () => {
     const running = held.runner.run(session, controller.signal);
     controller.abort();
 
-    expect((await running).status).toBe('cancelled');
+    expect((await ran(running)).status).toBe('cancelled');
   });
 });
 
@@ -308,7 +318,7 @@ describe('what a run says while it happens', () => {
 
   it('runs perfectly well with nobody listening', async () => {
     const held = runnerFor();
-    const outcome = await held.runner.run(sessionDocument(), new AbortController().signal);
+    const outcome = await ran(held.runner.run(sessionDocument(), new AbortController().signal));
 
     expect(outcome.status).toBe('pr_created');
   });
@@ -364,7 +374,7 @@ describe('telling the person it ended badly', () => {
     const held = mailing({ answers: [CLEAR_SCOPE] });
     held.mailer.failNextSends(new Error('smtp is down'));
 
-    const outcome = await held.runner.run(sessionDocument(), new AbortController().signal);
+    const outcome = await ran(held.runner.run(sessionDocument(), new AbortController().signal));
 
     expect(outcome.status).toBe('failed');
   });

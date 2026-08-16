@@ -8,6 +8,9 @@ import {
 import type { ApprovalStore } from '../agent/policy/approvals.js';
 import { InMemoryAttachmentRecords } from '../attachments/repository.js';
 import type { AttachmentDocument } from '../db/models/attachment.js';
+import type { SessionDocument } from '../db/models/session.js';
+import type { EventPublisher } from '../events/publisher.js';
+import type { CancelAnnouncer } from '../orchestrator/cancellation.js';
 import { capturingLogger } from '../llm/llm.fixtures.js';
 import { InMemorySessionRecords } from './repository.js';
 import { AgentSessionService, type RepositoryDirectory } from './service.js';
@@ -118,6 +121,9 @@ export function sessionHarness(
     now?: () => Date;
     maxSteps?: number;
     approvals?: (sessionId: string) => ApprovalStore;
+    cancellations?: CancelAnnouncer;
+    events?: EventPublisher;
+    notifyCancelled?: (session: SessionDocument) => Promise<void>;
   } = {},
 ): SessionHarness {
   const captured = capturingLogger();
@@ -133,6 +139,11 @@ export function sessionHarness(
       logger: captured.logger,
       ...(options.approvals === undefined ? {} : { approvalsFor: options.approvals }),
       ...(options.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }),
+      ...(options.cancellations === undefined ? {} : { cancellations: options.cancellations }),
+      ...(options.events === undefined ? {} : { events: options.events }),
+      ...(options.notifyCancelled === undefined
+        ? {}
+        : { notifyCancelled: options.notifyCancelled }),
       ...(options.now === undefined ? {} : { now: options.now }),
     }),
     records,

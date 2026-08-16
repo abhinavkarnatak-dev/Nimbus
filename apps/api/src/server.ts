@@ -33,6 +33,7 @@ import { SessionAttachments } from './routing/attached.js';
 import { ImageDescriber } from './routing/describe.js';
 import { providersForPlan } from './routing/requirements.js';
 import { planFor, SELECTABLE_TEXT_MODELS } from './routing/selection.js';
+import { RedisCancelAnnouncer, RedisCancelWatcher } from './orchestrator/cancellation.js';
 import { Orchestrator } from './orchestrator/orchestrator.js';
 import { LiveSessionWorkshop } from './orchestrator/live-workshop.js';
 import { SessionRunner } from './orchestrator/runner.js';
@@ -44,6 +45,7 @@ import { TrustedPushGateway } from './push/gateway.js';
 import { MongoApprovals } from './sessions/approvals.js';
 import { MongoSessionRecords } from './sessions/repository.js';
 import { AgentSessionService } from './sessions/service.js';
+import type { SessionDocument } from './db/models/session.js';
 import { usersCollection } from './db/models/user.js';
 import { createSandboxProvider } from './sandbox/factory.js';
 import type { SandboxProvider } from './sandbox/provider.js';
@@ -295,27 +297,41 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     );
   }
 
+  const sessionRecords = new MongoSessionRecords(handle.db);
+  const eventStore = new MongoEventStore(handle.db);
+  const events = new LiveEventPublisher({ store: eventStore, redis, logger });
+  const cancelAnnouncer = new RedisCancelAnnouncer({ redis, logger });
+  const cancelWatcher = new RedisCancelWatcher({ redis, logger });
+
+  const tellCancelled = async (session: SessionDocument): Promise<void> => {
+    await mail.sendSessionEnded(await emailOf(handle.db, session.userId), {
+      repository: `${session.repository.owner}/${session.repository.name}`,
+      task: session.task,
+      outcome: 'cancelled',
+      reason: 'Somebody cancelled it.',
+    });
+  };
+
   if (repositories !== null) {
     routers.push(
       createSessionsRouter({
         auth: sessions,
         sessions: new AgentSessionService({
-          records: new MongoSessionRecords(handle.db),
+          records: sessionRecords,
           attachments: attachmentRecords,
           repositories,
           logger,
           maxSteps: config.limits.maxAgentSteps,
           approvalsFor: (sessionId) => new MongoApprovals({ db: handle.db, sessionId }),
+          cancellations: cancelAnnouncer,
+          events,
+          notifyCancelled: tellCancelled,
         }),
       }),
     );
   }
 
   logger.info({ agentSessions: repositories !== null }, 'Agent sessions ready');
-
-  const sessionRecords = new MongoSessionRecords(handle.db);
-  const eventStore = new MongoEventStore(handle.db);
-  const events = new LiveEventPublisher({ store: eventStore, redis, logger });
 
   const orchestrator =
     repositories === null || githubTokens === null
@@ -324,6 +340,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
           records: new MongoSessionRecords(handle.db),
           leases: new LeaseManager(redis),
           logger,
+          cancellations: cancelWatcher,
           runner: new SessionRunner({
             workshop: new LiveSessionWorkshop({
               db: handle.db,

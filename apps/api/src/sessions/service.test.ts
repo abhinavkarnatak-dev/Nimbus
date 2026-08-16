@@ -4,7 +4,9 @@ import { ApprovalDecisionBodySchema, type ApprovalDecisionBody } from '@nimbus/c
 
 import { InMemoryApprovals } from '../agent/policy/approvals.js';
 import { DEFAULT_LIMITS } from '../config/limits.js';
+import { CollectingEventPublisher } from '../events/publisher.js';
 import { ApiError } from '../http/api-error.js';
+import { CollectingCancelAnnouncer } from '../orchestrator/cancellation.js';
 import { KNOWN_MODELS } from '../llm/models.js';
 import { SELECTABLE_TEXT_MODELS } from '../routing/selection.js';
 import { DEFAULT_MAX_STEPS } from './service.js';
@@ -528,6 +530,99 @@ describe('cancelling', () => {
     await harness.service.cancel(OWNER_ID, created.session.sessionId);
 
     expect(harness.records.documents[0]?.currentActivity).toBeNull();
+  });
+});
+
+describe('what a cancellation sets off', () => {
+  const watched = (): {
+    cancellations: CollectingCancelAnnouncer;
+    events: CollectingEventPublisher;
+    emails: string[];
+    harness: ReturnType<typeof sessionHarness>;
+  } => {
+    const cancellations = new CollectingCancelAnnouncer();
+    const events = new CollectingEventPublisher();
+    const emails: string[] = [];
+
+    return {
+      cancellations,
+      events,
+      emails,
+      harness: sessionHarness({
+        cancellations,
+        events,
+        notifyCancelled: async (session) => {
+          emails.push(session.sessionId);
+          await Promise.resolve();
+        },
+      }),
+    };
+  };
+
+  it('tells whichever worker is running it to stop', async () => {
+    const held = watched();
+    const created = await held.harness.service.create(OWNER_ID, newBody());
+    await held.harness.service.cancel(OWNER_ID, created.session.sessionId);
+
+    expect(held.cancellations.announced).toEqual([created.session.sessionId]);
+  });
+
+  it('records exactly one durable cancellation event', async () => {
+    const held = watched();
+    const created = await held.harness.service.create(OWNER_ID, newBody());
+    await held.harness.service.cancel(OWNER_ID, created.session.sessionId);
+
+    expect(held.events.typesFor(created.session.sessionId)).toEqual(['session.cancelled']);
+  });
+
+  it('sends exactly one email', async () => {
+    const held = watched();
+    const created = await held.harness.service.create(OWNER_ID, newBody());
+    await held.harness.service.cancel(OWNER_ID, created.session.sessionId);
+
+    expect(held.emails).toEqual([created.session.sessionId]);
+  });
+
+  it('sets nothing off for the loser of two cancels arriving together', async () => {
+    const held = watched();
+    const created = await held.harness.service.create(OWNER_ID, newBody());
+
+    await Promise.allSettled([
+      held.harness.service.cancel(OWNER_ID, created.session.sessionId),
+      held.harness.service.cancel(OWNER_ID, created.session.sessionId),
+    ]);
+
+    expect(held.cancellations.announced).toHaveLength(1);
+    expect(held.events.typesFor(created.session.sessionId)).toHaveLength(1);
+    expect(held.emails).toHaveLength(1);
+  });
+
+  it('still cancels when telling the worker fails', async () => {
+    const events = new CollectingEventPublisher();
+    const harness = sessionHarness({
+      events,
+      cancellations: {
+        announce: async () => {
+          await Promise.reject(new Error('redis is down'));
+        },
+      },
+    });
+
+    const created = await harness.service.create(OWNER_ID, newBody());
+    const cancelled = await harness.service.cancel(OWNER_ID, created.session.sessionId);
+
+    expect(cancelled.status).toBe('cancelled');
+    expect(events.typesFor(created.session.sessionId)).toEqual(['session.cancelled']);
+    expect(harness.logs()).toContain('one thing that follows it did not happen');
+  });
+
+  it('cancels perfectly well with nothing wired at all', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+
+    expect((await harness.service.cancel(OWNER_ID, created.session.sessionId)).status).toBe(
+      'cancelled',
+    );
   });
 });
 

@@ -60,9 +60,15 @@ export class LiveEventPublisher implements EventPublisher {
 export class CollectingEventPublisher implements EventPublisher {
   readonly published: { sessionId: string; event: ServerEvent }[] = [];
 
+  #onEvent: ((type: string) => Promise<void>) | null = null;
+
+  onEvent(work: (type: string) => Promise<void>): void {
+    this.#onEvent = work;
+  }
+
   async publish(sessionId: string, _userId: string, event: ServerEvent): Promise<void> {
     this.published.push({ sessionId, event });
-    await Promise.resolve();
+    await this.#onEvent?.(event.type);
   }
 
   typesFor(sessionId: string): string[] {

@@ -213,7 +213,21 @@ describe('a worker that loses its lease', () => {
     held.leases.steal(leaseResource(session.sessionId));
     await settle();
 
-    expect(held.logs()).toContain('writes nothing about this session');
+    expect(held.logs()).toContain('nothing was written about this session');
+    expect((await held.records.findById(session.sessionId))?.status).toBe('queued');
+  });
+
+  it('never pushes anything once another worker holds the lease', async () => {
+    const held = harness();
+    const session = sessionDocument();
+    await held.records.insert(session);
+
+    await held.orchestrator.take(session);
+    held.leases.steal(leaseResource(session.sessionId));
+    await settle();
+
+    expect(held.push.calls).toHaveLength(0);
+    expect(held.pullRequests.calls).toHaveLength(0);
   });
 
   it('stops holding the session, so the next worker can have it', async () => {

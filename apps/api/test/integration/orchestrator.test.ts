@@ -9,6 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ensureDatabaseSchema } from '../../src/db/bootstrap.js';
 import { sessionsCollection } from '../../src/db/models/session.js';
 import { capturingLogger } from '../../src/llm/llm.fixtures.js';
+import { RedisCancelAnnouncer, RedisCancelWatcher } from '../../src/orchestrator/cancellation.js';
 import { leaseResource } from '../../src/orchestrator/claim.js';
 import { Orchestrator } from '../../src/orchestrator/orchestrator.js';
 import { LiveEventPublisher } from '../../src/events/publisher.js';
@@ -39,7 +40,9 @@ let leases: LeaseManager;
 const push = new RecordingPushGateway();
 const pullRequests = new RecordingPullRequestGateway();
 
-function workerWith(options: { answers?: readonly { value: unknown }[]; hang?: boolean } = {}): {
+function workerWith(
+  options: { answers?: readonly { value: unknown }[]; hang?: boolean; watchCancels?: boolean } = {},
+): {
   orchestrator: Orchestrator;
   workshop: FakeWorkshop;
   logs: () => string;
@@ -67,6 +70,14 @@ function workerWith(options: { answers?: readonly { value: unknown }[]; hang?: b
       logger: captured.logger,
       heartbeatMs: 60_000,
       leaseSeconds: 2,
+      ...(options.watchCancels === true
+        ? {
+            cancellations: new RedisCancelWatcher({
+              redis: redis.client,
+              logger: captured.logger,
+            }),
+          }
+        : {}),
     }),
     workshop,
     logs: captured.text,
@@ -410,5 +421,76 @@ describe('a session waiting for a person, against a real database', () => {
     expect((await records.findClaimable(10)).map((one) => one.sessionId)).toEqual([
       session.sessionId,
     ]);
+  });
+});
+
+describe('a cancel raised by one process against a worker in another', () => {
+  it('reaches the worker over Redis and stops it before any external write', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+
+    const worker = workerWith({ watchCancels: true });
+    worker.orchestrator.start();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    await worker.orchestrator.take(session);
+    expect(worker.orchestrator.holds(session.sessionId)).toBe(true);
+
+    const elsewhere = new RedisCancelAnnouncer({
+      redis: redis.client,
+      logger: capturingLogger().logger,
+    });
+
+    await records.finish(session.userId, session.sessionId, 'cancelled', new Date());
+    await elsewhere.announce(session.sessionId, new Date());
+    await settle();
+
+    expect(worker.logs()).toContain('told to stop');
+    expect(push.calls).toHaveLength(0);
+    expect(pullRequests.calls).toHaveLength(0);
+
+    await worker.orchestrator.stop();
+  });
+
+  it('stops the run even when the announcement never arrives, from the database alone', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+
+    const worker = workerWith();
+    await worker.orchestrator.take(session);
+    await records.finish(session.userId, session.sessionId, 'cancelled', new Date());
+    await settle();
+
+    expect(push.calls).toHaveLength(0);
+    expect(pullRequests.calls).toHaveLength(0);
+    expect((await sessionsCollection(testDatabase.db).findOne({}))?.status).toBe('cancelled');
+  });
+
+  it('releases the lease so nothing is left holding a cancelled session', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+
+    const worker = workerWith();
+    await worker.orchestrator.take(session);
+    await records.finish(session.userId, session.sessionId, 'cancelled', new Date());
+    await settle();
+
+    expect(await leases.holderOf(leaseResource(session.sessionId))).toBeNull();
+    expect(worker.orchestrator.running).toBe(0);
+  });
+
+  it('never lets a late worker write over the cancelled terminal state', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+    await records.finish(session.userId, session.sessionId, 'cancelled', new Date());
+
+    const written = await records.recordOutcome(
+      session.sessionId,
+      { status: 'pr_created', currentActivity: null },
+      new Date(),
+    );
+
+    expect(written).toBeNull();
+    expect((await sessionsCollection(testDatabase.db).findOne({}))?.status).toBe('cancelled');
   });
 });

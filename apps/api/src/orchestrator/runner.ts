@@ -18,6 +18,7 @@ import type { PushGateway } from '../push/gateway.js';
 import type { ApprovalStore } from '../agent/policy/approvals.js';
 import type { RunOutcome, SessionRecords } from '../sessions/repository.js';
 import { WAIT_LIMITS } from './limits.js';
+import { ALWAYS_LIVE, type LivenessVerdict, type RunLiveness } from './liveness.js';
 import { failureOf, failureForStop, isPaused } from './outcome.js';
 import { WorkshopError, type SessionWorkshop } from './workshop.js';
 
@@ -35,6 +36,19 @@ export function changedFiles(report: PatchValidationReport | null): FileChange[]
     removedLines: file.removedLines,
     ...(file.previousPath === undefined ? {} : { previousPath: file.previousPath }),
   }));
+}
+
+export const CANCELLING_VERDICTS: readonly LivenessVerdict[] = ['aborted', 'cancelled'];
+
+export function stopHere(
+  verdict: LivenessVerdict,
+  progress: Omit<RunOutcome, 'status'>,
+): RunOutcome | null {
+  if (!CANCELLING_VERDICTS.includes(verdict)) {
+    return null;
+  }
+
+  return { status: 'cancelled', ...progress, currentActivity: null };
 }
 
 export interface SessionRunnerOptions {
@@ -80,8 +94,18 @@ export class SessionRunner {
     this.#mail = options.mail ?? null;
   }
 
-  async run(session: SessionDocument, signal: AbortSignal): Promise<RunOutcome> {
+  async run(
+    session: SessionDocument,
+    signal: AbortSignal,
+    liveness: RunLiveness = ALWAYS_LIVE,
+  ): Promise<RunOutcome | null> {
     let prepared;
+
+    const stopped = await this.#verdict(signal, liveness, 'before starting');
+
+    if (stopped !== 'live') {
+      return stopHere(stopped, {});
+    }
 
     await this.#say(session, {
       type: 'session.status',
@@ -115,13 +139,10 @@ export class SessionRunner {
 
       await this.#sayProgress(session, progress);
 
-      if (signal.aborted) {
-        await this.#say(session, {
-          type: 'session.cancelled',
-          cancelledAt: new Date().toISOString(),
-        });
-        await this.#mailEnded(session, 'cancelled', 'Somebody cancelled it while it was running.');
-        return { status: 'cancelled', currentActivity: null, ...progress };
+      const afterAgent = await this.#verdict(signal, liveness, 'after the agent finished');
+
+      if (afterAgent !== 'live') {
+        return stopHere(afterAgent, progress);
       }
 
       if (isPaused(result.state)) {
@@ -153,7 +174,14 @@ export class SessionRunner {
         return failed;
       }
 
-      return await this.#deliver(session, prepared.installationId, result, progress);
+      return await this.#deliver(
+        session,
+        prepared.installationId,
+        result,
+        progress,
+        liveness,
+        signal,
+      );
     } finally {
       await prepared.finish();
     }
@@ -164,7 +192,9 @@ export class SessionRunner {
     installationId: number,
     result: Awaited<ReturnType<typeof runAgent>>,
     progress: Omit<RunOutcome, 'status'>,
-  ): Promise<RunOutcome> {
+    liveness: RunLiveness,
+    signal: AbortSignal,
+  ): Promise<RunOutcome | null> {
     const patch = result.patch;
     const report = result.report;
 
@@ -173,6 +203,13 @@ export class SessionRunner {
     }
 
     const baseCommitSha = result.state.baseCommitSha;
+
+    const beforePush = await this.#verdict(signal, liveness, 'before pushing a branch');
+
+    if (beforePush !== 'live') {
+      return stopHere(beforePush, progress);
+    }
+
     let pushed: PushResult;
 
     try {
@@ -193,6 +230,20 @@ export class SessionRunner {
         'a branch could not be pushed',
       );
       return { status: 'failed', failure: failureOf('PUSH_FAILED'), ...progress };
+    }
+
+    const beforePullRequest = await this.#verdict(
+      signal,
+      liveness,
+      'before opening a pull request',
+    );
+
+    if (beforePullRequest !== 'live') {
+      this.#logger.warn(
+        { sessionId: session.sessionId, branch: pushed.branch, verdict: beforePullRequest },
+        'a branch was pushed and no pull request was opened, because the session stopped being live in between',
+      );
+      return stopHere(beforePullRequest, { branch: pushed.branch, ...progress });
     }
 
     let opened: PullRequestResult;
@@ -244,6 +295,22 @@ export class SessionRunner {
       },
       ...progress,
     };
+  }
+
+  async #verdict(
+    signal: AbortSignal,
+    liveness: RunLiveness,
+    where: string,
+  ): Promise<LivenessVerdict> {
+    if (signal.aborted) {
+      this.#logger.warn(
+        { where },
+        'a run stopped short of an external write because it was aborted',
+      );
+      return 'aborted';
+    }
+
+    return await liveness(where);
   }
 
   async #say(session: SessionDocument, event: ServerEvent): Promise<void> {

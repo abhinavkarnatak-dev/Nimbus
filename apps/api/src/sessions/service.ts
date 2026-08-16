@@ -18,6 +18,8 @@ import { tooThinToJudge } from '../agent/nodes/scope.js';
 import { ApprovalError, InMemoryApprovals, type ApprovalStore } from '../agent/policy/approvals.js';
 import type { AttachmentRecords } from '../attachments/repository.js';
 import { DEFAULT_LIMITS } from '../config/limits.js';
+import type { EventPublisher } from '../events/publisher.js';
+import type { CancelAnnouncer } from '../orchestrator/cancellation.js';
 import {
   SESSION_ID_PREFIX,
   isActiveSessionStatus,
@@ -46,6 +48,9 @@ export interface AgentSessionServiceOptions {
   repositories: RepositoryDirectory;
   logger: Logger;
   approvalsFor?: (sessionId: string) => ApprovalStore;
+  cancellations?: CancelAnnouncer;
+  events?: EventPublisher;
+  notifyCancelled?: (session: SessionDocument) => Promise<void>;
   maxSteps?: number;
   now?: () => Date;
 }
@@ -103,6 +108,12 @@ export class AgentSessionService {
 
   readonly #approvalsFor: (sessionId: string) => ApprovalStore;
 
+  readonly #cancellations: CancelAnnouncer | null;
+
+  readonly #events: EventPublisher | null;
+
+  readonly #notifyCancelled: ((session: SessionDocument) => Promise<void>) | null;
+
   readonly #now: () => Date;
 
   constructor(options: AgentSessionServiceOptions) {
@@ -112,6 +123,9 @@ export class AgentSessionService {
     this.#logger = options.logger;
     this.#maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
     this.#approvalsFor = options.approvalsFor ?? ((): ApprovalStore => new InMemoryApprovals());
+    this.#cancellations = options.cancellations ?? null;
+    this.#events = options.events ?? null;
+    this.#notifyCancelled = options.notifyCancelled ?? null;
     this.#now = options.now ?? ((): Date => new Date());
   }
 
@@ -175,14 +189,44 @@ export class AgentSessionService {
 
   async cancel(userId: string, sessionId: string): Promise<SessionSummary> {
     const document = await this.#owned(userId, sessionId);
-    const stopped = await this.#records.finish(userId, sessionId, 'cancelled', this.#now());
+    const at = this.#now();
+    const stopped = await this.#records.finish(userId, sessionId, 'cancelled', at);
 
     if (stopped === null) {
       throw new ApiError('SESSION_NOT_ACTIVE', `That session has already ${ended(document)}.`);
     }
 
     this.#logger.info({ sessionId, was: document.status }, 'a session was cancelled');
+    await this.#announceCancelled(stopped, at);
     return toSessionSummary(stopped);
+  }
+
+  async #announceCancelled(session: SessionDocument, at: Date): Promise<void> {
+    await this.#safely(session, 'tell the worker', async () => {
+      await this.#cancellations?.announce(session.sessionId, at);
+    });
+
+    await this.#safely(session, 'record the event', async () => {
+      await this.#events?.publish(session.sessionId, session.userId, {
+        type: 'session.cancelled',
+        cancelledAt: at.toISOString(),
+      });
+    });
+
+    await this.#safely(session, 'send the email', async () => {
+      await this.#notifyCancelled?.(session);
+    });
+  }
+
+  async #safely(session: SessionDocument, what: string, work: () => Promise<void>): Promise<void> {
+    try {
+      await work();
+    } catch (error) {
+      this.#logger.warn(
+        { sessionId: session.sessionId, what, error: String(error) },
+        'a cancellation was recorded but one thing that follows it did not happen',
+      );
+    }
   }
 
   async answer(userId: string, sessionId: string, text: string): Promise<SessionSummary> {

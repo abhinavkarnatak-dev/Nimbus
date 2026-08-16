@@ -2,8 +2,10 @@ import type { SessionDocument } from '../db/models/session.js';
 import type { Logger } from '../logging/logger.js';
 import type { Lease } from '../redis/lease.js';
 import type { RunOutcome, SessionRecords } from '../sessions/repository.js';
+import type { CancelWatcher } from './cancellation.js';
 import { Heartbeat, claimSession, type SessionLeases } from './claim.js';
 import { ORCHESTRATOR_LIMITS } from './limits.js';
+import { stillLive } from './liveness.js';
 import { failureOf } from './outcome.js';
 import type { SessionRunner } from './runner.js';
 
@@ -18,6 +20,7 @@ export interface OrchestratorOptions {
   claimBatch?: number;
   maxRecoveries?: number;
   runningConcurrently?: number;
+  cancellations?: CancelWatcher;
   now?: () => Date;
 }
 
@@ -44,7 +47,9 @@ export class Orchestrator {
 
   readonly #now: () => Date;
 
-  readonly #running = new Set<string>();
+  readonly #cancellations: CancelWatcher | null;
+
+  readonly #running = new Map<string, AbortController>();
 
   #timer: NodeJS.Timeout | null = null;
 
@@ -62,11 +67,31 @@ export class Orchestrator {
     this.#maxRecoveries = options.maxRecoveries ?? ORCHESTRATOR_LIMITS.maxRecoveries;
     this.#runningConcurrently =
       options.runningConcurrently ?? ORCHESTRATOR_LIMITS.runningConcurrently;
+    this.#cancellations = options.cancellations ?? null;
     this.#now = options.now ?? ((): Date => new Date());
   }
 
   get running(): number {
     return this.#running.size;
+  }
+
+  holds(sessionId: string): boolean {
+    return this.#running.has(sessionId);
+  }
+
+  cancel(sessionId: string): boolean {
+    const controller = this.#running.get(sessionId);
+
+    if (controller === undefined || controller.signal.aborted) {
+      return false;
+    }
+
+    controller.abort();
+    this.#logger.info(
+      { sessionId },
+      'a running session was told to stop because somebody cancelled it',
+    );
+    return true;
   }
 
   start(): void {
@@ -79,6 +104,10 @@ export class Orchestrator {
     }, this.#pollMs);
 
     this.#timer.unref();
+
+    void this.#cancellations?.watch((sessionId) => {
+      this.cancel(sessionId);
+    });
   }
 
   async stop(): Promise<void> {
@@ -88,7 +117,8 @@ export class Orchestrator {
       clearInterval(this.#timer);
       this.#timer = null;
     }
-    await Promise.resolve();
+
+    await this.#cancellations?.stop();
   }
 
   async tick(): Promise<number> {
@@ -135,8 +165,10 @@ export class Orchestrator {
       return false;
     }
 
-    this.#running.add(session.sessionId);
-    void this.#work(session, claim.lease, claim.release, recovering);
+    const controller = new AbortController();
+
+    this.#running.set(session.sessionId, controller);
+    void this.#work(session, claim.lease, claim.release, recovering, controller);
     return true;
   }
 
@@ -169,9 +201,8 @@ export class Orchestrator {
     lease: Lease,
     release: () => Promise<void>,
     recovering: boolean,
+    controller: AbortController,
   ): Promise<void> {
-    const controller = new AbortController();
-
     const heartbeat = new Heartbeat({
       leases: this.#leases,
       lease,
@@ -189,10 +220,21 @@ export class Orchestrator {
       'a worker took a session and started it',
     );
 
-    let outcome: RunOutcome;
+    let outcome: RunOutcome | null;
 
     try {
-      outcome = await this.#runner.run(session, controller.signal);
+      outcome = await this.#runner.run(
+        session,
+        controller.signal,
+        stillLive({
+          session,
+          records: this.#records,
+          leases: this.#leases,
+          lease,
+          signal: controller.signal,
+          logger: this.#logger,
+        }),
+      );
     } catch (error) {
       this.#logger.error(
         { sessionId: session.sessionId, error: String(error) },
@@ -201,6 +243,16 @@ export class Orchestrator {
       outcome = { status: 'failed', failure: failureOf('INTERNAL_ERROR'), currentActivity: null };
     } finally {
       heartbeat.stop();
+    }
+
+    if (outcome === null) {
+      this.#logger.info(
+        { sessionId: session.sessionId },
+        'a run stopped without an outcome of its own, so nothing was written about this session',
+      );
+      await release();
+      this.#running.delete(session.sessionId);
+      return;
     }
 
     const stillOurs = await heartbeat.beat();

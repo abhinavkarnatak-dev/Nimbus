@@ -166,12 +166,19 @@ export class RecordingPushGateway implements PushGateway {
 
   #failure: Error | null = null;
 
+  #after: (() => Promise<void>) | null = null;
+
   failWith(error: Error): void {
     this.#failure = error;
   }
 
+  justAfter(work: () => Promise<void>): void {
+    this.#after = work;
+  }
+
   async push(request: PushRequest): Promise<PushResult> {
     this.calls.push(request);
+    await this.#after?.();
 
     if (this.#failure !== null) {
       throw this.#failure;
