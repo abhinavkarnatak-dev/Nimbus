@@ -197,6 +197,7 @@ describe('what a run says while it happens', () => {
         workshop: new FakeWorkshop({
           logger: captured.logger,
           answers: options.answers ?? FINISHING_ANSWERS,
+          events,
         }),
         push,
         pullRequests,
@@ -226,6 +227,64 @@ describe('what a run says while it happens', () => {
     expect(types).toContain('tool.completed');
     expect(types).toContain('files.changed');
     expect(types).toContain('checks.updated');
+  });
+
+  it('sends what each tool did while the run is still going, not in a heap at the end', async () => {
+    const held = talking();
+    const session = sessionDocument();
+
+    await held.runner.run(session, new AbortController().signal);
+    const types = held.events.typesFor(session.sessionId);
+
+    const firstTool = types.indexOf('tool.completed');
+    const summaries = types.indexOf('files.changed');
+
+    expect(firstTool).toBeGreaterThan(-1);
+    expect(firstTool).toBeLessThan(summaries);
+  });
+
+  it('says a tool started, before saying it ended', async () => {
+    const held = talking();
+    const session = sessionDocument();
+
+    await held.runner.run(session, new AbortController().signal);
+    const types = held.events.typesFor(session.sessionId);
+
+    expect(types).toContain('tool.started');
+    expect(types.indexOf('tool.started')).toBeLessThan(types.indexOf('tool.completed'));
+  });
+
+  it('sends what a tool printed, for a tool that printed something', async () => {
+    const held = talking({ answers: [CLEAR_SCOPE, answer('read_file', { path: 'README.md' })] });
+    const session = sessionDocument();
+
+    await held.runner.run(session, new AbortController().signal);
+    const types = held.events.typesFor(session.sessionId);
+
+    expect(types).toContain('tool.output');
+    expect(types.indexOf('tool.output')).toBeLessThan(types.indexOf('tool.completed'));
+  });
+
+  it('sends nothing to read for a tool that printed nothing', async () => {
+    const held = talking({ answers: [CLEAR_SCOPE, answer('prepare_commit', { summary: 'done' })] });
+    const session = sessionDocument();
+
+    await held.runner.run(session, new AbortController().signal);
+
+    expect(held.events.typesFor(session.sessionId)).not.toContain('tool.output');
+  });
+
+  it('sends one completion per tool, not two', async () => {
+    const held = talking();
+    const session = sessionDocument();
+
+    await held.runner.run(session, new AbortController().signal);
+    const types = held.events.typesFor(session.sessionId);
+
+    const completions = types.filter((one) => one === 'tool.completed').length;
+    const starts = types.filter((one) => one === 'tool.started').length;
+
+    expect(completions).toBe(starts);
   });
 
   it('announces the pull request last', async () => {

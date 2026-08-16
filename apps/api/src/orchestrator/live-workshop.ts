@@ -11,7 +11,9 @@ import { createState, parseState } from '../agent/state/state.js';
 import type { AppConfig } from '../config/load.js';
 import type { Db } from 'mongodb';
 import type { SessionDocument } from '../db/models/session.js';
+import type { EventPublisher } from '../events/publisher.js';
 import type { GitHubTokenProvider, InstallationToken } from '../github/token-provider.js';
+import { LiveActionReporter } from './reporter.js';
 import { OctokitGitDataClient } from '../push/octokit-git-data.js';
 import type { Logger } from '../logging/logger.js';
 import {
@@ -39,6 +41,7 @@ export interface LiveWorkshopOptions {
   config: AppConfig;
   logger: Logger;
   attachments?: SessionAttachments;
+  events?: EventPublisher;
   checkpointer?: BaseCheckpointSaver;
   maxSteps?: number;
 }
@@ -120,6 +123,16 @@ export class LiveSessionWorkshop implements SessionWorkshop {
             logger: this.#options.logger,
           }),
           logger: this.#options.logger,
+          ...(this.#options.events === undefined
+            ? {}
+            : {
+                reporter: new LiveActionReporter({
+                  events: this.#options.events,
+                  sessionId: session.sessionId,
+                  userId: session.userId,
+                  logger: this.#options.logger,
+                }),
+              }),
         }),
         source: new GitHubRepositorySource({ logger: this.#options.logger }),
         reference: {

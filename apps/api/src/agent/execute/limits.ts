@@ -5,6 +5,7 @@ export const EXECUTE_LIMITS = {
   sameActionRepeatsMax: 3,
   recentActionsTracked: 12,
   userMessageMaxChars: 2_000,
+  reportedOutputMaxChars: 32_000,
 } as const;
 
 export type ExecuteLimits = typeof EXECUTE_LIMITS;

@@ -220,6 +220,8 @@ export const runCommandTool = defineTool({
         `${input.argv[0] ?? 'command'} exited ${String(result.exitCode ?? -1)} in ${String(result.durationMs)} ms`,
       ),
       text: clipped.text,
+      stdout: result.stdout,
+      stderr: result.stderr,
       truncated: clipped.truncated || result.truncated,
       ...only('outcome', outcomeFromCommand(result.outcome)),
     };
@@ -265,6 +267,8 @@ export const runChecksTool = defineTool({
     return {
       summary: shorten(`${input.name}: ${status}`),
       text: clipped.text,
+      stdout: result.stdout,
+      stderr: result.stderr,
       truncated: clipped.truncated || result.truncated,
       ...only('outcome', outcomeFromCommand(result.outcome)),
       check: CheckResultSchema.parse({

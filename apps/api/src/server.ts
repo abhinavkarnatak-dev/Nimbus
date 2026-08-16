@@ -303,6 +303,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
               text: createRoutedTextProvider({ config: config.llm, logger }),
               config,
               logger,
+              events,
               ...(attachedToRuns === null ? {} : { attachments: attachedToRuns }),
             }),
             push: new TrustedPushGateway({

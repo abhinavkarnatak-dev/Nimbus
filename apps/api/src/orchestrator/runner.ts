@@ -6,9 +6,6 @@ import type {
   PullRequestResult,
   PushResult,
   ServerEvent,
-  ToolEventSummary,
-  ToolName,
-  ToolOutcome,
 } from '@nimbus/contracts';
 
 import { runAgent } from '../agent/graph/run.js';
@@ -25,13 +22,6 @@ import { failureOf, failureForStop, isPaused } from './outcome.js';
 import { WorkshopError, type SessionWorkshop } from './workshop.js';
 
 export const PAUSE_EXPIRY_MS = WAIT_LIMITS.clarificationMs;
-
-export const REPORTED_OUTCOME: Readonly<Record<ToolEventSummary['outcome'], ToolOutcome>> = {
-  ok: 'succeeded',
-  failed: 'failed',
-  refused: 'denied',
-  paused: 'denied',
-};
 
 export function changedFiles(report: PatchValidationReport | null): FileChange[] {
   if (report === null) {
@@ -123,7 +113,7 @@ export class SessionRunner {
         baseCommitSha: result.state.baseCommitSha,
       };
 
-      await this.#sayProgress(session, result, progress);
+      await this.#sayProgress(session, progress);
 
       if (signal.aborted) {
         await this.#say(session, {
@@ -273,20 +263,8 @@ export class SessionRunner {
 
   async #sayProgress(
     session: SessionDocument,
-    result: Awaited<ReturnType<typeof runAgent>>,
     progress: Omit<RunOutcome, 'status'>,
   ): Promise<void> {
-    for (const event of result.state.toolEvents) {
-      await this.#say(session, {
-        type: 'tool.completed',
-        toolCallId: `call_${String(event.step)}`,
-        tool: event.tool as ToolName,
-        outcome: REPORTED_OUTCOME[event.outcome],
-        durationMs: 0,
-        summary: event.summary,
-      });
-    }
-
     if ((progress.filesChanged ?? []).length > 0) {
       await this.#say(session, { type: 'files.changed', files: progress.filesChanged ?? [] });
     }

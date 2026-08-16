@@ -17,6 +17,89 @@ const WORKFLOW = actionFor('create_file', {
 });
 const CURL = actionFor('run_command', { argv: ['curl', 'https://collect.example.com'] });
 
+describe('a person watching the run while it happens', () => {
+  it('hears the tool start, then its output, then that it finished', async () => {
+    const harness = await executeHarness();
+    await harness.executor.execute(READ);
+
+    expect(harness.reporter.order).toEqual(['started', 'output', 'completed']);
+  });
+
+  it('hears why the agent is doing it, in the agent own words', async () => {
+    const harness = await executeHarness();
+    await harness.executor.execute({ ...READ, intent: 'checking how sign in redirects' });
+
+    expect(harness.reporter.starts[0]?.summary).toBe('checking how sign in redirects');
+  });
+
+  it('names the same call on all three, so a view can join them up', async () => {
+    const harness = await executeHarness();
+    await harness.executor.execute(READ);
+
+    expect(harness.reporter.starts[0]?.toolCallId).toBe(READ.toolCallId);
+    expect(harness.reporter.chunks[0]?.toolCallId).toBe(READ.toolCallId);
+    expect(harness.reporter.completions[0]?.toolCallId).toBe(READ.toolCallId);
+  });
+
+  it('reports the time the registry measured, not a zero somebody made up', async () => {
+    const harness = await executeHarness();
+    const result = await harness.executor.execute(READ);
+
+    expect(harness.reporter.completions[0]?.durationMs).toBe(result.durationMs);
+  });
+
+  it('says nothing started when policy refused before anything ran', async () => {
+    const harness = await executeHarness();
+    await harness.executor.execute(CURL);
+
+    expect(harness.reporter.starts).toHaveLength(0);
+    expect(harness.reporter.completions[0]?.outcome).toBe('denied');
+  });
+
+  it('says nothing started when the arguments were unusable', async () => {
+    const harness = await executeHarness();
+    await harness.executor.execute(actionFor('read_file', { path: 42 }));
+
+    expect(harness.reporter.starts).toHaveLength(0);
+  });
+
+  it('says nothing started when the action is waiting for approval', async () => {
+    const harness = await executeHarness();
+    await harness.executor.execute(WORKFLOW);
+
+    expect(harness.reporter.starts).toHaveLength(0);
+    expect(harness.reporter.completions[0]?.outcome).toBe('denied');
+  });
+
+  it('never lets a secret out of the sandbox and onto a socket', async () => {
+    const harness = await executeHarness();
+    await harness.executor.execute(READ);
+
+    const sent = harness.reporter.chunks.map((one) => one.chunk).join('');
+
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent).not.toContain('ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  });
+
+  it('runs exactly as it always did when nobody is watching', async () => {
+    const harness = await executeHarness({ watched: false });
+    const result = await harness.executor.execute(READ);
+
+    expect(result.status).toBe('executed');
+    expect(harness.reporter.order).toEqual([]);
+  });
+
+  it('finishes the action even when the thing listening is broken', async () => {
+    const harness = await executeHarness();
+    harness.reporter.failWith(new Error('the socket went away'));
+
+    const result = await harness.executor.execute(READ);
+
+    expect(result.status).toBe('executed');
+    expect(harness.logs()).toContain('a live update could not be sent');
+  });
+});
+
 describe('nothing happens before policy has said so', () => {
   it('runs a tool policy allowed', async () => {
     const harness = await executeHarness();

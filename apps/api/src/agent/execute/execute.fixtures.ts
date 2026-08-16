@@ -14,6 +14,7 @@ import { ToolRegistry } from '../registry/registry.js';
 import { sampleState } from '../state/agent-state.fixtures.js';
 import { parseState } from '../state/state.js';
 import { ActionExecutor } from './executor.js';
+import { CollectingActionReporter } from './reporter.js';
 import { RunGuard } from './loop.js';
 
 export const HOSTILE_TEST_OUTPUT = [
@@ -45,6 +46,7 @@ export interface ExecuteHarness {
   policy: PolicyGate;
   approvals: InMemoryApprovals;
   executor: ActionExecutor;
+  reporter: CollectingActionReporter;
   guard: RunGuard;
   logs: () => string;
 }
@@ -54,6 +56,8 @@ export async function executeHarness(
     sandbox?: FakeSandboxOptions;
     now?: () => number;
     budgets?: { maxSteps?: number; maxRetries?: number; maxDurationMs?: number };
+    reporter?: CollectingActionReporter;
+    watched?: boolean;
   } = {},
 ): Promise<ExecuteHarness> {
   const provider = new FakeSandboxProvider({
@@ -84,16 +88,20 @@ export async function executeHarness(
     logger: captured.logger,
   });
 
+  const reporter = options.reporter ?? new CollectingActionReporter();
+
   return {
     state,
     sandbox,
     registry,
     policy,
     approvals,
+    reporter,
     executor: new ActionExecutor({
       registry,
       policy,
       logger: captured.logger,
+      ...(options.watched === false ? {} : { reporter }),
       ...(options.now === undefined ? {} : { now: options.now }),
     }),
     guard: new RunGuard(),

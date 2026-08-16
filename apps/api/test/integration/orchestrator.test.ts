@@ -11,11 +11,15 @@ import { sessionsCollection } from '../../src/db/models/session.js';
 import { capturingLogger } from '../../src/llm/llm.fixtures.js';
 import { leaseResource } from '../../src/orchestrator/claim.js';
 import { Orchestrator } from '../../src/orchestrator/orchestrator.js';
+import { LiveEventPublisher } from '../../src/events/publisher.js';
+import { MongoEventStore } from '../../src/events/store.js';
 import { WAIT_LIMITS } from '../../src/orchestrator/limits.js';
 import {
+  CLEAR_SCOPE,
   FINISHING_ANSWERS,
   FakeWorkshop,
   NEVER_CLEAR_ANSWERS,
+  answer,
   RecordingPullRequestGateway,
   RecordingPushGateway,
   pendingApproval,
@@ -243,6 +247,70 @@ describe('no orphan sandbox', () => {
     await settle();
 
     expect(await records.isLive(session.sessionId)).toBe(false);
+  });
+});
+
+describe('what a watcher would have seen, stored in order', () => {
+  it('records the run as it happened, with tools before the pull request', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+
+    const store = new MongoEventStore(testDatabase.db);
+    const captured = capturingLogger();
+    const events = new LiveEventPublisher({ store, redis: redis.client, logger: captured.logger });
+
+    const workshop = new FakeWorkshop({
+      logger: captured.logger,
+      answers: [
+        CLEAR_SCOPE,
+        answer('read_file', { path: 'README.md' }),
+        ...FINISHING_ANSWERS.slice(1),
+      ],
+      events,
+    });
+
+    const runner = new SessionRunner({
+      workshop,
+      push,
+      pullRequests,
+      logger: captured.logger,
+      events,
+      notifyEmailFor: async () => Promise.resolve('person@example.com'),
+    });
+
+    await runner.run(session, new AbortController().signal);
+
+    const stored = await store.since(session.sessionId, 0, 200);
+    const types = stored.map((one) => one.event.type);
+
+    expect(types).toContain('tool.started');
+    expect(types).toContain('tool.output');
+    expect(types).toContain('tool.completed');
+    expect(types.indexOf('tool.started')).toBeLessThan(types.indexOf('tool.completed'));
+    expect(types.indexOf('tool.completed')).toBeLessThan(types.lastIndexOf('pr.created'));
+  });
+
+  it('hands every event its own place in the queue, never a shared one', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+
+    const store = new MongoEventStore(testDatabase.db);
+    const captured = capturingLogger();
+    const events = new LiveEventPublisher({ store, redis: redis.client, logger: captured.logger });
+
+    await new SessionRunner({
+      workshop: new FakeWorkshop({ logger: captured.logger, answers: FINISHING_ANSWERS, events }),
+      push,
+      pullRequests,
+      logger: captured.logger,
+      events,
+      notifyEmailFor: async () => Promise.resolve('person@example.com'),
+    }).run(session, new AbortController().signal);
+
+    const sequences = (await store.since(session.sessionId, 0, 200)).map((one) => one.sequence);
+
+    expect(new Set(sequences).size).toBe(sequences.length);
+    expect([...sequences].sort((left, right) => left - right)).toEqual(sequences);
   });
 });
 

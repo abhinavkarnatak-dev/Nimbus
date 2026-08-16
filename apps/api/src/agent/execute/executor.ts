@@ -1,16 +1,23 @@
 import {
   PolicyRecordSchema,
   ToolEventSummarySchema,
+  ToolInvocationSchema,
   type CheckResult,
+  type OutputStream,
   type PolicyRecord,
   type ToolEventSummary,
   type ToolInvocation,
+  type ToolName,
+  type ToolOutcome,
 } from '@nimbus/contracts';
 
 import type { Logger } from '../../logging/logger.js';
+import { redactSecrets } from '../../logging/redact.js';
 import type { PolicyGate } from '../policy/policy.js';
+import type { ToolOutput } from '../registry/definition.js';
 import type { ToolRegistry } from '../registry/registry.js';
 import { EXECUTE_LIMITS } from './limits.js';
+import { chunkOutput, type ActionReporter } from './reporter.js';
 import {
   observeApprovalPause,
   observeDenial,
@@ -38,6 +45,7 @@ export interface ExecutionRequest {
 export interface ExecutionResult {
   status: ExecutionStatus;
   actionHash: string;
+  durationMs: number;
   policy: PolicyRecord | null;
   observation: Observation;
   event: ToolEventSummary;
@@ -53,6 +61,7 @@ export interface ExecutorOptions {
   registry: ToolRegistry;
   policy: PolicyGate;
   logger: Logger;
+  reporter?: ActionReporter;
   now?: () => number;
 }
 
@@ -65,12 +74,15 @@ export class ActionExecutor {
 
   readonly #logger: Logger;
 
+  readonly #reporter: ActionReporter | null;
+
   readonly #now: () => number;
 
   constructor(options: ExecutorOptions) {
     this.#registry = options.registry;
     this.#policy = options.policy;
     this.#logger = options.logger;
+    this.#reporter = options.reporter ?? null;
     this.#now = options.now ?? ((): number => Date.now());
   }
 
@@ -84,7 +96,7 @@ export class ActionExecutor {
     const checked = this.#registry.check(request.tool, request.toolArguments);
 
     if (!checked.ok) {
-      return this.#finish(request, hash, {
+      return await this.#finish(request, hash, {
         status: 'refused',
         policy: null,
         observation: observeRefusal(request.tool, checked.detail),
@@ -102,7 +114,7 @@ export class ActionExecutor {
     });
 
     if (decision.decision === 'denied') {
-      return this.#finish(request, hash, {
+      return await this.#finish(request, hash, {
         status: 'denied',
         policy: record,
         observation: observeDenial(request.tool, decision.reason),
@@ -112,7 +124,7 @@ export class ActionExecutor {
     if (decision.decision === 'approval_required') {
       const approval = await this.#policy.requestApproval(action);
 
-      return this.#finish(request, hash, {
+      return await this.#finish(request, hash, {
         status: 'approval_required',
         policy: record,
         observation: observeApprovalPause(request.tool, decision.reason),
@@ -120,6 +132,8 @@ export class ActionExecutor {
         pause: 'approval',
       });
     }
+
+    await this.#sayStarted(request);
 
     const invoked = await this.#registry.invoke({
       toolCallId: request.toolCallId,
@@ -129,7 +143,7 @@ export class ActionExecutor {
     });
 
     if (invoked.output === null) {
-      return this.#finish(request, hash, {
+      return await this.#finish(request, hash, {
         status: 'executed',
         policy: record,
         observation: observeFailure(
@@ -138,6 +152,7 @@ export class ActionExecutor {
           invoked.message ?? 'that tool did not finish',
         ),
         invocation: invoked.invocation,
+        durationMs: invoked.durationMs,
         failed: true,
       });
     }
@@ -145,11 +160,13 @@ export class ActionExecutor {
     const output = invoked.output;
     const speaks = USER_FACING_TOOLS.has(request.tool) && output.text !== undefined;
 
-    return this.#finish(request, hash, {
+    return await this.#finish(request, hash, {
       status: 'executed',
       policy: record,
       observation: observeOutput(request.tool, output),
       invocation: invoked.invocation,
+      durationMs: invoked.durationMs,
+      output,
       check: output.check ?? null,
       paths: [...(output.paths ?? [])],
       userMessage: speaks ? safeUserMessage(output.text ?? '') : null,
@@ -158,7 +175,77 @@ export class ActionExecutor {
     });
   }
 
-  #finish(
+  async #sayStarted(request: ExecutionRequest): Promise<void> {
+    if (this.#reporter === null) {
+      return;
+    }
+
+    const summary = shorten(redactSecrets(request.intent));
+
+    const invocation = ToolInvocationSchema.parse({
+      toolCallId: request.toolCallId,
+      tool: request.tool,
+      summary: summary === '' ? `${request.tool} is running` : summary,
+      paths: [],
+      startedAt: new Date(this.#now()).toISOString(),
+    });
+
+    await this.#safely(async () => {
+      await this.#reporter?.started(invocation);
+    });
+  }
+
+  async #sayOutput(toolCallId: string, output: ToolOutput | undefined): Promise<void> {
+    if (this.#reporter === null || output === undefined) {
+      return;
+    }
+
+    for (const part of reportedStreams(output)) {
+      for (const piece of chunkOutput(redactSecrets(part.text))) {
+        await this.#safely(async () => {
+          await this.#reporter?.output({
+            toolCallId,
+            stream: part.stream,
+            chunk: piece.chunk,
+            truncated: piece.truncated || output.truncated === true,
+          });
+        });
+      }
+    }
+  }
+
+  async #sayCompleted(
+    request: ExecutionRequest,
+    event: ToolEventSummary,
+    durationMs: number,
+  ): Promise<void> {
+    if (this.#reporter === null || !this.#registry.has(request.tool)) {
+      return;
+    }
+
+    await this.#safely(async () => {
+      await this.#reporter?.completed({
+        toolCallId: request.toolCallId,
+        tool: request.tool as ToolName,
+        outcome: REPORTED_OUTCOME[event.outcome],
+        durationMs,
+        summary: event.summary,
+      });
+    });
+  }
+
+  async #safely(work: () => Promise<void>): Promise<void> {
+    try {
+      await work();
+    } catch (error) {
+      this.#logger.warn(
+        { error: String(error) },
+        'a live update could not be sent, the run carries on without it',
+      );
+    }
+  }
+
+  async #finish(
     request: ExecutionRequest,
     actionHash: string,
     parts: {
@@ -166,6 +253,8 @@ export class ActionExecutor {
       policy: PolicyRecord | null;
       observation: Observation;
       invocation?: ToolInvocation;
+      durationMs?: number;
+      output?: ToolOutput;
       check?: CheckResult | null;
       paths?: string[];
       approvalId?: string;
@@ -173,8 +262,9 @@ export class ActionExecutor {
       pause?: 'clarification' | 'approval' | null;
       failed?: boolean;
     },
-  ): ExecutionResult {
+  ): Promise<ExecutionResult> {
     const outcome = eventOutcome(parts.status, parts.failed === true);
+    const durationMs = parts.durationMs ?? 0;
 
     const event = ToolEventSummarySchema.parse({
       step: request.step,
@@ -201,9 +291,13 @@ export class ActionExecutor {
       'an action was executed',
     );
 
+    await this.#sayOutput(request.toolCallId, parts.output);
+    await this.#sayCompleted(request, event, durationMs);
+
     return {
       status: parts.status,
       actionHash,
+      durationMs,
       policy: parts.policy,
       observation: parts.observation,
       event,
@@ -215,6 +309,33 @@ export class ActionExecutor {
       pause: parts.pause ?? null,
     };
   }
+}
+
+export const REPORTED_OUTCOME: Readonly<Record<ToolEventSummary['outcome'], ToolOutcome>> = {
+  ok: 'succeeded',
+  failed: 'failed',
+  refused: 'denied',
+  paused: 'denied',
+};
+
+export function reportedStreams(output: ToolOutput): { stream: OutputStream; text: string }[] {
+  const parts: { stream: OutputStream; text: string }[] = [];
+  const known = output.stdout !== undefined || output.stderr !== undefined;
+
+  if (!known) {
+    return output.text === undefined || output.text === ''
+      ? []
+      : [{ stream: 'stdout', text: output.text }];
+  }
+
+  if (output.stdout !== undefined && output.stdout !== '') {
+    parts.push({ stream: 'stdout', text: output.stdout });
+  }
+
+  if (output.stderr !== undefined && output.stderr !== '') {
+    parts.push({ stream: 'stderr', text: output.stderr });
+  }
+  return parts;
 }
 
 function eventOutcome(status: ExecutionStatus, failed: boolean): ToolEventSummary['outcome'] {

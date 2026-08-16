@@ -1,6 +1,9 @@
 import type { PullRequestResult, PushResult } from '@nimbus/contracts';
 
 import { FakeRepositorySource } from '../agent/clone/fake.js';
+import type { ActionReporter } from '../agent/execute/reporter.js';
+import type { EventPublisher } from '../events/publisher.js';
+import { LiveActionReporter } from './reporter.js';
 import { CommandRunner } from '../agent/commands/runner.js';
 import { ActionExecutor } from '../agent/execute/executor.js';
 import { InMemoryApprovals } from '../agent/policy/approvals.js';
@@ -216,6 +219,8 @@ export interface FakeWorkshopOptions {
   answers?: readonly { value: unknown }[];
   files?: Readonly<Record<string, string>>;
   failWith?: Error;
+  events?: EventPublisher;
+  reporter?: ActionReporter;
   onPrepare?: (session: SessionDocument) => void;
 }
 
@@ -236,6 +241,23 @@ export class FakeWorkshop implements SessionWorkshop {
 
   constructor(options: FakeWorkshopOptions) {
     this.#options = options;
+  }
+
+  #reporterFor(session: SessionDocument): ActionReporter | null {
+    if (this.#options.reporter !== undefined) {
+      return this.#options.reporter;
+    }
+
+    if (this.#options.events === undefined) {
+      return null;
+    }
+
+    return new LiveActionReporter({
+      events: this.#options.events,
+      sessionId: session.sessionId,
+      userId: session.userId,
+      logger: this.#options.logger,
+    });
   }
 
   async prepare(session: SessionDocument, options: { signal: AbortSignal }): Promise<PreparedRun> {
@@ -265,6 +287,7 @@ export class FakeWorkshop implements SessionWorkshop {
     });
 
     const text = new FakeTextProvider({ answers: [...(this.#options.answers ?? [])] });
+    const reporter = this.#reporterFor(session);
 
     return {
       installationId: 4_242,
@@ -287,6 +310,7 @@ export class FakeWorkshop implements SessionWorkshop {
           registry,
           policy: new PolicyGate({ approvals: new InMemoryApprovals(), logger }),
           logger,
+          ...(reporter === null ? {} : { reporter }),
         }),
         source: new FakeRepositorySource({ files: this.#options.files ?? SAMPLE_FILES }),
         reference: {

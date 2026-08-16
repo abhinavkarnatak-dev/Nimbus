@@ -31,6 +31,8 @@ export interface ToolOutput {
   summary: string;
   paths?: readonly string[];
   text?: string;
+  stdout?: string;
+  stderr?: string;
   truncated?: boolean;
   pause?: 'clarification' | 'approval';
   check?: CheckResult;
