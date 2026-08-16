@@ -1,3 +1,4 @@
+import { DEFAULT_LIMITS, type PatchCaps } from '../../config/limits.js';
 import { ToolError } from './errors.js';
 import { TOOL_LIMITS } from './limits.js';
 
@@ -75,7 +76,7 @@ function finishFile(file: PatchFile | null, files: PatchFile[]): void {
   files.push(file);
 }
 
-export function parsePatch(patch: string): PatchFile[] {
+export function parsePatch(patch: string, caps: PatchCaps = DEFAULT_LIMITS): PatchFile[] {
   if (patch.trim() === '') {
     throw malformed('it was empty');
   }
@@ -204,12 +205,12 @@ export function parsePatch(patch: string): PatchFile[] {
     throw malformed('it contained no file sections');
   }
 
-  if (files.length > TOOL_LIMITS.patchMaxFiles) {
+  if (files.length > caps.maxChangedFiles) {
     throw new ToolError('PATCH_TOO_LARGE', 'That patch touches too many files.');
   }
 
   const changed = files.reduce((total, file) => total + file.addedLines + file.removedLines, 0);
-  if (changed > TOOL_LIMITS.patchMaxLines) {
+  if (changed > caps.maxDiffLines) {
     throw new ToolError('PATCH_TOO_LARGE', 'That patch changes too many lines.');
   }
   return files;

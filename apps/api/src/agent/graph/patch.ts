@@ -1,5 +1,6 @@
 import type { AgentState, PatchValidationReport } from '@nimbus/contracts';
 
+import { DEFAULT_LIMITS, type PatchCaps } from '../../config/limits.js';
 import type { Logger } from '../../logging/logger.js';
 import { validatePatch } from '../../patch/validator.js';
 import type { Sandbox } from '../../sandbox/index.js';
@@ -15,6 +16,7 @@ export interface PreparePatchInput {
   state: AgentState;
   sandbox: Sandbox;
   logger: Logger;
+  limits?: PatchCaps;
 }
 
 export async function preparePatch(input: PreparePatchInput): Promise<PreparedPatch> {
@@ -24,6 +26,7 @@ export async function preparePatch(input: PreparePatchInput): Promise<PreparedPa
     patch: exported.patch,
     expectedBaseSha: input.state.baseCommitSha,
     reportedBaseSha: input.state.baseCommitSha,
+    limits: input.limits ?? DEFAULT_LIMITS,
   });
 
   const accepted = report.decision !== 'denied';

@@ -116,6 +116,7 @@ export function sessionHarness(
   options: {
     repositories?: RepositorySummary[];
     now?: () => Date;
+    maxSteps?: number;
     approvals?: (sessionId: string) => ApprovalStore;
   } = {},
 ): SessionHarness {
@@ -131,6 +132,7 @@ export function sessionHarness(
       repositories: directory,
       logger: captured.logger,
       ...(options.approvals === undefined ? {} : { approvalsFor: options.approvals }),
+      ...(options.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }),
       ...(options.now === undefined ? {} : { now: options.now }),
     }),
     records,

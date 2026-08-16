@@ -72,12 +72,15 @@ export class LiveSessionWorkshop implements SessionWorkshop {
     const base = await this.#baseCommit(session, readToken);
     const plan = this.#plan(session);
 
+    const limits = this.#options.config.limits;
+
     const sandbox = await this.#rent(session);
     const registry = new ToolRegistry({
       sessionId: session.sessionId,
       sandbox,
       commands: new CommandRunner(sandbox),
       logger: this.#options.logger,
+      limits,
     });
 
     const state = resumedState(
@@ -91,7 +94,7 @@ export class LiveSessionWorkshop implements SessionWorkshop {
         baseCommitSha: base,
         defaultBranch: session.repository.defaultBranch,
         models: plan,
-        budgets: { maxSteps: session.maxSteps || (this.#options.maxSteps ?? 40) },
+        budgets: { maxSteps: session.maxSteps || (this.#options.maxSteps ?? limits.maxAgentSteps) },
       },
       session,
     );
@@ -142,6 +145,7 @@ export class LiveSessionWorkshop implements SessionWorkshop {
           token: readToken.token,
         },
         logger: this.#options.logger,
+        limits,
         signal: options.signal,
         ...(this.#options.checkpointer === undefined
           ? {}
@@ -240,7 +244,11 @@ export class LiveSessionWorkshop implements SessionWorkshop {
   async #rent(session: SessionDocument): Promise<Sandbox> {
     try {
       return await this.#options.sandboxes.create(
-        buildSandboxSpec(this.#options.config.sandbox, session.sessionId),
+        buildSandboxSpec(
+          this.#options.config.sandbox,
+          session.sessionId,
+          this.#options.config.limits,
+        ),
       );
     } catch (error) {
       throw new WorkshopError('sandbox', 'A sandbox could not be started.', { cause: error });

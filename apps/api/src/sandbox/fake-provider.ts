@@ -1,6 +1,5 @@
 import { newPrefixedId } from '../lib/id.js';
 import { buildPatch } from './diff.js';
-import { SANDBOX_LIMITS } from './limits.js';
 import {
   SandboxError,
   TERMINAL_STATES,
@@ -61,6 +60,7 @@ export class FakeSandbox implements Sandbox {
   private readonly options: FakeSandboxOptions;
   private readonly createdAt: Date;
   private readonly lifetimeMs: number;
+  private readonly spec: SandboxSpec;
 
   private state: SandboxState = 'creating';
   private virtualElapsedMs = 0;
@@ -72,6 +72,7 @@ export class FakeSandbox implements Sandbox {
   constructor(spec: SandboxSpec, options: FakeSandboxOptions) {
     this.sandboxId = newPrefixedId('sbx');
     this.options = options;
+    this.spec = spec;
     this.createdAt = new Date();
     this.lifetimeMs = spec.maxSeconds * 1_000;
     this.workspace.seed(options.files ?? {});
@@ -146,7 +147,7 @@ export class FakeSandbox implements Sandbox {
     this.advanceClock(durationMs);
     this.applyEffects(script);
 
-    const budget = Math.max(0, SANDBOX_LIMITS.outputMaxBytes - this.outputBytesUsed);
+    const budget = Math.max(0, this.spec.maxOutputBytes - this.outputBytesUsed);
     const stdout = truncateToBytes(script.stdout ?? '', budget);
     const stderr = truncateToBytes(
       script.stderr ?? '',
@@ -197,7 +198,10 @@ export class FakeSandbox implements Sandbox {
     await Promise.resolve();
 
     const { baseline, current } = this.workspace.snapshot();
-    return buildPatch(baseline, current);
+    return buildPatch(baseline, current, {
+      maxChangedFiles: this.spec.maxChangedFiles,
+      maxDiffLines: this.spec.maxDiffLines,
+    });
   }
 
   async terminate(reason: SandboxTerminationReason): Promise<void> {

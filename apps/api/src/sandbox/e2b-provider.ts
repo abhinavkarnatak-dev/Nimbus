@@ -160,6 +160,7 @@ export class E2bSandbox implements Sandbox {
   private readonly createdAt: Date;
   private readonly lifetimeMs: number;
   private readonly now: () => number;
+  private readonly spec: SandboxSpec;
 
   private state: SandboxState = 'ready';
   private commandsRun = 0;
@@ -172,6 +173,7 @@ export class E2bSandbox implements Sandbox {
     this.handle = handle;
     this.sandboxId = handle.sandboxId;
     this.now = now;
+    this.spec = spec;
     this.createdAt = new Date(now());
     this.lifetimeMs = spec.maxSeconds * 1_000;
   }
@@ -217,7 +219,7 @@ export class E2bSandbox implements Sandbox {
       return this.cancelled(durationMs);
     }
 
-    const budget = Math.max(0, SANDBOX_LIMITS.outputMaxBytes - this.outputBytesUsed);
+    const budget = Math.max(0, this.spec.maxOutputBytes - this.outputBytesUsed);
     const stdout = truncateToBytes(result.stdout, budget);
     const stderr = truncateToBytes(
       result.stderr,
@@ -330,7 +332,10 @@ export class E2bSandbox implements Sandbox {
       throw new SandboxError('SANDBOX_PATCH_FAILED', 'The changes could not be read.');
     }
 
-    return buildGitPatchExport(diff.stdout);
+    return buildGitPatchExport(diff.stdout, {
+      maxChangedFiles: this.spec.maxChangedFiles,
+      maxDiffLines: this.spec.maxDiffLines,
+    });
   }
 
   async withEgress<T>(

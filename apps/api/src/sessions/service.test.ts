@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { ApprovalDecisionBodySchema, type ApprovalDecisionBody } from '@nimbus/contracts';
 
 import { InMemoryApprovals } from '../agent/policy/approvals.js';
+import { DEFAULT_LIMITS } from '../config/limits.js';
 import { ApiError } from '../http/api-error.js';
 import { KNOWN_MODELS } from '../llm/models.js';
 import { SELECTABLE_TEXT_MODELS } from '../routing/selection.js';
+import { DEFAULT_MAX_STEPS } from './service.js';
 import {
   CLEAR_TASK,
   HIDDEN,
@@ -526,6 +528,23 @@ describe('cancelling', () => {
     await harness.service.cancel(OWNER_ID, created.session.sessionId);
 
     expect(harness.records.documents[0]?.currentActivity).toBeNull();
+  });
+});
+
+describe('the step budget written onto a session', () => {
+  it('uses the shipped default when nothing is configured', async () => {
+    const harness = sessionHarness();
+    await harness.service.create(OWNER_ID, newBody());
+
+    expect(harness.records.documents[0]?.maxSteps).toBe(DEFAULT_MAX_STEPS);
+    expect(DEFAULT_MAX_STEPS).toBe(DEFAULT_LIMITS.maxAgentSteps);
+  });
+
+  it('uses the configured value rather than a number of its own', async () => {
+    const harness = sessionHarness({ maxSteps: 7 });
+    await harness.service.create(OWNER_ID, newBody());
+
+    expect(harness.records.documents[0]?.maxSteps).toBe(7);
   });
 });
 

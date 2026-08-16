@@ -1,6 +1,7 @@
 import type { CheckResult, ToolName, ToolOutcome } from '@nimbus/contracts';
 import { z, type ZodType } from 'zod';
 
+import type { PatchCaps } from '../../config/limits.js';
 import type { CommandRunner } from '../commands/runner.js';
 import type { Sandbox } from '../../sandbox/index.js';
 
@@ -25,6 +26,7 @@ export interface ToolContext {
   sandbox: Sandbox;
   commands: CommandRunner;
   signal: AbortSignal;
+  limits: PatchCaps;
 }
 
 export interface ToolOutput {

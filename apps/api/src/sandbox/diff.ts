@@ -1,3 +1,4 @@
+import { DEFAULT_LIMITS, type PatchCaps } from '../config/limits.js';
 import { SANDBOX_LIMITS } from './limits.js';
 import type { PatchExport, PatchedFile } from './provider.js';
 import { SandboxError } from './provider.js';
@@ -327,6 +328,7 @@ export function unifiedDiff(
 export function buildPatch(
   baseline: ReadonlyMap<string, string>,
   current: ReadonlyMap<string, string>,
+  caps: PatchCaps = DEFAULT_LIMITS,
 ): PatchExport {
   const paths = [...new Set([...baseline.keys(), ...current.keys()])].sort();
   const files: PatchedFile[] = [];
@@ -363,11 +365,11 @@ export function buildPatch(
     removedLines += diff.removedLines;
   }
 
-  if (files.length > SANDBOX_LIMITS.patchMaxFiles) {
+  if (files.length > caps.maxChangedFiles) {
     throw new SandboxError('SANDBOX_PATCH_TOO_LARGE', 'This change touches too many files.');
   }
 
-  if (addedLines + removedLines > SANDBOX_LIMITS.patchMaxLines) {
+  if (addedLines + removedLines > caps.maxDiffLines) {
     throw new SandboxError('SANDBOX_PATCH_TOO_LARGE', 'This change is too large.');
   }
 

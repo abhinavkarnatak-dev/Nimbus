@@ -5,6 +5,7 @@ import {
   type ToolOutcome,
 } from '@nimbus/contracts';
 
+import { DEFAULT_LIMITS, type PatchCaps } from '../../config/limits.js';
 import type { Logger } from '../../logging/logger.js';
 import type { CommandRunner } from '../commands/runner.js';
 import type { Sandbox } from '../../sandbox/index.js';
@@ -40,6 +41,7 @@ export interface RegistryOptions {
   sandbox: Sandbox;
   commands: CommandRunner;
   logger: Logger;
+  limits?: PatchCaps;
   tools?: readonly ToolDefinition[];
   now?: () => Date;
 }
@@ -55,6 +57,8 @@ export class ToolRegistry {
 
   private readonly logger: Logger;
 
+  private readonly limits: PatchCaps;
+
   private readonly now: () => Date;
 
   constructor(options: RegistryOptions) {
@@ -62,6 +66,7 @@ export class ToolRegistry {
     this.sandbox = options.sandbox;
     this.commands = options.commands;
     this.logger = options.logger;
+    this.limits = options.limits ?? DEFAULT_LIMITS;
     this.now = options.now ?? ((): Date => new Date());
 
     for (const tool of options.tools ?? BUILT_IN_TOOLS) {
@@ -176,6 +181,7 @@ export class ToolRegistry {
       sandbox: this.sandbox,
       commands: this.commands,
       signal,
+      limits: this.limits,
     };
   }
 

@@ -25,6 +25,8 @@ export const LIMITS = {
   maxAttachmentsPerSession: 5,
   maxChecksPerSession: 20,
   maxFilesListed: 200,
+  maxAgentSteps: 200,
+  maxSandboxSeconds: 7200,
 
   sessionHistoryPageSize: 50,
   approvalPathsMax: 50,

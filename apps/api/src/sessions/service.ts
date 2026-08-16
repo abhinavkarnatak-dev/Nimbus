@@ -17,6 +17,7 @@ import {
 import { tooThinToJudge } from '../agent/nodes/scope.js';
 import { ApprovalError, InMemoryApprovals, type ApprovalStore } from '../agent/policy/approvals.js';
 import type { AttachmentRecords } from '../attachments/repository.js';
+import { DEFAULT_LIMITS } from '../config/limits.js';
 import {
   SESSION_ID_PREFIX,
   isActiveSessionStatus,
@@ -31,7 +32,7 @@ import type { Logger } from '../logging/logger.js';
 import { assertSelectableModel } from '../routing/selection.js';
 import type { SessionRecords } from './repository.js';
 
-export const DEFAULT_MAX_STEPS = 40;
+export const DEFAULT_MAX_STEPS = DEFAULT_LIMITS.maxAgentSteps;
 
 export const REPOSITORY_NOT_AVAILABLE = 'We could not find that repository.';
 

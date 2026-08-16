@@ -20,6 +20,7 @@ import { gatherContext } from '../nodes/retrieve.js';
 import { validateScope } from '../nodes/scope.js';
 import type { ToolRegistry } from '../registry/registry.js';
 import { parseState, recordToolEvent, stopped, withPhase } from '../state/state.js';
+import type { PatchCaps } from '../../config/limits.js';
 import { judgeCompletion } from './complete.js';
 import { GRAPH_LIMITS } from './limits.js';
 import { preparePatch, type PreparedPatch } from './patch.js';
@@ -36,6 +37,7 @@ export interface RunInput {
   images?: readonly DescribedImage[];
   attachments?: readonly AttachedText[];
   checkpointer?: BaseCheckpointSaver;
+  limits?: PatchCaps;
   signal?: AbortSignal;
 }
 
@@ -229,6 +231,7 @@ export function buildAgentGraph(input: RunInput) {
       state: current.state,
       sandbox: input.sandbox,
       logger: input.logger,
+      ...(input.limits === undefined ? {} : { limits: input.limits }),
     });
 
     if (!prepared.accepted) {

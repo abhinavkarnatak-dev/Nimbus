@@ -1,3 +1,4 @@
+import { DEFAULT_LIMITS, type PatchCaps } from '../../config/limits.js';
 import type { Sandbox, WorkspaceEntryKind } from '../../sandbox/index.js';
 import { ToolError } from './errors.js';
 import { TOOL_LIMITS } from './limits.js';
@@ -357,9 +358,10 @@ function checkedPatchPath(index: WorkspaceIndex, path: string): ResolvedPath {
 export async function applyPatch(
   sandbox: Sandbox,
   input: ApplyPatchInput,
+  caps: PatchCaps = DEFAULT_LIMITS,
 ): Promise<ApplyPatchResult> {
   const index = await buildIndex(sandbox);
-  const parsed = parsePatch(input.patch);
+  const parsed = parsePatch(input.patch, caps);
 
   const planned: { file: AppliedFile; contents: string }[] = [];
 

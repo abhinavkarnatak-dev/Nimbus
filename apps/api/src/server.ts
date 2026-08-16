@@ -9,6 +9,7 @@ import { MongoAttachmentRecords } from './attachments/repository.js';
 import { S3AttachmentStore } from './attachments/s3-store.js';
 import { AttachmentService } from './attachments/service.js';
 import { AttachmentSweeper } from './attachments/sweeper.js';
+import { describeLimits } from './config/limits.js';
 import type { AppConfig } from './config/load.js';
 import { closeDatabase, connectDatabase } from './db/client.js';
 import { ensureDatabaseSchema } from './db/bootstrap.js';
@@ -176,6 +177,8 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     'Model routing plan ready',
   );
 
+  logger.info(describeLimits(config.limits), 'Effective safety limits');
+
   const handle = await connectDatabase({ uri: config.mongo.uri, logger });
   await ensureDatabaseSchema(handle.db, logger);
 
@@ -301,6 +304,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
           attachments: attachmentRecords,
           repositories,
           logger,
+          maxSteps: config.limits.maxAgentSteps,
           approvalsFor: (sessionId) => new MongoApprovals({ db: handle.db, sessionId }),
         }),
       }),

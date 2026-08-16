@@ -1,3 +1,5 @@
+import { LIMITS } from '@nimbus/contracts';
+
 import { isSecretKey, redactString } from '../logging/redact.js';
 import { SANDBOX_LIMITS } from './limits.js';
 
@@ -76,6 +78,9 @@ export interface SandboxSpec {
   templateId: string;
   workspaceDir: string;
   maxSeconds: number;
+  maxOutputBytes: number;
+  maxChangedFiles: number;
+  maxDiffLines: number;
   allowInternet: boolean;
   env: Readonly<Record<string, string>>;
 }
@@ -205,8 +210,24 @@ export function assertValidSpec(spec: SandboxSpec): void {
     throw new SandboxError('SANDBOX_SPEC_INVALID', 'The workspace directory is not usable.');
   }
 
-  if (!Number.isInteger(spec.maxSeconds) || spec.maxSeconds <= 0 || spec.maxSeconds > 7_200) {
+  if (
+    !Number.isInteger(spec.maxSeconds) ||
+    spec.maxSeconds <= 0 ||
+    spec.maxSeconds > LIMITS.maxSandboxSeconds
+  ) {
     throw new SandboxError('SANDBOX_SPEC_INVALID', 'The sandbox lifetime is out of range.');
+  }
+
+  const caps: [number, number, string][] = [
+    [spec.maxOutputBytes, LIMITS.toolOutputTotalMaxBytes, 'output budget'],
+    [spec.maxChangedFiles, LIMITS.maxChangedFiles, 'changed file limit'],
+    [spec.maxDiffLines, LIMITS.maxDiffLines, 'changed line limit'],
+  ];
+
+  for (const [asked, ceiling, what] of caps) {
+    if (!Number.isInteger(asked) || asked <= 0 || asked > ceiling) {
+      throw new SandboxError('SANDBOX_SPEC_INVALID', `The sandbox ${what} is out of range.`);
+    }
   }
 
   assertNoCredentials(spec.env);

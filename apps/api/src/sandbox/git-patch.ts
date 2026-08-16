@@ -1,3 +1,4 @@
+import { DEFAULT_LIMITS, type PatchCaps } from '../config/limits.js';
 import { SANDBOX_LIMITS } from './limits.js';
 import { SandboxError, type PatchExport, type PatchedFile } from './provider.js';
 
@@ -198,7 +199,7 @@ export function summarizeUnifiedDiff(patch: string): {
   return { files, addedLines, removedLines };
 }
 
-export function buildGitPatchExport(patch: string): PatchExport {
+export function buildGitPatchExport(patch: string, caps: PatchCaps = DEFAULT_LIMITS): PatchExport {
   const bytes = Buffer.byteLength(patch, 'utf8');
 
   if (bytes > SANDBOX_LIMITS.patchMaxBytes) {
@@ -207,11 +208,11 @@ export function buildGitPatchExport(patch: string): PatchExport {
 
   const { files, addedLines, removedLines } = summarizeUnifiedDiff(patch);
 
-  if (files.length > SANDBOX_LIMITS.patchMaxFiles) {
+  if (files.length > caps.maxChangedFiles) {
     throw new SandboxError('SANDBOX_PATCH_TOO_LARGE', 'Too many files were changed.');
   }
 
-  if (addedLines + removedLines > SANDBOX_LIMITS.patchMaxLines) {
+  if (addedLines + removedLines > caps.maxDiffLines) {
     throw new SandboxError('SANDBOX_PATCH_TOO_LARGE', 'Too many lines were changed.');
   }
 

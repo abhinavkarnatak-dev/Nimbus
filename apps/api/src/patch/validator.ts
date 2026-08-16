@@ -14,6 +14,7 @@ import {
 } from '@nimbus/contracts';
 
 import { isProtectedPath } from '../agent/tools/policy-paths.js';
+import { DEFAULT_LIMITS, type PatchCaps } from '../config/limits.js';
 import { SANDBOX_LIMITS } from '../sandbox/limits.js';
 import { APPROVAL_CATEGORY_BY_FINDING, decisionFor, worstDecision } from './findings.js';
 import {
@@ -50,6 +51,7 @@ export interface PatchValidationRequest {
   patch: string;
   expectedBaseSha: string;
   reportedBaseSha: string;
+  limits?: PatchCaps;
 }
 
 interface Draft {
@@ -341,21 +343,23 @@ export function validatePatch(request: PatchValidationRequest): PatchValidationR
     draft.files.push(described);
   }
 
-  if (parsed.length > LIMITS.maxChangedFiles) {
+  const caps = request.limits ?? DEFAULT_LIMITS;
+
+  if (parsed.length > caps.maxChangedFiles) {
     add(
       draft,
       'TOO_MANY_FILES',
       [],
-      `This change touches ${String(parsed.length)} files, more than the limit of ${String(LIMITS.maxChangedFiles)}.`,
+      `This change touches ${String(parsed.length)} files, more than the limit of ${String(caps.maxChangedFiles)}.`,
     );
   }
 
-  if (addedLines + removedLines > LIMITS.maxDiffLines) {
+  if (addedLines + removedLines > caps.maxDiffLines) {
     add(
       draft,
       'TOO_MANY_LINES',
       [],
-      `This change alters ${String(addedLines + removedLines)} lines, more than the limit of ${String(LIMITS.maxDiffLines)}.`,
+      `This change alters ${String(addedLines + removedLines)} lines, more than the limit of ${String(caps.maxDiffLines)}.`,
     );
   }
 

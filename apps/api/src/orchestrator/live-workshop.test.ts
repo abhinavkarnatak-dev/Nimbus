@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { InMemoryAttachmentRecords } from '../attachments/repository.js';
 import { minimalEnv } from '../config/env.fixtures.js';
+import { DEFAULT_LIMITS } from '../config/limits.js';
 import { loadConfig } from '../config/load.js';
 import type { AttachmentDocument } from '../db/models/attachment.js';
 import type { SessionDocument } from '../db/models/session.js';
@@ -35,7 +36,11 @@ function listed(document: AttachmentDocument): SessionDocument['attachments'][nu
 
 async function workshopFor(
   documents: readonly AttachmentDocument[],
-  options: { vision?: FakeVisionProvider; wired?: boolean } = {},
+  options: {
+    vision?: FakeVisionProvider;
+    wired?: boolean;
+    env?: Record<string, string | undefined>;
+  } = {},
 ): Promise<{
   session: SessionDocument;
   workshop: LiveSessionWorkshop;
@@ -68,7 +73,7 @@ async function workshopFor(
       tokens: new FakeGitHubTokenProvider(),
       sandboxes: new FakeSandboxProvider({ files: {} }),
       text: new FakeTextProvider({ answers: [] }),
-      config: loadConfig(minimalEnv()),
+      config: loadConfig({ ...minimalEnv(), ...options.env }),
       logger: captured.logger,
       ...(options.wired === false ? {} : { attachments }),
     }),
@@ -209,5 +214,76 @@ describe('the model a run is prepared with', () => {
         { signal: new AbortController().signal },
       ),
     ).rejects.toThrow(expect.objectContaining({ reason: 'models' }) as Error);
+  });
+});
+
+describe('the limits a run is prepared with', () => {
+  it('takes the sandbox caps from configuration rather than from a global', async () => {
+    const held = await workshopFor([], {
+      env: { MAX_TOOL_OUTPUT_BYTES: '4096', MAX_CHANGED_FILES: '3', MAX_DIFF_LINES: '40' },
+    });
+
+    const prepared = await held.workshop.prepare(held.session, {
+      signal: new AbortController().signal,
+    });
+
+    expect(prepared.input.limits).toEqual({
+      maxAttachmentBytes: DEFAULT_LIMITS.maxAttachmentBytes,
+      maxToolOutputBytes: 4096,
+      maxAgentSteps: DEFAULT_LIMITS.maxAgentSteps,
+      maxChangedFiles: 3,
+      maxDiffLines: 40,
+      maxSandboxSeconds: DEFAULT_LIMITS.maxSandboxSeconds,
+    });
+
+    await prepared.finish();
+  });
+
+  it('keeps the step budget the session was written with, whatever configuration says now', async () => {
+    const held = await workshopFor([], { env: { MAX_AGENT_STEPS: '9' } });
+
+    const prepared = await held.workshop.prepare(
+      { ...held.session, maxSteps: 12 },
+      { signal: new AbortController().signal },
+    );
+
+    expect(prepared.input.state.budgets.maxSteps).toBe(12);
+    await prepared.finish();
+  });
+
+  it('falls back to the configured budget when the session carries none', async () => {
+    const held = await workshopFor([], { env: { MAX_AGENT_STEPS: '9' } });
+
+    const prepared = await held.workshop.prepare(
+      { ...held.session, maxSteps: 0 },
+      { signal: new AbortController().signal },
+    );
+
+    expect(prepared.input.state.budgets.maxSteps).toBe(9);
+    await prepared.finish();
+  });
+
+  it('hands the sandbox the same numbers it hands the trusted validator', async () => {
+    const held = await workshopFor([], { env: { MAX_CHANGED_FILES: '3', MAX_DIFF_LINES: '40' } });
+    const sandboxes = new FakeSandboxProvider({ files: {} });
+
+    const prepared = await new LiveSessionWorkshop({
+      db: NO_DATABASE,
+      installations: { activeInstallation: async () => Promise.resolve({ installationId: 4_242 }) },
+      tokens: new FakeGitHubTokenProvider(),
+      sandboxes,
+      text: new FakeTextProvider({ answers: [] }),
+      config: loadConfig({ ...minimalEnv(), MAX_CHANGED_FILES: '3', MAX_DIFF_LINES: '40' }),
+      logger: capturingLogger().logger,
+    }).prepare(held.session, { signal: new AbortController().signal });
+
+    const spec = sandboxes.specs[0];
+
+    expect(spec?.maxChangedFiles).toBe(3);
+    expect(spec?.maxDiffLines).toBe(40);
+    expect(prepared.input.limits?.maxChangedFiles).toBe(spec?.maxChangedFiles);
+    expect(prepared.input.limits?.maxDiffLines).toBe(spec?.maxDiffLines);
+
+    await prepared.finish();
   });
 });

@@ -2,6 +2,7 @@ import type { z } from 'zod';
 
 import type { LogLevel } from '../logging/logger.js';
 import { missingProviderIssues, modelCatalogueIssues } from '../routing/requirements.js';
+import type { EffectiveLimits } from './limits.js';
 import { environmentSchema, type RawEnvironment } from './schema.js';
 
 export interface GoogleConfig {
@@ -81,13 +82,7 @@ export interface AppConfig {
   mail: { from: string };
   features: { semanticSearch: boolean };
   qdrant: QdrantConfig | null;
-  limits: {
-    maxAttachmentBytes: number;
-    maxToolOutputBytes: number;
-    maxAgentSteps: number;
-    maxChangedFiles: number;
-    maxDiffLines: number;
-  };
+  limits: EffectiveLimits;
   logging: { level: LogLevel };
 }
 
@@ -110,7 +105,9 @@ function describeIssue(issue: z.core.$ZodIssue): string {
     case 'too_small':
       return `${field}: is shorter or smaller than the allowed minimum`;
     case 'too_big':
-      return `${field}: is longer or larger than the allowed maximum`;
+      return typeof issue.maximum === 'number'
+        ? `${field}: is above the highest value this build supports, ${String(issue.maximum)}`
+        : `${field}: is longer or larger than the allowed maximum`;
     case 'invalid_value':
       return `${field}: is not one of the allowed values`;
     case 'unrecognized_keys':
@@ -317,6 +314,7 @@ function toAppConfig(raw: RawEnvironment): AppConfig {
       maxAgentSteps: raw.MAX_AGENT_STEPS,
       maxChangedFiles: raw.MAX_CHANGED_FILES,
       maxDiffLines: raw.MAX_DIFF_LINES,
+      maxSandboxSeconds: raw.SANDBOX_MAX_SECONDS,
     },
     logging: { level: raw.LOG_LEVEL },
   };

@@ -1,5 +1,7 @@
+import { LIMITS } from '@nimbus/contracts';
 import { describe, expect, it } from 'vitest';
 
+import { DEFAULT_LIMITS } from '../config/limits.js';
 import { testConfig } from '../http/http.fixtures.js';
 import { SANDBOX_LIMITS } from './limits.js';
 import { SandboxError, assertNoCredentials } from './provider.js';
@@ -16,9 +18,37 @@ describe('buildSandboxSpec', () => {
       templateId: DEFAULT_TEMPLATE_ID,
       workspaceDir: SANDBOX_LIMITS.workspaceDir,
       maxSeconds: 1_800,
+      maxOutputBytes: DEFAULT_LIMITS.maxToolOutputBytes,
+      maxChangedFiles: DEFAULT_LIMITS.maxChangedFiles,
+      maxDiffLines: DEFAULT_LIMITS.maxDiffLines,
       allowInternet: false,
       env: SANDBOX_ENV,
     });
+  });
+
+  it('carries the configured limits rather than the built in ones', () => {
+    const spec = buildSandboxSpec(testConfig().sandbox, SESSION_ID, {
+      ...DEFAULT_LIMITS,
+      maxToolOutputBytes: 4_096,
+      maxChangedFiles: 3,
+      maxDiffLines: 40,
+    });
+
+    expect(spec.maxOutputBytes).toBe(4_096);
+    expect(spec.maxChangedFiles).toBe(3);
+    expect(spec.maxDiffLines).toBe(40);
+  });
+
+  it('refuses a spec asking for more than this build supports', () => {
+    for (const widened of [
+      { maxToolOutputBytes: LIMITS.toolOutputTotalMaxBytes + 1 },
+      { maxChangedFiles: LIMITS.maxChangedFiles + 1 },
+      { maxDiffLines: LIMITS.maxDiffLines + 1 },
+    ]) {
+      expect(() =>
+        buildSandboxSpec(testConfig().sandbox, SESSION_ID, { ...DEFAULT_LIMITS, ...widened }),
+      ).toThrow(SandboxError);
+    }
   });
 
   it('falls back to the default template when none is configured', () => {

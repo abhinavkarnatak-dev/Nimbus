@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { LOG_LEVELS } from '../logging/logger.js';
+import { DEFAULT_LIMITS, HARD_LIMITS } from './limits.js';
 
 const SESSION_SECRET_PLACEHOLDER = 'replace-with-at-least-32-random-bytes';
 
@@ -87,7 +88,9 @@ export const environmentSchema = z.object({
   E2B_API_KEY: optionalText,
   SANDBOX_PROVIDER: z.enum(['fake', 'e2b']).default('fake'),
   SANDBOX_TEMPLATE_ID: optionalText,
-  SANDBOX_MAX_SECONDS: positiveInt.max(7200).default(1800),
+  SANDBOX_MAX_SECONDS: positiveInt
+    .max(HARD_LIMITS.maxSandboxSeconds)
+    .default(DEFAULT_LIMITS.maxSandboxSeconds),
   SANDBOX_ALLOW_INTERNET: boolean.default(false),
 
   S3_ENDPOINT: httpUrl.optional(),
@@ -112,11 +115,17 @@ export const environmentSchema = z.object({
   QDRANT_URL: httpUrl.optional(),
   QDRANT_API_KEY: optionalText,
 
-  MAX_ATTACHMENT_BYTES: positiveInt.default(5_242_880),
-  MAX_TOOL_OUTPUT_BYTES: positiveInt.default(262_144),
-  MAX_AGENT_STEPS: positiveInt.max(200).default(30),
-  MAX_CHANGED_FILES: positiveInt.max(500).default(30),
-  MAX_DIFF_LINES: positiveInt.max(50_000).default(2000),
+  MAX_ATTACHMENT_BYTES: positiveInt
+    .max(HARD_LIMITS.maxAttachmentBytes)
+    .default(DEFAULT_LIMITS.maxAttachmentBytes),
+  MAX_TOOL_OUTPUT_BYTES: positiveInt
+    .max(HARD_LIMITS.maxToolOutputBytes)
+    .default(DEFAULT_LIMITS.maxToolOutputBytes),
+  MAX_AGENT_STEPS: positiveInt.max(HARD_LIMITS.maxAgentSteps).default(DEFAULT_LIMITS.maxAgentSteps),
+  MAX_CHANGED_FILES: positiveInt
+    .max(HARD_LIMITS.maxChangedFiles)
+    .default(DEFAULT_LIMITS.maxChangedFiles),
+  MAX_DIFF_LINES: positiveInt.max(HARD_LIMITS.maxDiffLines).default(DEFAULT_LIMITS.maxDiffLines),
 
   LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
 });

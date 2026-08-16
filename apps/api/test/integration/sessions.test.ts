@@ -2,6 +2,7 @@ import { createTestDatabase, type TestDatabase } from '@nimbus/test-utils';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { MongoAttachmentRecords } from '../../src/attachments/repository.js';
+import { HARD_LIMITS } from '../../src/config/limits.js';
 import { ensureDatabaseSchema } from '../../src/db/bootstrap.js';
 import { sessionsCollection } from '../../src/db/models/session.js';
 import { ApiError } from '../../src/http/api-error.js';
@@ -160,6 +161,59 @@ describe('a real session, read back', () => {
 
     expect(await codeOf(service.detail(OTHER_ID, created.session.sessionId))).toBe('NOT_FOUND');
     expect(await codeOf(service.cancel(OTHER_ID, created.session.sessionId))).toBe('NOT_FOUND');
+  });
+});
+
+describe('the configured step budget, against the real collection', () => {
+  it('writes the configured value and reads it back', async () => {
+    const tightened = new AgentSessionService({
+      records: new MongoSessionRecords(testDatabase.db),
+      attachments: new MongoAttachmentRecords(testDatabase.db),
+      repositories: new FakeRepositoryDirectory([SHOPFRONT]),
+      logger: capturingLogger().logger,
+      maxSteps: 7,
+    });
+
+    const created = await tightened.create(OWNER_ID, keyed('a'));
+    const stored = await sessionsCollection(testDatabase.db).findOne({
+      sessionId: created.session.sessionId,
+    });
+
+    expect(stored?.maxSteps).toBe(7);
+    expect((await tightened.detail(OWNER_ID, created.session.sessionId)).session).toBeDefined();
+  });
+
+  it('passes the collection validator at the highest value this build supports', async () => {
+    const widest = new AgentSessionService({
+      records: new MongoSessionRecords(testDatabase.db),
+      attachments: new MongoAttachmentRecords(testDatabase.db),
+      repositories: new FakeRepositoryDirectory([SHOPFRONT]),
+      logger: capturingLogger().logger,
+      maxSteps: HARD_LIMITS.maxAgentSteps,
+    });
+
+    const created = await widest.create(OWNER_ID, keyed('a'));
+    const stored = await sessionsCollection(testDatabase.db).findOne({
+      sessionId: created.session.sessionId,
+    });
+
+    expect(stored?.maxSteps).toBe(HARD_LIMITS.maxAgentSteps);
+  });
+
+  it('keeps its own budget when a worker picks it up after the configuration changed', async () => {
+    const started = new AgentSessionService({
+      records: new MongoSessionRecords(testDatabase.db),
+      attachments: new MongoAttachmentRecords(testDatabase.db),
+      repositories: new FakeRepositoryDirectory([SHOPFRONT]),
+      logger: capturingLogger().logger,
+      maxSteps: 7,
+    });
+
+    const created = await started.create(OWNER_ID, keyed('a'));
+    const claimed = await new MongoSessionRecords(testDatabase.db).findClaimable(10);
+    const found = claimed.find((one) => one.sessionId === created.session.sessionId);
+
+    expect(found?.maxSteps).toBe(7);
   });
 });
 

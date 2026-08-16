@@ -179,7 +179,7 @@ export const applyPatchTool = defineTool({
       ),
   }),
   run: async (input, context) => {
-    const result = await applyPatch(context.sandbox, input);
+    const result = await applyPatch(context.sandbox, input, context.limits);
 
     return {
       summary: shorten(
