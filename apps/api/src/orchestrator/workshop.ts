@@ -13,10 +13,10 @@ export interface SessionWorkshop {
 }
 
 export class WorkshopError extends Error {
-  readonly reason: 'no_installation' | 'no_commit' | 'sandbox' | 'models';
+  readonly reason: 'no_installation' | 'no_commit' | 'stopped' | 'sandbox' | 'models';
 
   constructor(
-    reason: 'no_installation' | 'no_commit' | 'sandbox' | 'models',
+    reason: 'no_installation' | 'no_commit' | 'stopped' | 'sandbox' | 'models',
     message: string,
     options: { cause?: unknown } = {},
   ) {

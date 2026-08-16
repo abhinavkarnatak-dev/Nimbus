@@ -12,7 +12,7 @@ import {
   checkResultFixture,
   fileChangeFixture,
   pullRequestFixture,
-  sessionDetailFixture,
+  sessionMessageFixture,
   toolInvocationFixture,
   VALID_SESSION_ID,
   VALID_TIMESTAMP,
@@ -20,13 +20,15 @@ import {
 import { CONTRACTS_WIRE_VERSION } from './version.js';
 
 const eventByType = {
-  'session.snapshot': { type: 'session.snapshot', session: sessionDetailFixture() },
   'session.status': {
     type: 'session.status',
     status: 'working',
     progress: { step: 4, maxSteps: 30, currentActivity: null },
   },
-  'agent.message': { type: 'agent.message', message: 'Reading the date helper' },
+  'agent.message': {
+    type: 'agent.message',
+    message: { ...sessionMessageFixture(), role: 'agent', text: 'Reading the date helper' },
+  },
   'agent.question': {
     type: 'agent.question',
     question: 'Which date format should invoices use?',
@@ -85,6 +87,13 @@ describe('server events', () => {
 
   it('rejects an unknown event type', () => {
     expect(ServerEventSchema.safeParse({ type: 'agent.reasoning', text: 'hidden' }).success).toBe(
+      false,
+    );
+  });
+
+  it('does not advertise the removed snapshot event', () => {
+    expect(SERVER_EVENT_TYPES).not.toContain('session.snapshot');
+    expect(ServerEventSchema.safeParse({ type: 'session.snapshot', session: {} }).success).toBe(
       false,
     );
   });

@@ -10,6 +10,7 @@ import { InMemoryAttachmentRecords } from '../attachments/repository.js';
 import type { AttachmentDocument } from '../db/models/attachment.js';
 import type { SessionDocument } from '../db/models/session.js';
 import type { EventPublisher } from '../events/publisher.js';
+import type { SelectableModelCatalogue } from '../routing/selection.js';
 import type { CancelAnnouncer } from '../orchestrator/cancellation.js';
 import { capturingLogger } from '../llm/llm.fixtures.js';
 import { InMemorySessionRecords } from './repository.js';
@@ -124,6 +125,7 @@ export function sessionHarness(
     cancellations?: CancelAnnouncer;
     events?: EventPublisher;
     notifyCancelled?: (session: SessionDocument) => Promise<void>;
+    models?: SelectableModelCatalogue;
   } = {},
 ): SessionHarness {
   const captured = capturingLogger();
@@ -145,6 +147,7 @@ export function sessionHarness(
         ? {}
         : { notifyCancelled: options.notifyCancelled }),
       ...(options.now === undefined ? {} : { now: options.now }),
+      ...(options.models === undefined ? {} : { models: options.models }),
     }),
     records,
     attachments,

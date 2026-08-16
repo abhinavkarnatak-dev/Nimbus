@@ -27,6 +27,8 @@ blob-report/
 
 docs/commits/
 IMPLEMENTATION_STATUS.md
+output/
+tmp/pdf/nimbus-handoff
 
 .claude/
 CLAUDE.md

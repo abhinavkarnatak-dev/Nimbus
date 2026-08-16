@@ -18,10 +18,14 @@ import { ImageDescriber } from '../routing/describe.js';
 import { FakeImageBytes, attachment, textAttachment } from '../routing/routing.fixtures.js';
 import { SELECTABLE_TEXT_MODELS } from '../routing/selection.js';
 import { FakeSandboxProvider } from '../sandbox/fake-provider.js';
-import { LiveSessionWorkshop } from './live-workshop.js';
+import type { SandboxProvider } from '../sandbox/provider.js';
+import { InMemorySessionRecords } from '../sessions/repository.js';
+import { LiveSessionWorkshop, type BaseCommitResolver } from './live-workshop.js';
 import { sessionDocument } from './orchestrator.fixtures.js';
 
 const NO_DATABASE = {} as unknown as Db;
+const ORIGINAL_SHA = '1'.repeat(40);
+const MOVED_SHA = '2'.repeat(40);
 
 function listed(document: AttachmentDocument): SessionDocument['attachments'][number] {
   return {
@@ -145,6 +149,140 @@ describe('a run prepared for a session that has nothing attached', () => {
     expect(prepared.installationId).toBe(4_242);
     expect(prepared.input.images).toEqual([]);
     await prepared.finish();
+  });
+});
+
+describe('the immutable repository base', () => {
+  async function recoveryHarness(options: {
+    resolve: BaseCommitResolver['resolve'];
+    beforeRent?: () => void;
+  }): Promise<{
+    session: SessionDocument;
+    records: InMemorySessionRecords;
+    workshop: LiveSessionWorkshop;
+    sandboxes: FakeSandboxProvider;
+  }> {
+    const session = sessionDocument({ baseCommitSha: null });
+    const records = new InMemorySessionRecords();
+    await records.insert(session);
+    const sandboxes = new FakeSandboxProvider({ files: {} });
+    const provider: SandboxProvider = {
+      name: sandboxes.name,
+      real: sandboxes.real,
+      create: async (spec) => {
+        options.beforeRent?.();
+        return await sandboxes.create(spec);
+      },
+    };
+
+    return {
+      session,
+      records,
+      sandboxes,
+      workshop: new LiveSessionWorkshop({
+        db: NO_DATABASE,
+        installations: {
+          activeInstallation: async () => Promise.resolve({ installationId: 4_242 }),
+        },
+        tokens: new FakeGitHubTokenProvider(),
+        sandboxes: provider,
+        text: new FakeTextProvider({ answers: [] }),
+        config: loadConfig(minimalEnv()),
+        logger: capturingLogger().logger,
+        records,
+        baseCommits: { resolve: options.resolve },
+      }),
+    };
+  }
+
+  it('persists the resolved SHA before it rents a sandbox', async () => {
+    let records: InMemorySessionRecords | null = null;
+    const held = await recoveryHarness({
+      resolve: async () => Promise.resolve(ORIGINAL_SHA),
+      beforeRent: () => {
+        expect(records?.documents[0]?.baseCommitSha).toBe(ORIGINAL_SHA);
+      },
+    });
+    records = held.records;
+
+    const prepared = await held.workshop.prepare(held.session, {
+      signal: new AbortController().signal,
+    });
+
+    expect(prepared.input.reference.commitSha).toBe(ORIGINAL_SHA);
+    await prepared.finish();
+  });
+
+  it('keeps using the first SHA after the default branch advances between attempts', async () => {
+    let head = ORIGINAL_SHA;
+    let resolutions = 0;
+    const held = await recoveryHarness({
+      resolve: async () => {
+        resolutions += 1;
+        return Promise.resolve(head);
+      },
+    });
+
+    const first = await held.workshop.prepare(held.session, {
+      signal: new AbortController().signal,
+    });
+    await first.finish();
+    head = MOVED_SHA;
+
+    const recovered = await held.records.findById(held.session.sessionId);
+    expect(recovered?.baseCommitSha).toBe(ORIGINAL_SHA);
+    if (recovered === null) {
+      throw new Error('expected the session to remain available for recovery');
+    }
+
+    const second = await held.workshop.prepare(recovered, {
+      signal: new AbortController().signal,
+    });
+
+    expect(second.input.reference.commitSha).toBe(ORIGINAL_SHA);
+    expect(resolutions).toBe(1);
+    await second.finish();
+  });
+
+  it('lets one concurrent attempt pin the base and makes every attempt use it', async () => {
+    let next = 0;
+    const held = await recoveryHarness({
+      resolve: async () => Promise.resolve(next++ === 0 ? ORIGINAL_SHA : MOVED_SHA),
+    });
+
+    const [first, second] = await Promise.all([
+      held.workshop.prepare({ ...held.session }, { signal: new AbortController().signal }),
+      held.workshop.prepare({ ...held.session }, { signal: new AbortController().signal }),
+    ]);
+
+    expect(first.input.reference.commitSha).toBe(ORIGINAL_SHA);
+    expect(second.input.reference.commitSha).toBe(ORIGINAL_SHA);
+    expect(held.records.documents[0]?.baseCommitSha).toBe(ORIGINAL_SHA);
+    await Promise.all([first.finish(), second.finish()]);
+  });
+
+  it('does not write a SHA or rent a sandbox after cancellation wins the race', async () => {
+    let cancel = async (): Promise<void> => Promise.resolve();
+    const held = await recoveryHarness({
+      resolve: async () => {
+        await cancel();
+        return ORIGINAL_SHA;
+      },
+    });
+    cancel = async () => {
+      await held.records.finish(
+        held.session.userId,
+        held.session.sessionId,
+        'cancelled',
+        new Date(),
+      );
+    };
+
+    await expect(
+      held.workshop.prepare(held.session, { signal: new AbortController().signal }),
+    ).rejects.toThrow(expect.objectContaining({ reason: 'stopped' }) as Error);
+    expect(held.records.documents[0]?.baseCommitSha).toBeNull();
+    expect(held.sandboxes.specs).toHaveLength(0);
   });
 });
 

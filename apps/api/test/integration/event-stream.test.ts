@@ -1,7 +1,12 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import type { SessionEventEnvelope } from '@nimbus/contracts';
+import {
+  CONTRACTS_WIRE_VERSION,
+  MessageIdSchema,
+  type ServerEvent,
+  type SessionEventEnvelope,
+} from '@nimbus/contracts';
 import {
   createTestDatabase,
   createTestRedis,
@@ -29,6 +34,18 @@ const ORIGIN = 'https://nimbus.local';
 const COOKIE_NAME = sessionCookieName(false);
 const OWNER = testId('usr', 'owner');
 const STRANGER = testId('usr', 'other');
+
+function agentMessage(text: string, identity = 'm'): ServerEvent {
+  return {
+    type: 'agent.message',
+    message: {
+      messageId: MessageIdSchema.parse(testId('msg', identity)),
+      role: 'agent',
+      text,
+      sentAt: '2026-08-17T10:00:00.000Z',
+    },
+  };
+}
 
 let testDatabase: TestDatabase;
 let redis: TestRedis;
@@ -102,7 +119,7 @@ async function connect(
 function subscribe(sessionId: string, lastEventSequence: number): string {
   return JSON.stringify({
     type: 'session.subscribe',
-    payload: { v: 1, sessionId, lastEventSequence },
+    payload: { v: CONTRACTS_WIRE_VERSION, sessionId, lastEventSequence },
   });
 }
 
@@ -251,8 +268,8 @@ describe('subscribing', () => {
     const session = sessionDocument({ userId: OWNER });
     await sessionsCollection(testDatabase.db).insertOne({ ...session });
 
-    for (const text of ['one', 'two', 'three']) {
-      await publisher.publish(session.sessionId, OWNER, { type: 'agent.message', message: text });
+    for (const [index, text] of ['one', 'two', 'three'].entries()) {
+      await publisher.publish(session.sessionId, OWNER, agentMessage(text, String(index)));
     }
 
     const socket = await connect();
@@ -277,18 +294,21 @@ describe('subscribing', () => {
     socket.send(subscribe(session.sessionId, 0));
     await waitFor(() => hub.connections === 1);
 
-    await publisher.publish(session.sessionId, OWNER, { type: 'agent.message', message: 'live' });
+    await publisher.publish(session.sessionId, OWNER, agentMessage('live'));
     await waitFor(() => seen.length === 1);
 
-    expect(seen[0]?.event).toMatchObject({ type: 'agent.message', message: 'live' });
+    expect(seen[0]?.event).toMatchObject({
+      type: 'agent.message',
+      message: { role: 'agent', text: 'live' },
+    });
   });
 
   it('gives a reconnecting client only what it missed', async () => {
     const session = sessionDocument({ userId: OWNER });
     await sessionsCollection(testDatabase.db).insertOne({ ...session });
 
-    for (const text of ['one', 'two', 'three']) {
-      await publisher.publish(session.sessionId, OWNER, { type: 'agent.message', message: text });
+    for (const [index, text] of ['one', 'two', 'three'].entries()) {
+      await publisher.publish(session.sessionId, OWNER, agentMessage(text, String(index)));
     }
 
     const socket = await connect();
@@ -304,10 +324,7 @@ describe('subscribing', () => {
   it("sends nothing at all for somebody else's session", async () => {
     const session = sessionDocument({ userId: STRANGER });
     await sessionsCollection(testDatabase.db).insertOne({ ...session });
-    await publisher.publish(session.sessionId, STRANGER, {
-      type: 'agent.message',
-      message: 'private',
-    });
+    await publisher.publish(session.sessionId, STRANGER, agentMessage('private'));
 
     const socket = await connect();
     const seen: SessionEventEnvelope[] = [];
@@ -378,10 +395,11 @@ describe('sequences under concurrent writes', () => {
 
     await Promise.all(
       Array.from({ length: 25 }, async (_value, index) =>
-        publisher.publish(session.sessionId, OWNER, {
-          type: 'agent.message',
-          message: `one ${String(index)}`,
-        }),
+        publisher.publish(
+          session.sessionId,
+          OWNER,
+          agentMessage(`one ${String(index)}`, String(index)),
+        ),
       ),
     );
 

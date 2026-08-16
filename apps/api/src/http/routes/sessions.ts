@@ -1,9 +1,11 @@
 import {
   ApprovalDecisionBodySchema,
+  AnswerSessionBodySchema,
   CancelSessionResponseSchema,
   CreateSessionBodySchema,
   CreateSessionResponseSchema,
   PostMessageBodySchema,
+  PostMessageResponseSchema,
   SessionIdSchema,
 } from '@nimbus/contracts';
 import { Router } from 'express';
@@ -32,6 +34,10 @@ export function createSessionsRouter(options: SessionsRouterOptions): Router {
   const router = Router();
   const requireAuth = createRequireAuth();
   const requireCsrf = createRequireCsrf(options.auth);
+
+  router.get('/models', requireAuth, (_request, response) => {
+    response.status(200).json(options.sessions.modelCatalogue());
+  });
 
   router.post(
     '/sessions',
@@ -89,9 +95,16 @@ export function createSessionsRouter(options: SessionsRouterOptions): Router {
       const account = requireSession(request);
       const sessionId = readSessionId(request.params['sessionId']);
       const body = validatedBody(request, PostMessageBodySchema);
-      const said = await options.sessions.say(account.user.userId, sessionId, body.message);
+      const said = await options.sessions.say(
+        account.user.userId,
+        sessionId,
+        body.message,
+        body.idempotencyKey,
+      );
 
-      response.status(202).json(CreateSessionResponseSchema.parse({ session: said }));
+      response
+        .status(said.created ? 201 : 200)
+        .json(PostMessageResponseSchema.parse({ message: said.message }));
     },
   );
 
@@ -99,11 +112,11 @@ export function createSessionsRouter(options: SessionsRouterOptions): Router {
     '/sessions/:sessionId/answer',
     requireAuth,
     requireCsrf,
-    validateBody(PostMessageBodySchema),
+    validateBody(AnswerSessionBodySchema),
     async (request, response) => {
       const account = requireSession(request);
       const sessionId = readSessionId(request.params['sessionId']);
-      const body = validatedBody(request, PostMessageBodySchema);
+      const body = validatedBody(request, AnswerSessionBodySchema);
       const answered = await options.sessions.answer(account.user.userId, sessionId, body.message);
 
       response.status(202).json(CreateSessionResponseSchema.parse({ session: answered }));

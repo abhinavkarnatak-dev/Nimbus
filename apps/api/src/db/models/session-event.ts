@@ -1,4 +1,7 @@
+import { createHash } from 'node:crypto';
+
 import {
+  CONTRACTS_WIRE_VERSION,
   SERVER_EVENT_TYPES,
   SessionEventEnvelopeSchema,
   type ServerEvent,
@@ -34,12 +37,43 @@ export function sessionEventsCollection(db: Db): Collection<SessionEventDocument
 
 export function toEventEnvelope(document: SessionEventDocument): SessionEventEnvelope {
   return SessionEventEnvelopeSchema.parse({
-    v: 1,
+    v: CONTRACTS_WIRE_VERSION,
     sequence: document.sequence,
     sessionId: document.sessionId,
     emittedAt: toIsoTimestamp(document.emittedAt),
-    event: document.event,
+    event: currentEvent(document),
   });
+}
+
+function currentEvent(document: SessionEventDocument): unknown {
+  const event = document.event as unknown;
+
+  if (
+    typeof event !== 'object' ||
+    event === null ||
+    (event as { type?: unknown }).type !== 'agent.message' ||
+    typeof (event as { message?: unknown }).message !== 'string'
+  ) {
+    return event;
+  }
+
+  const text = (event as { message: string }).message;
+  const body = createHash('sha256')
+    .update(document.sessionId)
+    .update('\0')
+    .update(String(document.sequence))
+    .digest('base64url')
+    .slice(0, 21);
+
+  return {
+    type: 'agent.message',
+    message: {
+      messageId: `msg_${body}`,
+      role: 'agent',
+      text,
+      sentAt: toIsoTimestamp(document.emittedAt),
+    },
+  };
 }
 
 export const sessionEventModel: ModelDefinition = {

@@ -5,8 +5,8 @@ import { IsoTimestampSchema, SessionIdSchema } from './ids.js';
 import { LIMITS } from './limits.js';
 import { PullRequestResultSchema } from './pull-request.js';
 import {
-  SessionDetailSchema,
   SessionFailureSchema,
+  SessionMessageSchema,
   SessionProgressSchema,
   SessionStatusSchema,
 } from './sessions.js';
@@ -21,7 +21,6 @@ import {
 import { CONTRACTS_WIRE_VERSION } from './version.js';
 
 export const SERVER_EVENT_TYPES = [
-  'session.snapshot',
   'session.status',
   'agent.message',
   'agent.question',
@@ -38,11 +37,6 @@ export const SERVER_EVENT_TYPES = [
 
 export const ServerEventTypeSchema = z.enum(SERVER_EVENT_TYPES);
 
-const SessionSnapshotEventSchema = z.strictObject({
-  type: z.literal('session.snapshot'),
-  session: SessionDetailSchema,
-});
-
 const SessionStatusEventSchema = z.strictObject({
   type: z.literal('session.status'),
   status: SessionStatusSchema,
@@ -51,7 +45,7 @@ const SessionStatusEventSchema = z.strictObject({
 
 const AgentMessageEventSchema = z.strictObject({
   type: z.literal('agent.message'),
-  message: z.string().min(1).max(LIMITS.messageMaxChars),
+  message: SessionMessageSchema,
 });
 
 const AgentQuestionEventSchema = z.strictObject({
@@ -113,7 +107,6 @@ const SessionCancelledEventSchema = z.strictObject({
 });
 
 export const ServerEventSchema = z.discriminatedUnion('type', [
-  SessionSnapshotEventSchema,
   SessionStatusEventSchema,
   AgentMessageEventSchema,
   AgentQuestionEventSchema,

@@ -648,6 +648,13 @@ the newest turns so one session cannot grow a document without limit, and the re
 only the most recent few so a long conversation cannot crowd the repository context out of the request
 or spend the token budget on itself.
 
+Every persisted conversation turn has a server-generated message ID. User submissions also carry a
+client idempotency key recorded in a bounded receipt ledger, so concurrent retries with the same key
+and text converge on one turn and return its original ID even after that turn has rolled out of the
+visible conversation. Reusing the key for different text is a conflict. Agent messages use one ID for
+both the durable turn and the live event. Message-specific traffic rate limiting remains part of
+feature 047; the V1 storage and retry bounds do not depend on it.
+
 Owned by features 031 and 038h.
 
 ## 10g. Execution, observation, and validation

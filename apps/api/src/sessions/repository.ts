@@ -11,13 +11,16 @@ import type { Db } from 'mongodb';
 import {
   ACTIVE_SESSION_STATUSES,
   MAX_SESSION_MESSAGES,
+  MESSAGE_ID_PREFIX,
   isActiveSessionStatus,
   sessionsCollection,
   toSessionMessage,
   type SessionDocument,
   type SessionMessageDocument,
+  type SessionMessageReceiptDocument,
   type SessionPullRequestDocument,
 } from '../db/models/session.js';
+import { newPrefixedId } from '../lib/id.js';
 
 export const INSERT_OUTCOMES = ['created', 'same_request', 'already_active'] as const;
 
@@ -59,6 +62,17 @@ export interface RunOutcome {
   checks?: CheckResult[];
 }
 
+export interface UserMessageInput {
+  messageId: string;
+  text: string;
+  sentAt: Date;
+  idempotencyKey: string;
+}
+
+export type UserMessageWrite =
+  | { outcome: 'created' | 'same_request'; message: SessionMessage }
+  | { outcome: 'conflict' | 'inactive' | 'full'; message: null };
+
 export interface SessionRecords {
   insert(document: SessionDocument): Promise<InsertOutcome>;
   findOwned(userId: string, sessionId: string): Promise<SessionDocument | null>;
@@ -75,13 +89,19 @@ export interface SessionRecords {
   findWaitingSince(cutoff: Date, limit: number): Promise<SessionDocument[]>;
   findById(sessionId: string): Promise<SessionDocument | null>;
   startRun(sessionId: string, at: Date): Promise<SessionDocument | null>;
+  pinBaseCommitSha(sessionId: string, candidate: string, at: Date): Promise<string | null>;
   recordProgress(sessionId: string, progress: RunProgress, at: Date): Promise<void>;
   recordOutcome(sessionId: string, outcome: RunOutcome, at: Date): Promise<SessionDocument | null>;
   bumpRetry(sessionId: string, at: Date): Promise<number>;
   isLive(sessionId: string): Promise<boolean>;
   answerOnce(userId: string, sessionId: string, answer: string, at: Date): Promise<boolean>;
+  writeUserMessage(
+    userId: string,
+    sessionId: string,
+    input: UserMessageInput,
+  ): Promise<UserMessageWrite>;
   addMessage(userId: string, sessionId: string, text: string, at: Date): Promise<boolean>;
-  addAgentMessage(sessionId: string, text: string, at: Date): Promise<boolean>;
+  addAgentMessage(sessionId: string, text: string, at: Date, messageId?: string): Promise<boolean>;
   conversationOf(sessionId: string): Promise<SessionMessage[]>;
   askQuestion(sessionId: string, question: string, at: Date): Promise<void>;
 }
@@ -194,6 +214,20 @@ export class MongoSessionRecords implements SessionRecords {
     return result ?? null;
   }
 
+  async pinBaseCommitSha(sessionId: string, candidate: string, at: Date): Promise<string | null> {
+    await sessionsCollection(this.db).updateOne(
+      { sessionId, status: { $in: activeStatuses() }, baseCommitSha: null },
+      { $set: { baseCommitSha: candidate, updatedAt: at, lastActivityAt: at } },
+    );
+
+    const active = await sessionsCollection(this.db).findOne(
+      { sessionId, status: { $in: activeStatuses() } },
+      { projection: { baseCommitSha: 1 } },
+    );
+
+    return active?.baseCommitSha ?? null;
+  }
+
   async recordProgress(sessionId: string, progress: RunProgress, at: Date): Promise<void> {
     await sessionsCollection(this.db).updateOne(
       { sessionId, status: { $in: activeStatuses() } },
@@ -257,22 +291,82 @@ export class MongoSessionRecords implements SessionRecords {
   }
 
   async addMessage(userId: string, sessionId: string, text: string, at: Date): Promise<boolean> {
+    const written = await this.writeUserMessage(userId, sessionId, {
+      messageId: newPrefixedId(MESSAGE_ID_PREFIX),
+      text,
+      sentAt: at,
+      idempotencyKey: newPrefixedId('idk'),
+    });
+    return written.outcome === 'created';
+  }
+
+  async writeUserMessage(
+    userId: string,
+    sessionId: string,
+    input: UserMessageInput,
+  ): Promise<UserMessageWrite> {
+    const message = saidBy('user', input.text, input.sentAt, input.messageId, input.idempotencyKey);
+    const receipt = receiptFor(input);
     const changed = await sessionsCollection(this.db).updateOne(
-      { sessionId, userId, status: { $in: activeStatuses() } },
       {
-        $push: { messages: { $each: [saidBy('user', text, at)], $slice: -MAX_SESSION_MESSAGES } },
-        $set: { updatedAt: at, lastActivityAt: at },
+        sessionId,
+        userId,
+        status: { $in: activeStatuses() },
+        'messageReceipts.idempotencyKey': { $ne: input.idempotencyKey },
+        [`messageReceipts.${String(MAX_SESSION_MESSAGES - 1)}`]: { $exists: false },
+      },
+      {
+        $push: {
+          messages: { $each: [message], $slice: -MAX_SESSION_MESSAGES },
+          messageReceipts: receipt,
+        },
+        $set: { updatedAt: input.sentAt, lastActivityAt: input.sentAt },
       },
     );
 
-    return changed.modifiedCount === 1;
+    if (changed.modifiedCount === 1) {
+      return {
+        outcome: 'created',
+        message: toSessionMessage(sessionId, message, MAX_SESSION_MESSAGES - 1),
+      };
+    }
+
+    const held = await sessionsCollection(this.db).findOne(
+      { sessionId, userId },
+      { projection: { messageReceipts: 1, status: 1 } },
+    );
+    const index =
+      held?.messageReceipts?.findIndex((one) => one.idempotencyKey === input.idempotencyKey) ?? -1;
+    const existing = index < 0 ? undefined : held?.messageReceipts?.[index];
+
+    if (existing !== undefined) {
+      return existing.text === input.text
+        ? {
+            outcome: 'same_request',
+            message: messageFromReceipt(sessionId, existing, index),
+          }
+        : { outcome: 'conflict', message: null };
+    }
+    return held !== null && isActiveSessionStatus(held.status)
+      ? { outcome: 'full', message: null }
+      : { outcome: 'inactive', message: null };
   }
 
-  async addAgentMessage(sessionId: string, text: string, at: Date): Promise<boolean> {
+  async addAgentMessage(
+    sessionId: string,
+    text: string,
+    at: Date,
+    messageId = newPrefixedId(MESSAGE_ID_PREFIX),
+  ): Promise<boolean> {
     const changed = await sessionsCollection(this.db).updateOne(
       { sessionId, status: { $in: activeStatuses() } },
       {
-        $push: { messages: { $each: [saidBy('agent', text, at)], $slice: -MAX_SESSION_MESSAGES } },
+        $push: {
+          messages: {
+            $each: [saidBy('agent', text, at, messageId)],
+            $slice: -MAX_SESSION_MESSAGES,
+          },
+        },
         $set: { updatedAt: at, lastActivityAt: at },
       },
     );
@@ -286,7 +380,9 @@ export class MongoSessionRecords implements SessionRecords {
       { projection: { messages: 1 } },
     );
 
-    return (found?.messages ?? []).map(toSessionMessage);
+    return (found?.messages ?? []).map((message, index) =>
+      toSessionMessage(sessionId, message, index),
+    );
   }
 
   async askQuestion(sessionId: string, question: string, at: Date): Promise<void> {
@@ -422,6 +518,21 @@ export class InMemorySessionRecords implements SessionRecords {
     return Promise.resolve({ ...held });
   }
 
+  async pinBaseCommitSha(sessionId: string, candidate: string, at: Date): Promise<string | null> {
+    const held = this.#activeOne(sessionId);
+
+    if (held === undefined) {
+      return Promise.resolve(null);
+    }
+
+    if (held.baseCommitSha === null) {
+      held.baseCommitSha = candidate;
+      held.updatedAt = at;
+      held.lastActivityAt = at;
+    }
+    return Promise.resolve(held.baseCommitSha);
+  }
+
   async recordProgress(sessionId: string, progress: RunProgress, at: Date): Promise<void> {
     const held = this.#activeOne(sessionId);
 
@@ -502,39 +613,105 @@ export class InMemorySessionRecords implements SessionRecords {
   }
 
   async addMessage(userId: string, sessionId: string, text: string, at: Date): Promise<boolean> {
+    const written = await this.writeUserMessage(userId, sessionId, {
+      messageId: newPrefixedId(MESSAGE_ID_PREFIX),
+      text,
+      sentAt: at,
+      idempotencyKey: newPrefixedId('idk'),
+    });
+    return written.outcome === 'created';
+  }
+
+  async writeUserMessage(
+    userId: string,
+    sessionId: string,
+    input: UserMessageInput,
+  ): Promise<UserMessageWrite> {
     const held = this.documents.find(
       (one) =>
         one.sessionId === sessionId && one.userId === userId && isActiveSessionStatus(one.status),
     );
 
     if (held === undefined) {
-      return Promise.resolve(false);
+      const ended = this.documents.find(
+        (one) => one.sessionId === sessionId && one.userId === userId,
+      );
+      const existingIndex =
+        ended?.messageReceipts?.findIndex(
+          (receipt) => receipt.idempotencyKey === input.idempotencyKey,
+        ) ?? -1;
+      const existing = existingIndex < 0 ? undefined : ended?.messageReceipts?.[existingIndex];
+
+      if (existing === undefined) {
+        return Promise.resolve({ outcome: 'inactive', message: null });
+      }
+      return Promise.resolve(
+        existing.text === input.text
+          ? {
+              outcome: 'same_request',
+              message: messageFromReceipt(sessionId, existing, existingIndex),
+            }
+          : { outcome: 'conflict', message: null },
+      );
     }
 
-    this.#appendMessage(held, 'user', text, at);
-    return Promise.resolve(true);
+    const receipts = held.messageReceipts ?? [];
+    const existingIndex = receipts.findIndex(
+      (receipt) => receipt.idempotencyKey === input.idempotencyKey,
+    );
+    const existing = existingIndex < 0 ? undefined : receipts[existingIndex];
+
+    if (existing !== undefined) {
+      return Promise.resolve(
+        existing.text === input.text
+          ? {
+              outcome: 'same_request',
+              message: messageFromReceipt(sessionId, existing, existingIndex),
+            }
+          : { outcome: 'conflict', message: null },
+      );
+    }
+
+    if (receipts.length >= MAX_SESSION_MESSAGES) {
+      return Promise.resolve({ outcome: 'full', message: null });
+    }
+
+    const message = saidBy('user', input.text, input.sentAt, input.messageId, input.idempotencyKey);
+    this.#appendMessage(held, message);
+    held.messageReceipts = [...receipts, receiptFor(input)];
+    return Promise.resolve({
+      outcome: 'created',
+      message: toSessionMessage(sessionId, message, held.messages.length - 1),
+    });
   }
 
-  async addAgentMessage(sessionId: string, text: string, at: Date): Promise<boolean> {
+  async addAgentMessage(
+    sessionId: string,
+    text: string,
+    at: Date,
+    messageId = newPrefixedId(MESSAGE_ID_PREFIX),
+  ): Promise<boolean> {
     const held = this.#activeOne(sessionId);
 
     if (held === undefined) {
       return Promise.resolve(false);
     }
 
-    this.#appendMessage(held, 'agent', text, at);
+    this.#appendMessage(held, saidBy('agent', text, at, messageId));
     return Promise.resolve(true);
   }
 
   async conversationOf(sessionId: string): Promise<SessionMessage[]> {
     const held = this.documents.find((one) => one.sessionId === sessionId);
-    return Promise.resolve((held?.messages ?? []).map(toSessionMessage));
+    return Promise.resolve(
+      (held?.messages ?? []).map((message, index) => toSessionMessage(sessionId, message, index)),
+    );
   }
 
-  #appendMessage(held: SessionDocument, role: MessageRole, text: string, at: Date): void {
-    held.messages = [...held.messages, saidBy(role, text, at)].slice(-MAX_SESSION_MESSAGES);
-    held.updatedAt = at;
-    held.lastActivityAt = at;
+  #appendMessage(held: SessionDocument, message: SessionMessageDocument): void {
+    held.messages = [...held.messages, message].slice(-MAX_SESSION_MESSAGES);
+    held.updatedAt = message.sentAt;
+    held.lastActivityAt = message.sentAt;
   }
 
   async askQuestion(sessionId: string, question: string, at: Date): Promise<void> {
@@ -553,8 +730,46 @@ function activeStatuses(): SessionStatus[] {
   return [...ACTIVE_SESSION_STATUSES];
 }
 
-export function saidBy(role: MessageRole, text: string, at: Date): SessionMessageDocument {
-  return { role, text, sentAt: at };
+export function saidBy(
+  role: MessageRole,
+  text: string,
+  at: Date,
+  messageId = newPrefixedId(MESSAGE_ID_PREFIX),
+  idempotencyKey?: string,
+): SessionMessageDocument {
+  return {
+    messageId,
+    role,
+    text,
+    sentAt: at,
+    ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+  };
+}
+
+function receiptFor(input: UserMessageInput): SessionMessageReceiptDocument {
+  return {
+    idempotencyKey: input.idempotencyKey,
+    messageId: input.messageId,
+    text: input.text,
+    sentAt: input.sentAt,
+  };
+}
+
+function messageFromReceipt(
+  sessionId: string,
+  receipt: SessionMessageReceiptDocument,
+  index: number,
+): SessionMessage {
+  return toSessionMessage(
+    sessionId,
+    {
+      messageId: receipt.messageId,
+      role: 'user',
+      text: receipt.text,
+      sentAt: receipt.sentAt,
+    },
+    index,
+  );
 }
 
 export function startedFields(at: Date): Partial<SessionDocument> {

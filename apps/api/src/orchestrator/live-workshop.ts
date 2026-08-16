@@ -36,6 +36,10 @@ export interface InstallationDirectory {
   activeInstallation(userId: string): Promise<{ installationId: number } | null>;
 }
 
+export interface BaseCommitResolver {
+  resolve(session: SessionDocument, token: InstallationToken): Promise<string>;
+}
+
 export interface LiveWorkshopOptions {
   db: Db;
   installations: InstallationDirectory;
@@ -47,6 +51,7 @@ export interface LiveWorkshopOptions {
   attachments?: SessionAttachments;
   events?: EventPublisher;
   records?: SessionRecords;
+  baseCommits?: BaseCommitResolver;
   checkpointer?: BaseCheckpointSaver;
   maxSteps?: number;
 }
@@ -74,7 +79,14 @@ export class LiveSessionWorkshop implements SessionWorkshop {
       scope: 'read',
     });
 
-    const base = await this.#baseCommit(session, readToken);
+    let base: string;
+
+    try {
+      base = await this.#baseCommit(session, readToken, options.signal);
+    } catch (error) {
+      await this.#revoke(session, readToken);
+      throw error;
+    }
     const plan = this.#plan(session);
 
     const limits = this.#options.config.limits;
@@ -149,14 +161,7 @@ export class LiveSessionWorkshop implements SessionWorkshop {
           : { checkpointer: this.#options.checkpointer }),
       },
       finish: async (): Promise<void> => {
-        try {
-          await this.#options.tokens.revoke(readToken);
-        } catch (error) {
-          this.#options.logger.warn(
-            { sessionId: session.sessionId, error: String(error) },
-            'a read token could not be revoked, it expires on its own',
-          );
-        }
+        await this.#revoke(session, readToken);
       },
     };
   }
@@ -248,23 +253,66 @@ export class LiveSessionWorkshop implements SessionWorkshop {
     return loaded;
   }
 
-  async #baseCommit(session: SessionDocument, token: InstallationToken): Promise<string> {
+  async #baseCommit(
+    session: SessionDocument,
+    token: InstallationToken,
+    signal: AbortSignal,
+  ): Promise<string> {
     if (session.baseCommitSha !== null) {
       return session.baseCommitSha;
     }
 
+    const candidate =
+      this.#options.baseCommits === undefined
+        ? await this.#resolveBaseCommit(session, token)
+        : await this.#options.baseCommits.resolve(session, token);
+
+    if (signal.aborted) {
+      throw new WorkshopError('stopped', 'That session stopped before its base commit was pinned.');
+    }
+
+    const pinned = await this.#options.records?.pinBaseCommitSha(
+      session.sessionId,
+      candidate,
+      new Date(),
+    );
+
+    if (pinned === undefined) {
+      throw new WorkshopError(
+        'no_commit',
+        'The repository base could not be persisted before the run started.',
+      );
+    }
+
+    if (pinned === null) {
+      throw new WorkshopError('stopped', 'That session stopped before its base commit was pinned.');
+    }
+    return pinned;
+  }
+
+  async #resolveBaseCommit(session: SessionDocument, token: InstallationToken): Promise<string> {
     const reader = new OctokitGitDataClient({
       owner: session.repository.owner,
       name: session.repository.name,
       token: token.token,
     });
-
     const head = await reader.getRef(session.repository.defaultBranch);
 
     if (head === null) {
       throw new WorkshopError('no_commit', 'That repository has no commits on its default branch.');
     }
     return head.commitSha;
+  }
+
+  async #revoke(session: SessionDocument, token: InstallationToken): Promise<void> {
+    try {
+      await this.#options.tokens.revoke(token);
+    } catch (error) {
+      this.#options.logger.warn(
+        { sessionId: session.sessionId, error: String(error) },
+        'a read token could not be revoked, it expires on its own',
+      );
+    }
   }
 
   #plan(session: SessionDocument): ModelPlan {

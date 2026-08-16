@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   ApprovalCategorySchema,
   ApprovalStatusSchema,
@@ -16,6 +18,7 @@ import {
   RiskLevelSchema,
   SESSION_STATUSES,
   SessionDetailSchema,
+  SessionMessageSchema,
   SessionSummarySchema,
   TERMINAL_SESSION_STATUSES,
   ToolNameSchema,
@@ -54,6 +57,7 @@ import {
 } from './shared.js';
 
 export const SESSION_ID_PREFIX = 'ses';
+export const MESSAGE_ID_PREFIX = 'msg';
 
 export const MAX_SESSION_MESSAGES = LIMITS.maxMessagesPerSession;
 
@@ -94,17 +98,51 @@ export interface SessionApprovalDocument {
 }
 
 export interface SessionMessageDocument {
+  messageId?: string;
   role?: MessageRole;
+  text: string;
+  sentAt: Date;
+  idempotencyKey?: string;
+}
+
+export interface SessionMessageReceiptDocument {
+  idempotencyKey: string;
+  messageId: string;
   text: string;
   sentAt: Date;
 }
 
-export function toSessionMessage(document: SessionMessageDocument): SessionMessage {
-  return {
+export function toSessionMessage(
+  sessionId: string,
+  document: SessionMessageDocument,
+  index: number,
+): SessionMessage {
+  return SessionMessageSchema.parse({
+    messageId: document.messageId ?? legacyMessageId(sessionId, document, index),
     role: document.role ?? 'user',
     text: document.text,
     sentAt: document.sentAt.toISOString(),
-  };
+  });
+}
+
+function legacyMessageId(
+  sessionId: string,
+  document: SessionMessageDocument,
+  index: number,
+): string {
+  const body = createHash('sha256')
+    .update(sessionId)
+    .update('\0')
+    .update(String(index))
+    .update('\0')
+    .update(document.role ?? 'user')
+    .update('\0')
+    .update(document.text)
+    .update('\0')
+    .update(document.sentAt.toISOString())
+    .digest('base64url')
+    .slice(0, 21);
+  return `${MESSAGE_ID_PREFIX}_${body}`;
 }
 
 export interface SessionToolEventDocument {
@@ -138,6 +176,7 @@ export interface SessionDocument {
   clarificationAnswer: string | null;
   waitingSince: Date | null;
   messages: SessionMessageDocument[];
+  messageReceipts?: SessionMessageReceiptDocument[];
   attachments: SessionAttachmentDocument[];
   idempotencyKey: string;
   checkpointId: string | null;
@@ -233,7 +272,9 @@ export function toSessionDetail(document: SessionDocument): SessionDetail {
     model: document.model ?? null,
     baseCommitSha: document.baseCommitSha,
     attachments: document.attachments.map(toAttachmentMetadata),
-    messages: document.messages.map(toSessionMessage),
+    messages: document.messages.map((message, index) =>
+      toSessionMessage(document.sessionId, message, index),
+    ),
     progress: {
       step: document.step,
       maxSteps: document.maxSteps,
@@ -368,7 +409,24 @@ export const sessionModel: ModelDefinition = {
             additionalProperties: false,
             required: ['text', 'sentAt'],
             properties: {
+              messageId: { bsonType: 'string', pattern: publicIdPattern('msg') },
               role: { enum: [...MESSAGE_ROLES] },
+              text: { bsonType: 'string', minLength: 1, maxLength: LIMITS.messageMaxChars },
+              sentAt: { bsonType: 'date' },
+              idempotencyKey: { bsonType: 'string', pattern: publicIdPattern('idk') },
+            },
+          },
+        },
+        messageReceipts: {
+          bsonType: 'array',
+          maxItems: MAX_SESSION_MESSAGES,
+          items: {
+            bsonType: 'object',
+            additionalProperties: false,
+            required: ['idempotencyKey', 'messageId', 'text', 'sentAt'],
+            properties: {
+              idempotencyKey: { bsonType: 'string', pattern: publicIdPattern('idk') },
+              messageId: { bsonType: 'string', pattern: publicIdPattern('msg') },
               text: { bsonType: 'string', minLength: 1, maxLength: LIMITS.messageMaxChars },
               sentAt: { bsonType: 'date' },
             },

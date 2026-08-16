@@ -317,6 +317,43 @@ describe('cancelling for real', () => {
   });
 });
 
+describe('pinning the repository base in the real collection', () => {
+  it('keeps the winner when concurrent workers resolve different default heads', async () => {
+    const created = await service.create(OWNER_ID, newBody());
+    const records = new MongoSessionRecords(testDatabase.db);
+    const candidates = ['1'.repeat(40), '2'.repeat(40), '3'.repeat(40)];
+
+    const pinned = await Promise.all(
+      candidates.map((candidate) =>
+        records.pinBaseCommitSha(created.session.sessionId, candidate, new Date()),
+      ),
+    );
+    const stored = await sessionsCollection(testDatabase.db).findOne({
+      sessionId: created.session.sessionId,
+    });
+
+    expect(candidates).toContain(stored?.baseCommitSha);
+    expect(new Set(pinned)).toEqual(new Set([stored?.baseCommitSha]));
+  });
+
+  it('does not write after the session has become terminal', async () => {
+    const created = await service.create(OWNER_ID, newBody());
+    const records = new MongoSessionRecords(testDatabase.db);
+    await records.finish(OWNER_ID, created.session.sessionId, 'cancelled', new Date());
+
+    expect(
+      await records.pinBaseCommitSha(created.session.sessionId, '4'.repeat(40), new Date()),
+    ).toBeNull();
+    expect(
+      (
+        await sessionsCollection(testDatabase.db).findOne({
+          sessionId: created.session.sessionId,
+        })
+      )?.baseCommitSha,
+    ).toBeNull();
+  });
+});
+
 describe('a conversation kept on a session', () => {
   it('keeps both sides, in the order they were said', async () => {
     const created = await service.create(OWNER_ID, keyed('a'));
@@ -330,6 +367,82 @@ describe('a conversation kept on a session', () => {
       'user',
       'agent',
     ]);
+    const ids = (await records.conversationOf(sessionId)).map((one) => one.messageId);
+    expect(ids.every((id) => id.startsWith('msg_'))).toBe(true);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('turns concurrent retries into exactly one message with the winner identity', async () => {
+    const created = await service.create(OWNER_ID, keyed('a'));
+    const records = new MongoSessionRecords(testDatabase.db);
+    const sessionId = created.session.sessionId;
+    const idempotencyKey = testId('idk', 'm');
+
+    const results = await Promise.all(
+      Array.from({ length: 8 }, (_value, index) =>
+        records.writeUserMessage(OWNER_ID, sessionId, {
+          messageId: testId('msg', String(index)),
+          text: 'keep the old link working',
+          sentAt: new Date(),
+          idempotencyKey,
+        }),
+      ),
+    );
+
+    expect(results.filter((result) => result.outcome === 'created')).toHaveLength(1);
+    expect(results.filter((result) => result.outcome === 'same_request')).toHaveLength(7);
+    expect(
+      new Set(
+        results.map((result) => (result.message === null ? 'none' : result.message.messageId)),
+      ).size,
+    ).toBe(1);
+    expect(await records.conversationOf(sessionId)).toHaveLength(1);
+  });
+
+  it('distinguishes a safe retry from the same key carrying different text', async () => {
+    const created = await service.create(OWNER_ID, keyed('a'));
+    const records = new MongoSessionRecords(testDatabase.db);
+    const sessionId = created.session.sessionId;
+    const idempotencyKey = testId('idk', 'm');
+    const first = {
+      messageId: testId('msg', 'a'),
+      text: 'keep the old link working',
+      sentAt: new Date(),
+      idempotencyKey,
+    };
+
+    expect((await records.writeUserMessage(OWNER_ID, sessionId, first)).outcome).toBe('created');
+    expect((await records.writeUserMessage(OWNER_ID, sessionId, first)).outcome).toBe(
+      'same_request',
+    );
+    expect(
+      (
+        await records.writeUserMessage(OWNER_ID, sessionId, {
+          ...first,
+          messageId: testId('msg', 'b'),
+          text: 'a different instruction',
+        })
+      ).outcome,
+    ).toBe('conflict');
+    expect(await records.conversationOf(sessionId)).toHaveLength(1);
+  });
+
+  it('can acknowledge a completed-session retry without creating another message', async () => {
+    const created = await service.create(OWNER_ID, keyed('a'));
+    const records = new MongoSessionRecords(testDatabase.db);
+    const input = {
+      messageId: testId('msg', 'a'),
+      text: 'keep the old link working',
+      sentAt: new Date(),
+      idempotencyKey: testId('idk', 'm'),
+    };
+    const first = await records.writeUserMessage(OWNER_ID, created.session.sessionId, input);
+    await records.finish(OWNER_ID, created.session.sessionId, 'cancelled', new Date());
+    const retry = await records.writeUserMessage(OWNER_ID, created.session.sessionId, input);
+
+    expect(first.outcome).toBe('created');
+    expect(retry.outcome).toBe('same_request');
+    expect(retry.message?.messageId).toBe(first.message?.messageId);
   });
 
   it('comes back on the session detail, so a reload shows it', async () => {
@@ -362,8 +475,11 @@ describe('a conversation kept on a session', () => {
     await records.addAgentMessage(sessionId, 'a newer one', new Date());
 
     const conversation = await records.conversationOf(sessionId);
+    const reread = await records.conversationOf(sessionId);
 
     expect(conversation.map((one) => one.role)).toStrictEqual(['user', 'agent']);
+    expect(conversation[0]?.messageId).toMatch(/^msg_/);
+    expect(reread[0]?.messageId).toBe(conversation[0]?.messageId);
   });
 
   it('keeps the newest turns once it is full, and the validator still accepts it', async () => {

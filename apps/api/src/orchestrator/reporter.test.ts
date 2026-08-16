@@ -1,7 +1,7 @@
 import type { ToolInvocation } from '@nimbus/contracts';
 import { describe, expect, it } from 'vitest';
 
-import type { ReportedCompletion } from '../agent/execute/reporter.js';
+import type { ReportedCompletion, SaidMessage } from '../agent/execute/reporter.js';
 import { CollectingActionReporter } from '../agent/execute/reporter.js';
 import { CollectingEventPublisher } from '../events/publisher.js';
 import { InMemorySessionRecords } from '../sessions/repository.js';
@@ -9,6 +9,11 @@ import { DurableProgressReporter, EveryReporter, LiveActionReporter } from './re
 import { orchestratorLogger, sessionDocument } from './orchestrator.fixtures.js';
 
 const AT = new Date('2026-08-17T10:00:00.000Z');
+const MESSAGE_ID = 'msg_V1StGXR8Z5jdHi6BmyTab';
+
+function said(text: string, step = 3): SaidMessage {
+  return { messageId: MESSAGE_ID, step, text, sentAt: AT.toISOString() };
+}
 
 function invocation(summary: string): ToolInvocation {
   return {
@@ -25,7 +30,7 @@ function completion(step: number, summary: string): ReportedCompletion {
     toolCallId: `call_${String(step)}`,
     step,
     tool: 'read_file',
-    outcome: 'ok',
+    outcome: 'succeeded',
     durationMs: 12,
     summary,
   };
@@ -136,21 +141,26 @@ describe('a note from the agent', () => {
       logger: captured.logger,
     });
 
-    await reporter.said({ step: 3, text: 'I found the redirect.' });
+    await reporter.said(said('I found the redirect.'));
 
     expect(events.published[0]?.event).toStrictEqual({
       type: 'agent.message',
-      message: 'I found the redirect.',
+      message: {
+        messageId: MESSAGE_ID,
+        role: 'agent',
+        text: 'I found the redirect.',
+        sentAt: AT.toISOString(),
+      },
     });
   });
 
   it('is kept on the session as a turn from the agent', async () => {
     const held = await withRun();
 
-    await held.reporter.said({ step: 3, text: 'I found the redirect.' });
+    await held.reporter.said(said('I found the redirect.'));
 
     expect(held.records.documents[0]?.messages).toStrictEqual([
-      { role: 'agent', text: 'I found the redirect.', sentAt: AT },
+      { messageId: MESSAGE_ID, role: 'agent', text: 'I found the redirect.', sentAt: AT },
     ]);
   });
 
@@ -160,7 +170,7 @@ describe('a note from the agent', () => {
     held.records.addAgentMessage = async (): Promise<never> =>
       Promise.reject(new Error('mongo is down'));
 
-    await expect(held.reporter.said({ step: 3, text: 'hello' })).resolves.toBeUndefined();
+    await expect(held.reporter.said(said('hello'))).resolves.toBeUndefined();
     expect(held.logs()).toContain('could not be kept');
   });
 
@@ -172,7 +182,7 @@ describe('a note from the agent', () => {
       session.status = 'cancelled';
     }
 
-    await held.reporter.said({ step: 3, text: 'hello' });
+    await held.reporter.said(said('hello'));
 
     expect(held.records.documents[0]?.messages).toHaveLength(0);
   });
@@ -187,7 +197,7 @@ describe('reporting to more than one place', () => {
     await both.started(invocation('reading'));
     await both.output({ toolCallId: 'call_3', stream: 'stdout', chunk: 'hello', truncated: false });
     await both.completed(completion(3, 'read it'));
-    await both.said({ step: 3, text: 'I read it' });
+    await both.said(said('I read it'));
 
     expect(first.order).toStrictEqual(['started', 'output', 'completed', 'said']);
     expect(second.order).toStrictEqual(['started', 'output', 'completed', 'said']);
@@ -208,10 +218,15 @@ describe('reporting to more than one place', () => {
       held.reporter,
     ]);
 
-    await both.said({ step: 2, text: 'I found the redirect.' });
+    await both.said(said('I found the redirect.', 2));
 
     expect(events.typesFor(held.sessionId)).toStrictEqual(['agent.message']);
     expect(held.records.documents[0]?.messages).toHaveLength(1);
+    const event = events.published[0]?.event;
+    expect(event?.type).toBe('agent.message');
+    if (event?.type === 'agent.message') {
+      expect(event.message.messageId).toBe(held.records.documents[0]?.messages[0]?.messageId);
+    }
   });
 
   it('carries the live one and the durable one together', async () => {

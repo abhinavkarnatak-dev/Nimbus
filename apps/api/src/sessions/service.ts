@@ -1,6 +1,7 @@
 import {
   ApprovalRecordSchema,
   LIMITS,
+  PostMessageResponseSchema,
   SessionDetailResponseSchema,
   SessionListResponseSchema,
   type ApprovalDecisionBody,
@@ -12,6 +13,8 @@ import {
   type SessionDetailResponse,
   type SessionListResponse,
   type SessionSummary,
+  type ModelCatalogueResponse,
+  type PostMessageResponse,
 } from '@nimbus/contracts';
 
 import { tooThinToJudge } from '../agent/nodes/scope.js';
@@ -31,7 +34,7 @@ import { ApiError } from '../http/api-error.js';
 import { newPrefixedId } from '../lib/id.js';
 import { LlmError } from '../llm/errors.js';
 import type { Logger } from '../logging/logger.js';
-import { assertSelectableModel } from '../routing/selection.js';
+import { SelectableModelCatalogue } from '../routing/selection.js';
 import type { SessionRecords } from './repository.js';
 
 export const DEFAULT_MAX_STEPS = DEFAULT_LIMITS.maxAgentSteps;
@@ -53,6 +56,7 @@ export interface AgentSessionServiceOptions {
   notifyCancelled?: (session: SessionDocument) => Promise<void>;
   maxSteps?: number;
   now?: () => Date;
+  models?: SelectableModelCatalogue;
 }
 
 export const APPROVAL_ERROR_TO_API: Readonly<Record<string, ErrorCode>> = {
@@ -64,13 +68,16 @@ export const APPROVAL_ERROR_TO_API: Readonly<Record<string, ErrorCode>> = {
   APPROVAL_LIMIT_REACHED: 'CONFLICT',
 };
 
-export function chosenModel(selection: ModelSelection | undefined): ModelSelection | null {
+export function chosenModel(
+  selection: ModelSelection | undefined,
+  catalogue = new SelectableModelCatalogue(),
+): ModelSelection | null {
   if (selection === undefined || selection.textModel.trim() === '') {
     return null;
   }
 
   try {
-    return { textModel: assertSelectableModel(selection.textModel) };
+    return { textModel: catalogue.assertAvailable(selection.textModel) };
   } catch (error) {
     throw new ApiError(
       'VALIDATION_FAILED',
@@ -95,6 +102,10 @@ export interface CreatedSession {
   created: boolean;
 }
 
+export interface SaidMessageResult extends PostMessageResponse {
+  created: boolean;
+}
+
 export class AgentSessionService {
   readonly #records: SessionRecords;
 
@@ -116,6 +127,8 @@ export class AgentSessionService {
 
   readonly #now: () => Date;
 
+  readonly #models: SelectableModelCatalogue;
+
   constructor(options: AgentSessionServiceOptions) {
     this.#records = options.records;
     this.#attachments = options.attachments;
@@ -127,6 +140,7 @@ export class AgentSessionService {
     this.#events = options.events ?? null;
     this.#notifyCancelled = options.notifyCancelled ?? null;
     this.#now = options.now ?? ((): Date => new Date());
+    this.#models = options.models ?? new SelectableModelCatalogue();
   }
 
   async create(userId: string, body: CreateSessionBody): Promise<CreatedSession> {
@@ -141,7 +155,7 @@ export class AgentSessionService {
       );
     }
 
-    const model = chosenModel(body.model);
+    const model = chosenModel(body.model, this.#models);
     const attachments = await this.#attachmentsFor(userId, body.attachmentIds);
     const at = this.#now();
     const document = this.#newDocument({ userId, body, repository, attachments, model, at });
@@ -176,6 +190,10 @@ export class AgentSessionService {
       sessions: documents.map(toSessionSummary),
       activeSessionId: active?.sessionId ?? null,
     });
+  }
+
+  modelCatalogue(): ModelCatalogueResponse {
+    return this.#models.response();
   }
 
   async detail(userId: string, sessionId: string): Promise<SessionDetailResponse> {
@@ -251,15 +269,42 @@ export class AgentSessionService {
     return toSessionSummary(await this.#owned(userId, sessionId));
   }
 
-  async say(userId: string, sessionId: string, text: string): Promise<SessionSummary> {
+  async say(
+    userId: string,
+    sessionId: string,
+    text: string,
+    idempotencyKey = newPrefixedId('idk'),
+  ): Promise<SaidMessageResult> {
     await this.#owned(userId, sessionId);
-    const written = await this.#records.addMessage(userId, sessionId, text, this.#now());
+    const written = await this.#records.writeUserMessage(userId, sessionId, {
+      messageId: newPrefixedId('msg'),
+      text,
+      sentAt: this.#now(),
+      idempotencyKey,
+    });
 
-    if (!written) {
+    if (written.outcome === 'inactive') {
       throw new ApiError('SESSION_NOT_ACTIVE', 'That session has already finished.');
     }
 
-    return toSessionSummary(await this.#owned(userId, sessionId));
+    if (written.outcome === 'conflict') {
+      throw new ApiError(
+        'CONFLICT',
+        'That message retry key was already used for different content.',
+      );
+    }
+
+    if (written.outcome === 'full') {
+      throw new ApiError(
+        'CONFLICT',
+        'That session has reached the maximum number of user messages.',
+      );
+    }
+
+    return {
+      ...PostMessageResponseSchema.parse({ message: written.message }),
+      created: written.outcome === 'created',
+    };
   }
 
   async decide(
@@ -413,6 +458,7 @@ export class AgentSessionService {
       clarificationAnswer: null,
       waitingSince: null,
       messages: [],
+      messageReceipts: [],
       attachments: input.attachments,
       idempotencyKey: input.body.idempotencyKey,
       checkpointId: null,

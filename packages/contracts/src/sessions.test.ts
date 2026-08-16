@@ -10,13 +10,49 @@ import {
 } from './session.fixtures.js';
 import {
   CreateSessionBodySchema,
+  PostMessageBodySchema,
+  PostMessageResponseSchema,
   SESSION_STATUSES,
   SessionDetailSchema,
   SessionListResponseSchema,
+  SessionMessageSchema,
   SessionStatusSchema,
   SessionSummarySchema,
   TERMINAL_SESSION_STATUSES,
 } from './sessions.js';
+
+describe('session messages', () => {
+  const message = SessionMessageSchema.parse(sessionDetailFixture().messages[0]);
+
+  it('requires a stable server identity on every public message', () => {
+    expect(SessionMessageSchema.parse(message)).toEqual(message);
+    const { messageId: _messageId, ...withoutIdentity } = message;
+    expect(SessionMessageSchema.safeParse(withoutIdentity).success).toBe(false);
+  });
+
+  it('requires a client idempotency key when a person submits one', () => {
+    expect(
+      PostMessageBodySchema.parse({
+        message: 'keep the old link working',
+        idempotencyKey: VALID_IDEMPOTENCY_KEY,
+      }),
+    ).toEqual({
+      message: 'keep the old link working',
+      idempotencyKey: VALID_IDEMPOTENCY_KEY,
+    });
+    expect(PostMessageBodySchema.safeParse({ message: 'keep the old link working' }).success).toBe(
+      false,
+    );
+  });
+
+  it('returns exactly the persisted message and no internal retry metadata', () => {
+    expect(PostMessageResponseSchema.parse({ message })).toEqual({ message });
+    expect(
+      PostMessageResponseSchema.safeParse({ message, idempotencyKey: VALID_IDEMPOTENCY_KEY })
+        .success,
+    ).toBe(false);
+  });
+});
 
 describe('session creation', () => {
   const valid = () => ({

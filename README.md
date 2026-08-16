@@ -388,6 +388,12 @@ Four properties, each with tests:
   account is re-read every time rather than trusted from the session. Every session that person holds
   is revoked at once.
 
+Coding-session reconnects have one supported flow. Read `GET /sessions/:sessionId` for the current
+strict session detail and its `lastEventSequence`, then subscribe to that session over the
+authenticated socket with the returned sequence. The server replays only later events in order and
+then continues live; there is deliberately no separate `session.snapshot` event to race with the
+HTTP read or duplicate it.
+
 ## GitHub access
 
 Nimbus never holds a long lived GitHub credential. It holds a private key that proves who it is, and

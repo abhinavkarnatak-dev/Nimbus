@@ -25,8 +25,10 @@ export interface ReportedCompletion {
 }
 
 export interface SaidMessage {
+  messageId: string;
   step: number;
   text: string;
+  sentAt: string;
 }
 
 export interface ActionReporter {

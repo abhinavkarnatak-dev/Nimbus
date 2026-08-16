@@ -13,6 +13,7 @@ import {
 
 import type { Logger } from '../../logging/logger.js';
 import { redactSecrets } from '../../logging/redact.js';
+import { newPrefixedId } from '../../lib/id.js';
 import type { PolicyGate } from '../policy/policy.js';
 import type { ToolOutput } from '../registry/definition.js';
 import type { ToolRegistry } from '../registry/registry.js';
@@ -252,7 +253,12 @@ export class ActionExecutor {
     }
 
     await this.#safely(async () => {
-      await this.#reporter?.said({ step: request.step, text: message });
+      await this.#reporter?.said({
+        messageId: newPrefixedId('msg'),
+        step: request.step,
+        text: message,
+        sentAt: new Date().toISOString(),
+      });
     });
   }
 

@@ -11,6 +11,7 @@ import {
   SELECTABLE_TEXT_MODELS,
   assertSelectableModel,
   isSelectable,
+  modelCatalogueFor,
   modelForRole,
   planFor,
   selectableModels,
@@ -36,6 +37,7 @@ describe('SELECTABLE_TEXT_MODELS', () => {
     for (const model of selectableModels()) {
       expect(model.id).not.toBe('');
       expect(typeof model.vision).toBe('boolean');
+      expect(typeof model.reasoning).toBe('boolean');
     }
   });
 
@@ -53,6 +55,33 @@ describe('SELECTABLE_TEXT_MODELS', () => {
       expect(() => assertSelectableModel(gone)).toThrow(
         expect.objectContaining({ code: 'LLM_MODEL_UNKNOWN' }) as Error,
       );
+    }
+  });
+});
+
+describe('the catalogue exposed by this server', () => {
+  it('uses every fake-backed model when development has no provider keys', () => {
+    expect(
+      modelCatalogueFor({})
+        .response()
+        .models.map((model) => model.id),
+    ).toEqual(SELECTABLE_TEXT_MODELS);
+  });
+
+  it('offers only models whose real provider is configured when one key is present', () => {
+    const catalogue = modelCatalogueFor({ geminiApiKey: 'configured' });
+
+    expect(new Set(catalogue.response().models.map((model) => model.provider))).toEqual(
+      new Set(['gemini']),
+    );
+    expect(() => catalogue.assertAvailable('openai/gpt-oss-120b')).toThrow(
+      expect.objectContaining({ code: 'LLM_MODEL_UNKNOWN' }) as Error,
+    );
+  });
+
+  it('contains only registry-derived public fields', () => {
+    for (const model of modelCatalogueFor({}).response().models) {
+      expect(Object.keys(model).sort()).toEqual(['id', 'provider', 'reasoning', 'vision']);
     }
   });
 });

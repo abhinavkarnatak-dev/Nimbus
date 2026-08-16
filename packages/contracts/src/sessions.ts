@@ -8,6 +8,7 @@ import {
   CommitShaSchema,
   IdempotencyKeySchema,
   IsoTimestampSchema,
+  MessageIdSchema,
   SessionIdSchema,
 } from './ids.js';
 import { LIMITS } from './limits.js';
@@ -68,6 +69,7 @@ export const MESSAGE_ROLES = ['user', 'agent'] as const;
 export const MessageRoleSchema = z.enum(MESSAGE_ROLES);
 
 export const SessionMessageSchema = z.strictObject({
+  messageId: MessageIdSchema,
   role: MessageRoleSchema,
   text: z.string().min(1).max(LIMITS.messageMaxChars),
   sentAt: IsoTimestampSchema,
@@ -131,6 +133,15 @@ export const CreateSessionResponseSchema = z.strictObject({
 
 export const PostMessageBodySchema = z.strictObject({
   message: UserMessageSchema,
+  idempotencyKey: IdempotencyKeySchema,
+});
+
+export const AnswerSessionBodySchema = z.strictObject({
+  message: UserMessageSchema,
+});
+
+export const PostMessageResponseSchema = z.strictObject({
+  message: SessionMessageSchema,
 });
 
 export const CancelSessionResponseSchema = z.strictObject({
@@ -152,4 +163,6 @@ export type SessionListResponse = z.infer<typeof SessionListResponseSchema>;
 export type SessionDetailResponse = z.infer<typeof SessionDetailResponseSchema>;
 export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>;
 export type PostMessageBody = z.infer<typeof PostMessageBodySchema>;
+export type AnswerSessionBody = z.infer<typeof AnswerSessionBodySchema>;
+export type PostMessageResponse = z.infer<typeof PostMessageResponseSchema>;
 export type CancelSessionResponse = z.infer<typeof CancelSessionResponseSchema>;

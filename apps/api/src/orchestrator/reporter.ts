@@ -1,4 +1,4 @@
-import type { ServerEvent, ToolInvocation } from '@nimbus/contracts';
+import { SessionMessageSchema, type ServerEvent, type ToolInvocation } from '@nimbus/contracts';
 
 import type {
   ActionReporter,
@@ -50,7 +50,15 @@ export class LiveActionReporter implements ActionReporter {
   }
 
   async said(message: SaidMessage): Promise<void> {
-    await this.#say({ type: 'agent.message', message: message.text });
+    await this.#say({
+      type: 'agent.message',
+      message: SessionMessageSchema.parse({
+        messageId: message.messageId,
+        role: 'agent',
+        text: message.text,
+        sentAt: message.sentAt,
+      }),
+    });
   }
 
   async #say(event: ServerEvent): Promise<void> {
@@ -99,7 +107,8 @@ export class DurableProgressReporter implements ActionReporter {
       await this.#options.records.addAgentMessage(
         this.#options.sessionId,
         message.text,
-        this.#now(),
+        new Date(message.sentAt),
+        message.messageId,
       );
     } catch (error) {
       this.#options.logger.warn(

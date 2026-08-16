@@ -144,6 +144,14 @@ never reached.
 - A local commit inside a sandbox is not durable. Only material exported to the backend counts.
 - Session events carry a monotonically increasing sequence number so a reconnecting client can ask
   for everything after `lastEventSequence`.
+- There is no `session.snapshot` socket event. A client first reads `GET /sessions/:sessionId`, which
+  returns the authoritative session detail and `lastEventSequence`, then subscribes with that exact
+  sequence. Replay and live delivery are ordered by sequence and suppress duplicates at or below the
+  client's cursor.
+- `session.checkpointId` and `session.toolEvents` are reserved persistence fields in V1. They remain
+  in the strict MongoDB shape so existing documents can still be updated safely, but neither is an
+  API promise or a second recovery/event subsystem. Recovery uses durable session progress and the
+  verified base commit; tool history uses the sequenced event store.
 
 ## 7. Retrieval
 

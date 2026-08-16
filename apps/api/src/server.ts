@@ -32,7 +32,7 @@ import { createRoutedTextProvider, createVisionProvider } from './llm/factory.js
 import { SessionAttachments } from './routing/attached.js';
 import { ImageDescriber } from './routing/describe.js';
 import { providersForPlan } from './routing/requirements.js';
-import { planFor, SELECTABLE_TEXT_MODELS } from './routing/selection.js';
+import { modelCatalogueFor, planFor } from './routing/selection.js';
 import { RedisCancelAnnouncer, RedisCancelWatcher } from './orchestrator/cancellation.js';
 import { Orchestrator } from './orchestrator/orchestrator.js';
 import { LiveSessionWorkshop } from './orchestrator/live-workshop.js';
@@ -166,6 +166,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   const { config, logger } = options;
 
   const plan = planFor();
+  const modelCatalogue = modelCatalogueFor(config.llm);
 
   logger.info(
     {
@@ -173,7 +174,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
       light: plan.light,
       reasoning: plan.reasoning,
       vision: plan.vision,
-      selectable: SELECTABLE_TEXT_MODELS,
+      selectable: modelCatalogue.response().models.map((model) => model.id),
       plannedProviders: providersForPlan(config.llm),
     },
     'Model routing plan ready',
@@ -326,6 +327,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
           cancellations: cancelAnnouncer,
           events,
           notifyCancelled: tellCancelled,
+          models: modelCatalogue,
         }),
       }),
     );

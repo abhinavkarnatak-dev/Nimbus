@@ -1,4 +1,4 @@
-import { NextActionSchema } from '@nimbus/contracts';
+import { MessageIdSchema, NextActionSchema } from '@nimbus/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { capturingLogger } from '../../llm/llm.fixtures.js';
@@ -143,6 +143,7 @@ describe('what the model is told', () => {
 
 describe('what the person has said', () => {
   const TOLD = 'please keep the old link working too';
+  const MESSAGE_ID = MessageIdSchema.parse('msg_V1StGXR8Z5jdHi6BmyTab');
 
   it('is put in front of the model on the step it is asked about', async () => {
     const harness = await nodeHarness({ answers: { answers: [answer(READ_ACTION)] } });
@@ -152,7 +153,14 @@ describe('what the person has said', () => {
       context: 'the task',
       registry: harness.registry,
       router: harness.router,
-      conversation: [{ role: 'user', text: TOLD, sentAt: '2026-08-17T10:00:00.000Z' }],
+      conversation: [
+        {
+          messageId: MESSAGE_ID,
+          role: 'user',
+          text: TOLD,
+          sentAt: '2026-08-17T10:00:00.000Z',
+        },
+      ],
     });
 
     const sent = harness.text.calls[0]?.messages.map((one) => one.content).join('\n') ?? '';
@@ -177,7 +185,14 @@ describe('what the person has said', () => {
 
   it('is not wrapped in the markers that repository content gets', () => {
     const shown =
-      conversationShown([{ role: 'user', text: TOLD, sentAt: '2026-08-17T10:00:00.000Z' }]) ?? '';
+      conversationShown([
+        {
+          messageId: MESSAGE_ID,
+          role: 'user',
+          text: TOLD,
+          sentAt: '2026-08-17T10:00:00.000Z',
+        },
+      ]) ?? '';
 
     expect(shown).not.toContain('BEGIN');
     expect(shown).toContain('instructions about this task');

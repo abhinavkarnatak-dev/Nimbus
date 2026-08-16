@@ -116,6 +116,9 @@ export class SessionRunner {
     try {
       prepared = await this.#workshop.prepare(session, { signal });
     } catch (error) {
+      if (error instanceof WorkshopError && error.reason === 'stopped') {
+        return { status: 'cancelled', currentActivity: null };
+      }
       const failed = this.#couldNotStart(session, error);
       await this.#sayFailed(session, failed);
       return failed;

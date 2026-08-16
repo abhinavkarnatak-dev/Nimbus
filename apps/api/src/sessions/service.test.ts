@@ -8,7 +8,7 @@ import { CollectingEventPublisher } from '../events/publisher.js';
 import { ApiError } from '../http/api-error.js';
 import { CollectingCancelAnnouncer } from '../orchestrator/cancellation.js';
 import { KNOWN_MODELS } from '../llm/models.js';
-import { SELECTABLE_TEXT_MODELS } from '../routing/selection.js';
+import { SELECTABLE_TEXT_MODELS, modelCatalogueFor } from '../routing/selection.js';
 import { DEFAULT_MAX_STEPS } from './service.js';
 import {
   CLEAR_TASK,
@@ -659,6 +659,31 @@ describe('choosing a model', () => {
       expect(harness.records.documents[0]?.model).toEqual({ textModel: model });
     });
   }
+
+  it('accepts every model returned by the same catalogue', async () => {
+    const models = modelCatalogueFor({ geminiApiKey: 'configured' });
+
+    for (const model of models.response().models) {
+      const harness = sessionHarness({ models });
+      await harness.service.create(OWNER_ID, newBody({ model: { textModel: model.id } }));
+      expect(harness.records.documents[0]?.model?.textModel).toBe(model.id);
+    }
+  });
+
+  it('rejects a registry model the configured catalogue did not return', async () => {
+    const models = modelCatalogueFor({ geminiApiKey: 'configured' });
+    const harness = sessionHarness({ models });
+
+    expect(models.response().models.some((model) => model.id === 'openai/gpt-oss-120b')).toBe(
+      false,
+    );
+    expect(
+      await codeOf(
+        harness.service.create(OWNER_ID, newBody({ model: { textModel: 'openai/gpt-oss-120b' } })),
+      ),
+    ).toBe('VALIDATION_FAILED');
+    expect(harness.records.documents).toHaveLength(0);
+  });
 
   it('refuses a model nobody has heard of, before a session exists', async () => {
     const harness = sessionHarness();

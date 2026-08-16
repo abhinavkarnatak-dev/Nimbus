@@ -90,6 +90,7 @@ export const sessionSummaryFixture = () => ({
 });
 
 export const sessionMessageFixture = () => ({
+  messageId: 'msg_V1StGXR8Z5jdHi6BmyTab',
   role: 'user' as const,
   text: 'please keep the old link working too',
   sentAt: VALID_TIMESTAMP,

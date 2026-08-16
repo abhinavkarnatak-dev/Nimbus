@@ -1,4 +1,9 @@
-import type { ServerEvent, SessionEventEnvelope } from '@nimbus/contracts';
+import {
+  CONTRACTS_WIRE_VERSION,
+  MessageIdSchema,
+  type ServerEvent,
+  type SessionEventEnvelope,
+} from '@nimbus/contracts';
 import type { IncomingMessage } from 'node:http';
 import { describe, expect, it } from 'vitest';
 
@@ -12,8 +17,17 @@ import { Subscription } from './subscription.js';
 const ORIGIN = 'https://nimbus.local';
 const SESSION_ID = 'ses_wwwwwwwwwwwwwwwwwwwww';
 const USER_ID = 'usr_ownerownerownerowne';
+const AGENT_MESSAGE = {
+  type: 'agent.message',
+  message: {
+    messageId: MessageIdSchema.parse('msg_V1StGXR8Z5jdHi6BmyTab'),
+    role: 'agent',
+    text: 'hello',
+    sentAt: '2026-08-17T10:00:00.000Z',
+  },
+} as const satisfies ServerEvent;
 
-function message(event: ServerEvent = { type: 'agent.message', message: 'hello' }): ServerEvent {
+function message(event: ServerEvent = AGENT_MESSAGE): ServerEvent {
   return event;
 }
 
@@ -347,7 +361,7 @@ describe('reading an envelope off the channel', () => {
 
   it('refuses one carrying an event nobody defined', () => {
     const bogus = {
-      v: 1,
+      v: CONTRACTS_WIRE_VERSION,
       sequence: 1,
       sessionId: SESSION_ID,
       emittedAt: '2026-08-15T10:00:00.000Z',

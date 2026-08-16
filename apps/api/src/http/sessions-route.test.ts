@@ -199,6 +199,26 @@ describe('GET /sessions', () => {
   });
 });
 
+describe('GET /models', () => {
+  it('returns the strict safe catalogue used by session creation', async () => {
+    const response = await request(harness()).get('/models').set('Cookie', COOKIE);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      models: expect.arrayContaining([
+        expect.objectContaining({ id: 'gemini-3.6-flash', provider: 'gemini' }),
+      ]) as unknown[],
+    });
+    expect(JSON.stringify(response.body)).not.toMatch(/apiKey|secret|credential/i);
+  });
+
+  it('requires a signed in person', async () => {
+    const response = await request(harness({ signedIn: false })).get('/models');
+
+    expect(response.status).toBe(401);
+  });
+});
+
 describe('GET /sessions/:sessionId', () => {
   it('gives the detail and the sequence a stream replays from', async () => {
     const app = harness();
@@ -297,10 +317,70 @@ describe('POST /sessions/:sessionId/messages', () => {
       .post(`/sessions/${started.sessionId}/messages`)
       .set('Cookie', COOKIE)
       .set(CSRF_HEADER, CSRF_TOKEN)
-      .send({ message: 'try the other file' });
+      .send({ message: 'try the other file', idempotencyKey: testId('idk', 'm') });
 
-    expect(response.status).toBe(202);
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      message: { messageId: expect.stringMatching(/^msg_/) as string, role: 'user' },
+    });
     expect(records.documents[0]?.messages[0]?.text).toBe('try the other file');
+  });
+
+  it('turns concurrent retries into one durable message with one stable identity', async () => {
+    const app = harness();
+    const started = await start(app);
+    const send = async (): Promise<{ status: number; messageId: string }> => {
+      const response = await request(app)
+        .post(`/sessions/${started.sessionId}/messages`)
+        .set('Cookie', COOKIE)
+        .set(CSRF_HEADER, CSRF_TOKEN)
+        .send({ message: 'try the other file', idempotencyKey: testId('idk', 'r') });
+      return {
+        status: response.status,
+        messageId: (response.body as { message?: { messageId?: string } }).message?.messageId ?? '',
+      };
+    };
+
+    const responses = await Promise.all(Array.from({ length: 8 }, send));
+
+    expect(responses.filter((one) => one.status === 201)).toHaveLength(1);
+    expect(responses.filter((one) => one.status === 200)).toHaveLength(7);
+    expect(new Set(responses.map((one) => one.messageId)).size).toBe(1);
+    expect(records.documents[0]?.messages).toHaveLength(1);
+  });
+
+  it('returns conflict when a key is reused for different text', async () => {
+    const app = harness();
+    const started = await start(app);
+    const key = testId('idk', 'c');
+
+    await request(app)
+      .post(`/sessions/${started.sessionId}/messages`)
+      .set('Cookie', COOKIE)
+      .set(CSRF_HEADER, CSRF_TOKEN)
+      .send({ message: 'first text', idempotencyKey: key });
+    const conflict = await request(app)
+      .post(`/sessions/${started.sessionId}/messages`)
+      .set('Cookie', COOKIE)
+      .set(CSRF_HEADER, CSRF_TOKEN)
+      .send({ message: 'different text', idempotencyKey: key });
+
+    expect(conflict.status).toBe(409);
+    expect(conflict.body).toMatchObject({ error: { code: 'CONFLICT' } });
+    expect(records.documents[0]?.messages).toHaveLength(1);
+  });
+
+  it('requires the client retry key', async () => {
+    const app = harness();
+    const started = await start(app);
+
+    const response = await request(app)
+      .post(`/sessions/${started.sessionId}/messages`)
+      .set('Cookie', COOKIE)
+      .set(CSRF_HEADER, CSRF_TOKEN)
+      .send({ message: 'hello' });
+
+    expect(response.status).toBe(400);
   });
 
   it('tells another person the session does not exist', async () => {
@@ -310,7 +390,7 @@ describe('POST /sessions/:sessionId/messages', () => {
       .post(`/sessions/${started.sessionId}/messages`)
       .set('Cookie', COOKIE)
       .set(CSRF_HEADER, CSRF_TOKEN)
-      .send({ message: 'hello' });
+      .send({ message: 'hello', idempotencyKey: testId('idk', 'x') });
 
     expect(response.status).toBe(404);
   });

@@ -293,7 +293,15 @@ describe('what a recovered run is told about the one before it', () => {
             removedLines: 1,
           },
         ],
-        checks: [{ name: 'unit tests', kind: 'test', passed: true, durationMs: 10, summary: 'ok' }],
+        checks: [
+          {
+            name: 'unit tests',
+            kind: 'test',
+            status: 'passed',
+            durationMs: 10,
+            summary: 'ok',
+          },
+        ],
       }),
     );
 

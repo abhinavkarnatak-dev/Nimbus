@@ -1,4 +1,4 @@
-import type { SessionMessage } from '@nimbus/contracts';
+import { MessageIdSchema, type SessionMessage } from '@nimbus/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { conversationShown } from '../agent/nodes/reason.js';
@@ -90,7 +90,16 @@ describe('a note the agent sends', () => {
     const sent = held.events.published.filter((one) => one.event.type === 'agent.message');
 
     expect(sent).toHaveLength(1);
-    expect(sent[0]?.event).toStrictEqual({ type: 'agent.message', message: NOTE });
+    expect(sent[0]?.event).toMatchObject({
+      type: 'agent.message',
+      message: { role: 'agent', text: NOTE },
+    });
+    if (sent[0]?.event.type === 'agent.message') {
+      expect(sent[0].event.message.messageId).toMatch(/^msg_/);
+      expect(sent[0].event.message.messageId).toBe(
+        held.records.documents[0]?.messages[0]?.messageId,
+      );
+    }
   });
 
   it('is still there after a reload, as a turn from the agent', async () => {
@@ -209,6 +218,7 @@ describe('an older message written before roles existed', () => {
 
     expect(toSessionDetail(document).messages).toStrictEqual([
       {
+        messageId: expect.stringMatching(/^msg_/) as string,
         role: 'user',
         text: 'keep the old link working',
         sentAt: '2026-08-01T10:00:00.000Z',
@@ -220,6 +230,7 @@ describe('an older message written before roles existed', () => {
 describe('how much of a conversation is kept and shown', () => {
   function turns(count: number): SessionMessage[] {
     return Array.from({ length: count }, (_one, at) => ({
+      messageId: MessageIdSchema.parse(`msg_${String(at).padStart(21, '0')}`),
       role: at % 2 === 0 ? ('user' as const) : ('agent' as const),
       text: `turn ${String(at)}`,
       sentAt: new Date(2026, 7, 17, 10, 0, at).toISOString(),
@@ -240,6 +251,32 @@ describe('how much of a conversation is kept and shown', () => {
     expect(kept).toHaveLength(MAX_SESSION_MESSAGES);
     expect(kept.at(-1)?.text).toBe(`turn ${String(MAX_SESSION_MESSAGES + 4)}`);
     expect(kept[0]?.text).toBe('turn 5');
+  });
+
+  it('still recognizes a retry after agent turns have pushed the original message out', async () => {
+    const records = new InMemorySessionRecords();
+    const session = sessionDocument();
+    await records.insert(session);
+    const input = {
+      messageId: 'msg_V1StGXR8Z5jdHi6BmyTab',
+      text: 'keep the old link working',
+      sentAt: new Date(),
+      idempotencyKey: 'idk_V1StGXR8Z5jdHi6BmyTab',
+    };
+    const first = await records.writeUserMessage(session.userId, session.sessionId, input);
+
+    for (let at = 0; at < MAX_SESSION_MESSAGES; at += 1) {
+      await records.addAgentMessage(session.sessionId, `turn ${String(at)}`, new Date());
+    }
+
+    expect(
+      (await records.conversationOf(session.sessionId)).some((one) => one.role === 'user'),
+    ).toBe(false);
+    const retry = await records.writeUserMessage(session.userId, session.sessionId, input);
+
+    expect(retry.outcome).toBe('same_request');
+    expect(retry.message?.messageId).toBe(first.message?.messageId);
+    expect(await records.conversationOf(session.sessionId)).toHaveLength(MAX_SESSION_MESSAGES);
   });
 
   it('shows the model only the most recent few, however many are kept', () => {

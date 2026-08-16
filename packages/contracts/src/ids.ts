@@ -14,6 +14,7 @@ export const InstallationRecordIdSchema = publicId(
 export const AttachmentIdSchema = publicId('att', 'attachment id').brand<'AttachmentId'>();
 export const ApprovalIdSchema = publicId('apr', 'approval id').brand<'ApprovalId'>();
 export const RequestIdSchema = publicId('req', 'request id').brand<'RequestId'>();
+export const MessageIdSchema = publicId('msg', 'message id').brand<'MessageId'>();
 export const IdempotencyKeySchema = publicId('idk', 'idempotency key').brand<'IdempotencyKey'>();
 
 export const GitHubRepositoryIdSchema = z.int().positive().brand<'GitHubRepositoryId'>();
@@ -37,6 +38,7 @@ export type InstallationRecordId = z.infer<typeof InstallationRecordIdSchema>;
 export type AttachmentId = z.infer<typeof AttachmentIdSchema>;
 export type ApprovalId = z.infer<typeof ApprovalIdSchema>;
 export type RequestId = z.infer<typeof RequestIdSchema>;
+export type MessageId = z.infer<typeof MessageIdSchema>;
 export type IdempotencyKey = z.infer<typeof IdempotencyKeySchema>;
 export type GitHubRepositoryId = z.infer<typeof GitHubRepositoryIdSchema>;
 export type GitHubInstallationId = z.infer<typeof GitHubInstallationIdSchema>;

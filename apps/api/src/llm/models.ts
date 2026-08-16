@@ -9,6 +9,7 @@ export interface ModelFacts {
   structuredOutput: 'json_schema' | 'json_object';
   vision: boolean;
   thinks: boolean;
+  selectable: boolean;
 }
 
 export const DEFAULT_TEXT_MODEL = 'gemini-3.6-flash';
@@ -29,6 +30,7 @@ export const KNOWN_MODELS: readonly ModelFacts[] = [
     structuredOutput: 'json_schema',
     vision: true,
     thinks: true,
+    selectable: true,
   },
   {
     id: 'gemini-3.5-flash-lite',
@@ -39,6 +41,7 @@ export const KNOWN_MODELS: readonly ModelFacts[] = [
     structuredOutput: 'json_schema',
     vision: true,
     thinks: false,
+    selectable: true,
   },
   {
     id: 'openai/gpt-oss-120b',
@@ -49,6 +52,7 @@ export const KNOWN_MODELS: readonly ModelFacts[] = [
     structuredOutput: 'json_schema',
     vision: false,
     thinks: true,
+    selectable: true,
   },
 ];
 
