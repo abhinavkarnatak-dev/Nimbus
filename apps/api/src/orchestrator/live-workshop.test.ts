@@ -1,3 +1,4 @@
+import type { ModelPlan } from '@nimbus/contracts';
 import type { Db } from 'mongodb';
 import { describe, expect, it } from 'vitest';
 
@@ -10,9 +11,11 @@ import { FakeGitHubTokenProvider } from '../github/fake-token-provider.js';
 import { FakeTextProvider } from '../llm/fake-text.js';
 import { FakeVisionProvider } from '../llm/fake-vision.js';
 import { capturingLogger } from '../llm/llm.fixtures.js';
+import { DEFAULT_TEXT_MODEL, findModel } from '../llm/models.js';
 import { SessionAttachments } from '../routing/attached.js';
 import { ImageDescriber } from '../routing/describe.js';
 import { FakeImageBytes, attachment, textAttachment } from '../routing/routing.fixtures.js';
+import { SELECTABLE_TEXT_MODELS } from '../routing/selection.js';
 import { FakeSandboxProvider } from '../sandbox/fake-provider.js';
 import { LiveSessionWorkshop } from './live-workshop.js';
 import { sessionDocument } from './orchestrator.fixtures.js';
@@ -137,5 +140,74 @@ describe('a run prepared for a session that has nothing attached', () => {
     expect(prepared.installationId).toBe(4_242);
     expect(prepared.input.images).toEqual([]);
     await prepared.finish();
+  });
+});
+
+describe('the model a run is prepared with', () => {
+  const planOf = async (model: SessionDocument['model']): Promise<ModelPlan> => {
+    const held = await workshopFor([]);
+    const prepared = await held.workshop.prepare(
+      { ...held.session, model },
+      { signal: new AbortController().signal },
+    );
+
+    const plan = prepared.input.state.models;
+    await prepared.finish();
+    return plan;
+  };
+
+  it('uses the default when nobody chose one', async () => {
+    const plan = await planOf(null);
+
+    expect(plan.primary).toBe(DEFAULT_TEXT_MODEL);
+    expect(plan.chosenByUser).toBe(false);
+  });
+
+  it('uses the default for a session written before the field existed', async () => {
+    const plan = await planOf(undefined as unknown as SessionDocument['model']);
+
+    expect(plan.primary).toBe(DEFAULT_TEXT_MODEL);
+  });
+
+  for (const model of SELECTABLE_TEXT_MODELS) {
+    it(`puts ${model} in the primary role when it was chosen, and reaches its own provider`, async () => {
+      const plan = await planOf({ textModel: model });
+
+      expect(plan.primary).toBe(model);
+      expect(plan.chosenByUser).toBe(true);
+      expect(findModel(plan.primary)?.provider).toBe(findModel(model)?.provider);
+    });
+  }
+
+  it('does not leave the primary role on Gemini when Groq was chosen', async () => {
+    const plan = await planOf({ textModel: 'openai/gpt-oss-120b' });
+
+    expect(findModel(plan.primary)?.provider).toBe('groq');
+  });
+
+  it('does not leave the primary role on Groq when Gemini was chosen', async () => {
+    const plan = await planOf({ textModel: 'gemini-3.5-flash-lite' });
+
+    expect(findModel(plan.primary)?.provider).toBe('gemini');
+  });
+
+  it('leaves the server owned roles alone whatever was chosen', async () => {
+    const chosen = await planOf({ textModel: 'openai/gpt-oss-120b' });
+    const untouched = await planOf(null);
+
+    expect(chosen.light).toBe(untouched.light);
+    expect(chosen.reasoning).toBe(untouched.reasoning);
+    expect(chosen.vision).toBe(untouched.vision);
+  });
+
+  it('fails the run rather than swapping in another model when the choice is gone', async () => {
+    const held = await workshopFor([]);
+
+    await expect(
+      held.workshop.prepare(
+        { ...held.session, model: { textModel: 'a-model-that-was-removed' } },
+        { signal: new AbortController().signal },
+      ),
+    ).rejects.toThrow(expect.objectContaining({ reason: 'models' }) as Error);
   });
 });

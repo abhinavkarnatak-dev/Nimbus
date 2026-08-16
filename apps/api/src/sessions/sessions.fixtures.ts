@@ -44,6 +44,7 @@ export function newBody(
     repositoryId: number;
     task: string;
     attachmentIds: string[];
+    model: { textModel: string };
     idempotencyKey: string;
   }> = {},
 ): CreateSessionBody {

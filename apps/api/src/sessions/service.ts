@@ -7,6 +7,7 @@ import {
   type ApprovalRecord,
   type CreateSessionBody,
   type ErrorCode,
+  type ModelSelection,
   type RepositorySummary,
   type SessionDetailResponse,
   type SessionListResponse,
@@ -25,7 +26,9 @@ import {
 } from '../db/models/session.js';
 import { ApiError } from '../http/api-error.js';
 import { newPrefixedId } from '../lib/id.js';
+import { LlmError } from '../llm/errors.js';
 import type { Logger } from '../logging/logger.js';
+import { assertSelectableModel } from '../routing/selection.js';
 import type { SessionRecords } from './repository.js';
 
 export const DEFAULT_MAX_STEPS = 40;
@@ -54,6 +57,22 @@ export const APPROVAL_ERROR_TO_API: Readonly<Record<string, ErrorCode>> = {
   APPROVAL_ALREADY_USED: 'APPROVAL_EXPIRED',
   APPROVAL_LIMIT_REACHED: 'CONFLICT',
 };
+
+export function chosenModel(selection: ModelSelection | undefined): ModelSelection | null {
+  if (selection === undefined || selection.textModel.trim() === '') {
+    return null;
+  }
+
+  try {
+    return { textModel: assertSelectableModel(selection.textModel) };
+  } catch (error) {
+    throw new ApiError(
+      'VALIDATION_FAILED',
+      error instanceof LlmError ? error.message : 'That model cannot be chosen for a session.',
+      { details: { field: 'model.textModel' } },
+    );
+  }
+}
 
 export function asApiError(error: unknown): ApiError {
   if (!(error instanceof ApprovalError)) {
@@ -107,9 +126,10 @@ export class AgentSessionService {
       );
     }
 
+    const model = chosenModel(body.model);
     const attachments = await this.#attachmentsFor(userId, body.attachmentIds);
     const at = this.#now();
-    const document = this.#newDocument({ userId, body, repository, attachments, at });
+    const document = this.#newDocument({ userId, body, repository, attachments, model, at });
 
     const outcome = await this.#records.insert(document);
 
@@ -324,6 +344,7 @@ export class AgentSessionService {
     body: CreateSessionBody;
     repository: RepositorySummary;
     attachments: SessionDocument['attachments'];
+    model: ModelSelection | null;
     at: Date;
   }): SessionDocument {
     return {
@@ -342,6 +363,7 @@ export class AgentSessionService {
       branch: null,
       baseCommitSha: null,
       task: input.body.task,
+      model: input.model,
       clarificationQuestion: null,
       clarificationAnswer: null,
       waitingSince: null,

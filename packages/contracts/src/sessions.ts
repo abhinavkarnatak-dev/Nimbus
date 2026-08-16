@@ -94,6 +94,7 @@ export const SessionProgressSchema = z.strictObject({
 });
 
 export const SessionDetailSchema = SessionSummarySchema.extend({
+  model: ModelSelectionSchema.nullable(),
   baseCommitSha: CommitShaSchema.nullable(),
   attachments: z.array(AttachmentMetadataSchema).max(LIMITS.maxAttachmentsPerSession),
   progress: SessionProgressSchema,

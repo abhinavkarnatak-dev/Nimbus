@@ -6,6 +6,7 @@ import { ensureDatabaseSchema } from '../../src/db/bootstrap.js';
 import { sessionsCollection } from '../../src/db/models/session.js';
 import { ApiError } from '../../src/http/api-error.js';
 import { capturingLogger } from '../../src/llm/llm.fixtures.js';
+import { SELECTABLE_TEXT_MODELS } from '../../src/routing/selection.js';
 import { MongoSessionRecords } from '../../src/sessions/repository.js';
 import { AgentSessionService } from '../../src/sessions/service.js';
 import {
@@ -159,6 +160,70 @@ describe('a real session, read back', () => {
 
     expect(await codeOf(service.detail(OTHER_ID, created.session.sessionId))).toBe('NOT_FOUND');
     expect(await codeOf(service.cancel(OTHER_ID, created.session.sessionId))).toBe('NOT_FOUND');
+  });
+});
+
+describe('a chosen model, against the real collection', () => {
+  for (const model of SELECTABLE_TEXT_MODELS) {
+    it(`survives the round trip for ${model}`, async () => {
+      const created = await service.create(OWNER_ID, {
+        ...keyed('a'),
+        model: { textModel: model },
+      });
+
+      const stored = await sessionsCollection(testDatabase.db).findOne({
+        sessionId: created.session.sessionId,
+      });
+
+      expect(stored?.model).toEqual({ textModel: model });
+    });
+  }
+
+  it('is read back by a worker that never saw the request', async () => {
+    const created = await service.create(OWNER_ID, {
+      ...keyed('a'),
+      model: { textModel: 'openai/gpt-oss-120b' },
+    });
+
+    const worker = new MongoSessionRecords(testDatabase.db);
+    const claimable = await worker.findClaimable(10);
+    const found = claimable.find((one) => one.sessionId === created.session.sessionId);
+
+    expect(found?.model).toEqual({ textModel: 'openai/gpt-oss-120b' });
+  });
+
+  it('writes null rather than leaving the field out when nobody chose', async () => {
+    const created = await service.create(OWNER_ID, keyed('a'));
+    const stored = await sessionsCollection(testDatabase.db).findOne({
+      sessionId: created.session.sessionId,
+    });
+
+    expect(stored?.model).toBeNull();
+  });
+
+  it('lets a session written before the field existed keep working', async () => {
+    const created = await service.create(OWNER_ID, keyed('a'));
+
+    await sessionsCollection(testDatabase.db).updateOne(
+      { sessionId: created.session.sessionId },
+      { $unset: { model: '' } },
+    );
+
+    const older = await sessionsCollection(testDatabase.db).findOne({
+      sessionId: created.session.sessionId,
+    });
+
+    expect(older?.model).toBeUndefined();
+
+    const moved = await new MongoSessionRecords(testDatabase.db).finish(
+      OWNER_ID,
+      created.session.sessionId,
+      'cancelled',
+      new Date(),
+    );
+
+    expect(moved).not.toBeNull();
+    expect((await service.detail(OWNER_ID, created.session.sessionId)).session.model).toBeNull();
   });
 });
 

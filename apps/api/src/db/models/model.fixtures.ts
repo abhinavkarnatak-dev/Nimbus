@@ -75,6 +75,7 @@ export function makeSession(
     waitingSince: null,
     messages: [],
     task: 'Add a short setup section to the readme file',
+    model: null,
     attachments: [],
     idempotencyKey: newPrefixedId('idk'),
     checkpointId: null,

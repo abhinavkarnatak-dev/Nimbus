@@ -91,6 +91,7 @@ export const sessionSummaryFixture = () => ({
 
 export const sessionDetailFixture = () => ({
   ...sessionSummaryFixture(),
+  model: { textModel: 'gemini-3.6-flash' },
   baseCommitSha: VALID_COMMIT_SHA,
   attachments: [attachmentFixture()],
   progress: { step: 4, maxSteps: 30, currentActivity: 'Reading src/utils/format-date.ts' },

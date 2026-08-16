@@ -100,6 +100,21 @@ describe('session summary and detail', () => {
     expect(SessionDetailSchema.parse(sessionDetailFixture())).toEqual(sessionDetailFixture());
   });
 
+  it('carries which model the session was started with, or an explicit null', () => {
+    expect(SessionDetailSchema.parse(sessionDetailFixture()).model).toEqual({
+      textModel: 'gemini-3.6-flash',
+    });
+    expect(SessionDetailSchema.safeParse({ ...sessionDetailFixture(), model: null }).success).toBe(
+      true,
+    );
+  });
+
+  it('will not accept a model field that was left out', () => {
+    const { model: _model, ...withoutModel } = sessionDetailFixture();
+
+    expect(SessionDetailSchema.safeParse(withoutModel).success).toBe(false);
+  });
+
   it('keeps rejecting unknown keys after extend, which is where strictness usually leaks', () => {
     expect(
       SessionDetailSchema.safeParse({ ...sessionDetailFixture(), sandboxId: 'sbx_live_1' }).success,

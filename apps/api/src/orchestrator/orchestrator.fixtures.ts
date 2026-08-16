@@ -130,6 +130,7 @@ export function sessionDocument(overrides: Partial<SessionDocument> = {}): Sessi
     branch: null,
     baseCommitSha: 'a'.repeat(40),
     task: 'the login redirect always sends people to the dashboard',
+    model: null,
     clarificationQuestion: null,
     clarificationAnswer: null,
     waitingSince: null,

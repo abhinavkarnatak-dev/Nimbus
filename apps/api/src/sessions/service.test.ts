@@ -4,6 +4,8 @@ import { ApprovalDecisionBodySchema, type ApprovalDecisionBody } from '@nimbus/c
 
 import { InMemoryApprovals } from '../agent/policy/approvals.js';
 import { ApiError } from '../http/api-error.js';
+import { KNOWN_MODELS } from '../llm/models.js';
+import { SELECTABLE_TEXT_MODELS } from '../routing/selection.js';
 import {
   CLEAR_TASK,
   HIDDEN,
@@ -524,5 +526,98 @@ describe('cancelling', () => {
     await harness.service.cancel(OWNER_ID, created.session.sessionId);
 
     expect(harness.records.documents[0]?.currentActivity).toBeNull();
+  });
+});
+
+describe('choosing a model', () => {
+  it('stores nothing when nobody chose', async () => {
+    const harness = sessionHarness();
+    await harness.service.create(OWNER_ID, newBody());
+
+    expect(harness.records.documents[0]?.model).toBeNull();
+  });
+
+  for (const model of SELECTABLE_TEXT_MODELS) {
+    it(`stores ${model} when it was chosen`, async () => {
+      const harness = sessionHarness();
+      await harness.service.create(OWNER_ID, newBody({ model: { textModel: model } }));
+
+      expect(harness.records.documents[0]?.model).toEqual({ textModel: model });
+    });
+  }
+
+  it('refuses a model nobody has heard of, before a session exists', async () => {
+    const harness = sessionHarness();
+    const code = await codeOf(
+      harness.service.create(OWNER_ID, newBody({ model: { textModel: 'made-up-model' } })),
+    );
+
+    expect(code).toBe('VALIDATION_FAILED');
+    expect(harness.records.documents).toHaveLength(0);
+  });
+
+  it('refuses a model that exists but may not be chosen for a session', async () => {
+    const known = KNOWN_MODELS.find((one) => !SELECTABLE_TEXT_MODELS.includes(one.id));
+
+    if (known === undefined) {
+      expect(SELECTABLE_TEXT_MODELS.length).toBe(KNOWN_MODELS.length);
+      return;
+    }
+
+    const harness = sessionHarness();
+    const code = await codeOf(
+      harness.service.create(OWNER_ID, newBody({ model: { textModel: known.id } })),
+    );
+
+    expect(code).toBe('VALIDATION_FAILED');
+    expect(harness.records.documents).toHaveLength(0);
+  });
+
+  it('never substitutes a different model for the one that was refused', async () => {
+    const harness = sessionHarness();
+    await codeOf(
+      harness.service.create(OWNER_ID, newBody({ model: { textModel: 'made-up-model' } })),
+    );
+
+    expect(harness.records.documents).toHaveLength(0);
+  });
+
+  it('reads the chosen model back in session detail', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(
+      OWNER_ID,
+      newBody({ model: { textModel: 'openai/gpt-oss-120b' } }),
+    );
+
+    const detail = await harness.service.detail(OWNER_ID, created.session.sessionId);
+
+    expect(detail.session.model).toEqual({ textModel: 'openai/gpt-oss-120b' });
+  });
+
+  it('reads null back for a session nobody chose a model for', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+    const detail = await harness.service.detail(OWNER_ID, created.session.sessionId);
+
+    expect(detail.session.model).toBeNull();
+  });
+
+  it('cannot have its model changed by a retry of the same request', async () => {
+    const harness = sessionHarness();
+    const key = testId('idk', 'r');
+
+    const first = await harness.service.create(
+      OWNER_ID,
+      newBody({ idempotencyKey: key, model: { textModel: 'openai/gpt-oss-120b' } }),
+    );
+    const again = await harness.service.create(
+      OWNER_ID,
+      newBody({ idempotencyKey: key, model: { textModel: 'gemini-3.5-flash-lite' } }),
+    );
+
+    expect(again.created).toBe(false);
+    expect(again.session.sessionId).toBe(first.session.sessionId);
+    expect(harness.records.documents).toHaveLength(1);
+    expect(harness.records.documents[0]?.model).toEqual({ textModel: 'openai/gpt-oss-120b' });
   });
 });

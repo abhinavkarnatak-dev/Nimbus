@@ -27,6 +27,7 @@ import {
   type AttachmentMimeType,
   type CheckResult,
   type FileChange,
+  type ModelSelection,
   type PullRequestResult,
   type RepositorySummary,
   type SessionDetail,
@@ -120,6 +121,7 @@ export interface SessionDocument {
   branch: string | null;
   baseCommitSha: string | null;
   task: string;
+  model: ModelSelection | null;
   clarificationQuestion: string | null;
   clarificationAnswer: string | null;
   waitingSince: Date | null;
@@ -216,6 +218,7 @@ export function toSessionSummary(document: SessionDocument): SessionSummary {
 export function toSessionDetail(document: SessionDocument): SessionDetail {
   return SessionDetailSchema.parse({
     ...toSessionSummary(document),
+    model: document.model ?? null,
     baseCommitSha: document.baseCommitSha,
     attachments: document.attachments.map(toAttachmentMetadata),
     progress: {
@@ -326,6 +329,14 @@ export const sessionModel: ModelDefinition = {
           bsonType: 'string',
           minLength: LIMITS.taskMinChars,
           maxLength: LIMITS.taskMaxChars,
+        },
+        model: {
+          bsonType: ['object', 'null'],
+          additionalProperties: false,
+          required: ['textModel'],
+          properties: {
+            textModel: { bsonType: 'string', minLength: 1, maxLength: 120 },
+          },
         },
         clarificationQuestion: {
           bsonType: ['string', 'null'],

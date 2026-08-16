@@ -220,8 +220,21 @@ export class LiveSessionWorkshop implements SessionWorkshop {
   }
 
   #plan(session: SessionDocument): ModelPlan {
-    void session;
-    return planFor();
+    const chosen = session.model ?? null;
+
+    if (chosen === null) {
+      return planFor();
+    }
+
+    try {
+      return planFor({ textModel: chosen.textModel });
+    } catch (error) {
+      throw new WorkshopError(
+        'models',
+        'The model this session was started with is no longer available, and Nimbus does not swap in another one.',
+        { cause: error },
+      );
+    }
   }
 
   async #rent(session: SessionDocument): Promise<Sandbox> {
