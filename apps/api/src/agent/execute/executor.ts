@@ -246,6 +246,16 @@ export class ActionExecutor {
     }
   }
 
+  async #saySaid(request: ExecutionRequest, message: string | null): Promise<void> {
+    if (this.#reporter === null || message === null || message === '') {
+      return;
+    }
+
+    await this.#safely(async () => {
+      await this.#reporter?.said({ step: request.step, text: message });
+    });
+  }
+
   async #finish(
     request: ExecutionRequest,
     actionHash: string,
@@ -294,6 +304,7 @@ export class ActionExecutor {
 
     await this.#sayOutput(request.toolCallId, parts.output);
     await this.#sayCompleted(request, event, durationMs);
+    await this.#saySaid(request, parts.userMessage ?? null);
 
     return {
       status: parts.status,

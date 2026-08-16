@@ -63,6 +63,16 @@ export const TaskSchema = z
 
 export const UserMessageSchema = z.string().trim().min(1).max(LIMITS.messageMaxChars);
 
+export const MESSAGE_ROLES = ['user', 'agent'] as const;
+
+export const MessageRoleSchema = z.enum(MESSAGE_ROLES);
+
+export const SessionMessageSchema = z.strictObject({
+  role: MessageRoleSchema,
+  text: z.string().min(1).max(LIMITS.messageMaxChars),
+  sentAt: IsoTimestampSchema,
+});
+
 export const ModelSelectionSchema = z.strictObject({
   textModel: z.string().min(1).max(120),
 });
@@ -97,6 +107,7 @@ export const SessionDetailSchema = SessionSummarySchema.extend({
   model: ModelSelectionSchema.nullable(),
   baseCommitSha: CommitShaSchema.nullable(),
   attachments: z.array(AttachmentMetadataSchema).max(LIMITS.maxAttachmentsPerSession),
+  messages: z.array(SessionMessageSchema).max(LIMITS.maxMessagesPerSession),
   progress: SessionProgressSchema,
   filesChanged: z.array(FileChangeSchema).max(LIMITS.maxChangedFiles),
   checks: z.array(CheckResultSchema).max(LIMITS.maxChecksPerSession),
@@ -131,6 +142,8 @@ export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 export type FailureCode = z.infer<typeof FailureCodeSchema>;
 export type SessionFailure = z.infer<typeof SessionFailureSchema>;
 export type ModelSelection = z.infer<typeof ModelSelectionSchema>;
+export type MessageRole = z.infer<typeof MessageRoleSchema>;
+export type SessionMessage = z.infer<typeof SessionMessageSchema>;
 export type CreateSessionBody = z.infer<typeof CreateSessionBodySchema>;
 export type SessionSummary = z.infer<typeof SessionSummarySchema>;
 export type SessionProgress = z.infer<typeof SessionProgressSchema>;

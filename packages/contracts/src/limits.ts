@@ -24,6 +24,7 @@ export const LIMITS = {
   maxAttachmentBytes: 5_242_880,
   maxAttachmentsPerSession: 5,
   maxChecksPerSession: 20,
+  maxMessagesPerSession: 200,
   maxFilesListed: 200,
   maxAgentSteps: 200,
   maxSandboxSeconds: 7200,

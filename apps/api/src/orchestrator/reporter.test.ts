@@ -125,6 +125,59 @@ describe('writing what a run is doing down', () => {
   });
 });
 
+describe('a note from the agent', () => {
+  it('is published as a message rather than as another tool line', async () => {
+    const captured = orchestratorLogger();
+    const events = new CollectingEventPublisher();
+    const reporter = new LiveActionReporter({
+      events,
+      sessionId: 'ses_aaaaaaaaaaaaaaaaaaaaa',
+      userId: 'usr_aaaaaaaaaaaaaaaaaaaaa',
+      logger: captured.logger,
+    });
+
+    await reporter.said({ step: 3, text: 'I found the redirect.' });
+
+    expect(events.published[0]?.event).toStrictEqual({
+      type: 'agent.message',
+      message: 'I found the redirect.',
+    });
+  });
+
+  it('is kept on the session as a turn from the agent', async () => {
+    const held = await withRun();
+
+    await held.reporter.said({ step: 3, text: 'I found the redirect.' });
+
+    expect(held.records.documents[0]?.messages).toStrictEqual([
+      { role: 'agent', text: 'I found the redirect.', sentAt: AT },
+    ]);
+  });
+
+  it('lets the run carry on when it cannot be kept', async () => {
+    const held = await withRun();
+
+    held.records.addAgentMessage = async (): Promise<never> =>
+      Promise.reject(new Error('mongo is down'));
+
+    await expect(held.reporter.said({ step: 3, text: 'hello' })).resolves.toBeUndefined();
+    expect(held.logs()).toContain('could not be kept');
+  });
+
+  it('is not kept on a session that has already ended', async () => {
+    const held = await withRun();
+    const session = held.records.documents[0];
+
+    if (session !== undefined) {
+      session.status = 'cancelled';
+    }
+
+    await held.reporter.said({ step: 3, text: 'hello' });
+
+    expect(held.records.documents[0]?.messages).toHaveLength(0);
+  });
+});
+
 describe('reporting to more than one place', () => {
   it('gives every reporter the same start, output and completion', async () => {
     const first = new CollectingActionReporter();
@@ -134,9 +187,31 @@ describe('reporting to more than one place', () => {
     await both.started(invocation('reading'));
     await both.output({ toolCallId: 'call_3', stream: 'stdout', chunk: 'hello', truncated: false });
     await both.completed(completion(3, 'read it'));
+    await both.said({ step: 3, text: 'I read it' });
 
-    expect(first.order).toStrictEqual(['started', 'output', 'completed']);
-    expect(second.order).toStrictEqual(['started', 'output', 'completed']);
+    expect(first.order).toStrictEqual(['started', 'output', 'completed', 'said']);
+    expect(second.order).toStrictEqual(['started', 'output', 'completed', 'said']);
+  });
+
+  it('sends a note both to the person watching and to the session that keeps it', async () => {
+    const captured = orchestratorLogger();
+    const events = new CollectingEventPublisher();
+    const held = await withRun();
+
+    const both = new EveryReporter([
+      new LiveActionReporter({
+        events,
+        sessionId: held.sessionId,
+        userId: 'usr_aaaaaaaaaaaaaaaaaaaaa',
+        logger: captured.logger,
+      }),
+      held.reporter,
+    ]);
+
+    await both.said({ step: 2, text: 'I found the redirect.' });
+
+    expect(events.typesFor(held.sessionId)).toStrictEqual(['agent.message']);
+    expect(held.records.documents[0]?.messages).toHaveLength(1);
   });
 
   it('carries the live one and the durable one together', async () => {

@@ -10,6 +10,7 @@ import {
   FailureCodeSchema,
   FileChangeKindSchema,
   LIMITS,
+  MESSAGE_ROLES,
   PullRequestResultSchema,
   RepositorySummarySchema,
   RiskLevelSchema,
@@ -27,10 +28,12 @@ import {
   type AttachmentMimeType,
   type CheckResult,
   type FileChange,
+  type MessageRole,
   type ModelSelection,
   type PullRequestResult,
   type RepositorySummary,
   type SessionDetail,
+  type SessionMessage,
   type SessionFailure,
   type SessionStatus,
   type SessionSummary,
@@ -52,7 +55,7 @@ import {
 
 export const SESSION_ID_PREFIX = 'ses';
 
-export const MAX_USER_MESSAGES = 50;
+export const MAX_SESSION_MESSAGES = LIMITS.maxMessagesPerSession;
 
 const terminalStatuses = new Set<string>(TERMINAL_SESSION_STATUSES);
 
@@ -91,8 +94,17 @@ export interface SessionApprovalDocument {
 }
 
 export interface SessionMessageDocument {
+  role?: MessageRole;
   text: string;
   sentAt: Date;
+}
+
+export function toSessionMessage(document: SessionMessageDocument): SessionMessage {
+  return {
+    role: document.role ?? 'user',
+    text: document.text,
+    sentAt: document.sentAt.toISOString(),
+  };
 }
 
 export interface SessionToolEventDocument {
@@ -221,6 +233,7 @@ export function toSessionDetail(document: SessionDocument): SessionDetail {
     model: document.model ?? null,
     baseCommitSha: document.baseCommitSha,
     attachments: document.attachments.map(toAttachmentMetadata),
+    messages: document.messages.map(toSessionMessage),
     progress: {
       step: document.step,
       maxSteps: document.maxSteps,
@@ -349,12 +362,13 @@ export const sessionModel: ModelDefinition = {
         waitingSince: { bsonType: ['date', 'null'] },
         messages: {
           bsonType: 'array',
-          maxItems: MAX_USER_MESSAGES,
+          maxItems: MAX_SESSION_MESSAGES,
           items: {
             bsonType: 'object',
             additionalProperties: false,
             required: ['text', 'sentAt'],
             properties: {
+              role: { enum: [...MESSAGE_ROLES] },
               text: { bsonType: 'string', minLength: 1, maxLength: LIMITS.messageMaxChars },
               sentAt: { bsonType: 'date' },
             },

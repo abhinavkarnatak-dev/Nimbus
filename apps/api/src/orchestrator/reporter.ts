@@ -4,6 +4,7 @@ import type {
   ActionReporter,
   ReportedChunk,
   ReportedCompletion,
+  SaidMessage,
 } from '../agent/execute/reporter.js';
 import type { EventPublisher } from '../events/publisher.js';
 import type { Logger } from '../logging/logger.js';
@@ -48,6 +49,10 @@ export class LiveActionReporter implements ActionReporter {
     });
   }
 
+  async said(message: SaidMessage): Promise<void> {
+    await this.#say({ type: 'agent.message', message: message.text });
+  }
+
   async #say(event: ServerEvent): Promise<void> {
     try {
       await this.#options.events.publish(this.#options.sessionId, this.#options.userId, event);
@@ -89,6 +94,21 @@ export class DurableProgressReporter implements ActionReporter {
     await this.#write(completion.step, completion.summary);
   }
 
+  async said(message: SaidMessage): Promise<void> {
+    try {
+      await this.#options.records.addAgentMessage(
+        this.#options.sessionId,
+        message.text,
+        this.#now(),
+      );
+    } catch (error) {
+      this.#options.logger.warn(
+        { sessionId: this.#options.sessionId, error: String(error) },
+        'a note from the agent could not be kept, the person still saw it live',
+      );
+    }
+  }
+
   async #write(step: number, activity: string): Promise<void> {
     try {
       await this.#options.records.recordProgress(
@@ -127,6 +147,12 @@ export class EveryReporter implements ActionReporter {
   async completed(completion: ReportedCompletion): Promise<void> {
     for (const reporter of this.#reporters) {
       await reporter.completed(completion);
+    }
+  }
+
+  async said(message: SaidMessage): Promise<void> {
+    for (const reporter of this.#reporters) {
+      await reporter.said(message);
     }
   }
 }

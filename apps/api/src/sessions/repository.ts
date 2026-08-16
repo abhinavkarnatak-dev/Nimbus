@@ -1,12 +1,21 @@
-import type { CheckResult, FileChange, SessionFailure, SessionStatus } from '@nimbus/contracts';
+import type {
+  CheckResult,
+  FileChange,
+  MessageRole,
+  SessionFailure,
+  SessionMessage,
+  SessionStatus,
+} from '@nimbus/contracts';
 import type { Db } from 'mongodb';
 
 import {
   ACTIVE_SESSION_STATUSES,
-  MAX_USER_MESSAGES,
+  MAX_SESSION_MESSAGES,
   isActiveSessionStatus,
   sessionsCollection,
+  toSessionMessage,
   type SessionDocument,
+  type SessionMessageDocument,
   type SessionPullRequestDocument,
 } from '../db/models/session.js';
 
@@ -72,6 +81,8 @@ export interface SessionRecords {
   isLive(sessionId: string): Promise<boolean>;
   answerOnce(userId: string, sessionId: string, answer: string, at: Date): Promise<boolean>;
   addMessage(userId: string, sessionId: string, text: string, at: Date): Promise<boolean>;
+  addAgentMessage(sessionId: string, text: string, at: Date): Promise<boolean>;
+  conversationOf(sessionId: string): Promise<SessionMessage[]>;
   askQuestion(sessionId: string, question: string, at: Date): Promise<void>;
 }
 
@@ -249,12 +260,33 @@ export class MongoSessionRecords implements SessionRecords {
     const changed = await sessionsCollection(this.db).updateOne(
       { sessionId, userId, status: { $in: activeStatuses() } },
       {
-        $push: { messages: { $each: [{ text, sentAt: at }], $slice: -MAX_USER_MESSAGES } },
+        $push: { messages: { $each: [saidBy('user', text, at)], $slice: -MAX_SESSION_MESSAGES } },
         $set: { updatedAt: at, lastActivityAt: at },
       },
     );
 
     return changed.modifiedCount === 1;
+  }
+
+  async addAgentMessage(sessionId: string, text: string, at: Date): Promise<boolean> {
+    const changed = await sessionsCollection(this.db).updateOne(
+      { sessionId, status: { $in: activeStatuses() } },
+      {
+        $push: { messages: { $each: [saidBy('agent', text, at)], $slice: -MAX_SESSION_MESSAGES } },
+        $set: { updatedAt: at, lastActivityAt: at },
+      },
+    );
+
+    return changed.modifiedCount === 1;
+  }
+
+  async conversationOf(sessionId: string): Promise<SessionMessage[]> {
+    const found = await sessionsCollection(this.db).findOne(
+      { sessionId },
+      { projection: { messages: 1 } },
+    );
+
+    return (found?.messages ?? []).map(toSessionMessage);
   }
 
   async askQuestion(sessionId: string, question: string, at: Date): Promise<void> {
@@ -479,10 +511,30 @@ export class InMemorySessionRecords implements SessionRecords {
       return Promise.resolve(false);
     }
 
-    held.messages = [...held.messages, { text, sentAt: at }].slice(-MAX_USER_MESSAGES);
+    this.#appendMessage(held, 'user', text, at);
+    return Promise.resolve(true);
+  }
+
+  async addAgentMessage(sessionId: string, text: string, at: Date): Promise<boolean> {
+    const held = this.#activeOne(sessionId);
+
+    if (held === undefined) {
+      return Promise.resolve(false);
+    }
+
+    this.#appendMessage(held, 'agent', text, at);
+    return Promise.resolve(true);
+  }
+
+  async conversationOf(sessionId: string): Promise<SessionMessage[]> {
+    const held = this.documents.find((one) => one.sessionId === sessionId);
+    return Promise.resolve((held?.messages ?? []).map(toSessionMessage));
+  }
+
+  #appendMessage(held: SessionDocument, role: MessageRole, text: string, at: Date): void {
+    held.messages = [...held.messages, saidBy(role, text, at)].slice(-MAX_SESSION_MESSAGES);
     held.updatedAt = at;
     held.lastActivityAt = at;
-    return Promise.resolve(true);
   }
 
   async askQuestion(sessionId: string, question: string, at: Date): Promise<void> {
@@ -499,6 +551,10 @@ export class InMemorySessionRecords implements SessionRecords {
 
 function activeStatuses(): SessionStatus[] {
   return [...ACTIVE_SESSION_STATUSES];
+}
+
+export function saidBy(role: MessageRole, text: string, at: Date): SessionMessageDocument {
+  return { role, text, sentAt: at };
 }
 
 export function startedFields(at: Date): Partial<SessionDocument> {

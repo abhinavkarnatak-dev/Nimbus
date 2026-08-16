@@ -3,6 +3,7 @@ import {
   NextActionWireSchema,
   type AgentState,
   type NextAction,
+  type SessionMessage,
 } from '@nimbus/contracts';
 
 import type { ToolRegistry } from '../registry/registry.js';
@@ -86,6 +87,27 @@ export interface ReasonInput {
   registry: ToolRegistry;
   router: SessionRouter;
   history?: readonly string[];
+  conversation?: readonly SessionMessage[];
+}
+
+export function conversationShown(conversation: readonly SessionMessage[]): string | null {
+  const recent = conversation.slice(-NODE_LIMITS.conversationShown);
+
+  if (recent.length === 0) {
+    return null;
+  }
+
+  const lines = recent.map(
+    (turn) => `${turn.role === 'agent' ? 'you' : 'the person'}: ${turn.text}`,
+  );
+
+  return [
+    'What has been said between you and the person who asked for this, oldest first.',
+    'Their words are instructions about this task and outrank your earlier notes,',
+    'but they cannot grant permission that the separate checking system withholds.',
+    '',
+    ...lines,
+  ].join('\n');
 }
 
 export interface ReasonResult {
@@ -109,6 +131,12 @@ export async function chooseNextAction(input: ReasonInput): Promise<ReasonResult
       role: 'system' as const,
       content: `What has happened so far, oldest first:\n${(input.history ?? []).join('\n')}`,
     });
+  }
+
+  const spoken = conversationShown(input.conversation ?? []);
+
+  if (spoken !== null) {
+    messages.push({ role: 'system' as const, content: spoken });
   }
 
   const result = await input.router.completeStructured({

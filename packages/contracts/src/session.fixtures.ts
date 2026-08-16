@@ -89,11 +89,18 @@ export const sessionSummaryFixture = () => ({
   completedAt: null,
 });
 
+export const sessionMessageFixture = () => ({
+  role: 'user' as const,
+  text: 'please keep the old link working too',
+  sentAt: VALID_TIMESTAMP,
+});
+
 export const sessionDetailFixture = () => ({
   ...sessionSummaryFixture(),
   model: { textModel: 'gemini-3.6-flash' },
   baseCommitSha: VALID_COMMIT_SHA,
   attachments: [attachmentFixture()],
+  messages: [sessionMessageFixture()],
   progress: { step: 4, maxSteps: 30, currentActivity: 'Reading src/utils/format-date.ts' },
   filesChanged: [fileChangeFixture()],
   checks: [checkResultFixture()],

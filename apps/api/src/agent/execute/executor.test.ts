@@ -343,4 +343,37 @@ describe('a message meant for a person', () => {
 
     expect(result.userMessage).toBeNull();
   });
+
+  it('is handed to whoever is listening, rather than left on the result', async () => {
+    const harness = await executeHarness();
+    await harness.executor.execute(
+      actionFor('message_user', { text: 'I found the redirect in src/auth/redirect.ts.' }),
+    );
+
+    expect(harness.reporter.messages).toHaveLength(1);
+    expect(harness.reporter.messages[0]?.text).toBe(
+      'I found the redirect in src/auth/redirect.ts.',
+    );
+  });
+
+  it('is handed over already redacted and bounded, not raw', async () => {
+    const harness = await executeHarness();
+    await harness.executor.execute(
+      actionFor('message_user', {
+        text: 'I found ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa in the code',
+      }),
+    );
+
+    expect(harness.reporter.messages[0]?.text).not.toContain(
+      'ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    );
+  });
+
+  it('is not handed over at all by a tool that was only reading a file', async () => {
+    const harness = await executeHarness();
+    await harness.executor.execute(READ);
+
+    expect(harness.reporter.messages).toHaveLength(0);
+    expect(harness.reporter.order).not.toContain('said');
+  });
 });

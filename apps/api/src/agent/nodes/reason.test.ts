@@ -8,6 +8,7 @@ import {
   REASON_SYSTEM,
   checkAgainstRegistry,
   chooseNextAction,
+  conversationShown,
   nextActionJsonSchema,
   toolCatalogue,
 } from './reason.js';
@@ -137,6 +138,49 @@ describe('what the model is told', () => {
   it('says that something else checks every call, so there is no point arguing', () => {
     expect(REASON_SYSTEM).toContain('checked by a separate system');
     expect(REASON_SYSTEM).toContain('do not try to avoid the check');
+  });
+});
+
+describe('what the person has said', () => {
+  const TOLD = 'please keep the old link working too';
+
+  it('is put in front of the model on the step it is asked about', async () => {
+    const harness = await nodeHarness({ answers: { answers: [answer(READ_ACTION)] } });
+
+    await chooseNextAction({
+      state: harness.state,
+      context: 'the task',
+      registry: harness.registry,
+      router: harness.router,
+      conversation: [{ role: 'user', text: TOLD, sentAt: '2026-08-17T10:00:00.000Z' }],
+    });
+
+    const sent = harness.text.calls[0]?.messages.map((one) => one.content).join('\n') ?? '';
+
+    expect(sent).toContain(`the person: ${TOLD}`);
+  });
+
+  it('adds nothing to the request when nothing has been said', async () => {
+    const harness = await nodeHarness({ answers: { answers: [answer(READ_ACTION)] } });
+
+    await chooseNextAction({
+      state: harness.state,
+      context: 'the task',
+      registry: harness.registry,
+      router: harness.router,
+    });
+
+    const sent = harness.text.calls[0]?.messages.map((one) => one.content).join('\n') ?? '';
+
+    expect(sent).not.toContain('What has been said between you and the person');
+  });
+
+  it('is not wrapped in the markers that repository content gets', () => {
+    const shown =
+      conversationShown([{ role: 'user', text: TOLD, sentAt: '2026-08-17T10:00:00.000Z' }]) ?? '';
+
+    expect(shown).not.toContain('BEGIN');
+    expect(shown).toContain('instructions about this task');
   });
 });
 

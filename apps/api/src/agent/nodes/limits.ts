@@ -8,6 +8,7 @@ export const NODE_LIMITS = {
   contextMaxChars: 90_000,
 
   intentMaxChars: 300,
+  conversationShown: 10,
 } as const;
 
 export const FILLER_WORDS: ReadonlySet<string> = new Set([

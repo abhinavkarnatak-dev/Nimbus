@@ -24,10 +24,16 @@ export interface ReportedCompletion {
   summary: string;
 }
 
+export interface SaidMessage {
+  step: number;
+  text: string;
+}
+
 export interface ActionReporter {
   started(invocation: ToolInvocation): Promise<void>;
   output(chunk: ReportedChunk): Promise<void>;
   completed(completion: ReportedCompletion): Promise<void>;
+  said(message: SaidMessage): Promise<void>;
 }
 
 export function chunkOutput(
@@ -64,6 +70,8 @@ export class CollectingActionReporter implements ActionReporter {
 
   readonly completions: ReportedCompletion[] = [];
 
+  readonly messages: SaidMessage[] = [];
+
   readonly order: string[] = [];
 
   #failure: Error | null = null;
@@ -90,6 +98,13 @@ export class CollectingActionReporter implements ActionReporter {
     this.#refuse();
     this.completions.push(completion);
     this.order.push('completed');
+    await Promise.resolve();
+  }
+
+  async said(message: SaidMessage): Promise<void> {
+    this.#refuse();
+    this.messages.push(message);
+    this.order.push('said');
     await Promise.resolve();
   }
 

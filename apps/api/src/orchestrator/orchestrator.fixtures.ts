@@ -1,9 +1,11 @@
-import type { PullRequestResult, PushResult } from '@nimbus/contracts';
+import type { PullRequestResult, PushResult, SessionMessage } from '@nimbus/contracts';
 
 import { FakeRepositorySource } from '../agent/clone/fake.js';
 import type { ActionReporter } from '../agent/execute/reporter.js';
 import type { EventPublisher } from '../events/publisher.js';
-import { LiveActionReporter } from './reporter.js';
+import type { ConversationSource } from '../agent/graph/graph.js';
+import type { SessionRecords } from '../sessions/repository.js';
+import { DurableProgressReporter, EveryReporter, LiveActionReporter } from './reporter.js';
 import { CommandRunner } from '../agent/commands/runner.js';
 import { ActionExecutor } from '../agent/execute/executor.js';
 import { InMemoryApprovals } from '../agent/policy/approvals.js';
@@ -229,6 +231,7 @@ export interface FakeWorkshopOptions {
   failWith?: Error;
   events?: EventPublisher;
   reporter?: ActionReporter;
+  records?: SessionRecords;
   onPrepare?: (session: SessionDocument, signal: AbortSignal) => void;
 }
 
@@ -256,16 +259,50 @@ export class FakeWorkshop implements SessionWorkshop {
       return this.#options.reporter;
     }
 
-    if (this.#options.events === undefined) {
-      return null;
+    const reporters: ActionReporter[] = [];
+
+    if (this.#options.events !== undefined) {
+      reporters.push(
+        new LiveActionReporter({
+          events: this.#options.events,
+          sessionId: session.sessionId,
+          userId: session.userId,
+          logger: this.#options.logger,
+        }),
+      );
     }
 
-    return new LiveActionReporter({
-      events: this.#options.events,
-      sessionId: session.sessionId,
-      userId: session.userId,
-      logger: this.#options.logger,
-    });
+    if (this.#options.records !== undefined) {
+      reporters.push(
+        new DurableProgressReporter({
+          records: this.#options.records,
+          sessionId: session.sessionId,
+          logger: this.#options.logger,
+        }),
+      );
+    }
+
+    const only = reporters[0];
+
+    if (only === undefined) {
+      return null;
+    }
+    return reporters.length === 1 ? only : new EveryReporter(reporters);
+  }
+
+  #conversationFor(session: SessionDocument): { conversation?: ConversationSource } {
+    const records = this.#options.records;
+
+    if (records === undefined) {
+      return {};
+    }
+
+    return {
+      conversation: {
+        latest: async (): Promise<readonly SessionMessage[]> =>
+          records.conversationOf(session.sessionId),
+      },
+    };
   }
 
   async prepare(session: SessionDocument, options: { signal: AbortSignal }): Promise<PreparedRun> {
@@ -329,6 +366,7 @@ export class FakeWorkshop implements SessionWorkshop {
         },
         logger,
         signal: options.signal,
+        ...this.#conversationFor(session),
       },
       finish: async (): Promise<void> => {
         this.finished.push(session.sessionId);

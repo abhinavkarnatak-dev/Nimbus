@@ -1,6 +1,8 @@
 import { createTestDatabase, type TestDatabase } from '@nimbus/test-utils';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { LIMITS } from '@nimbus/contracts';
+
 import { MongoAttachmentRecords } from '../../src/attachments/repository.js';
 import { HARD_LIMITS } from '../../src/config/limits.js';
 import { ensureDatabaseSchema } from '../../src/db/bootstrap.js';
@@ -312,5 +314,82 @@ describe('cancelling for real', () => {
     });
 
     expect(stored?.completedAt?.toISOString()).toBe(cancelled.completedAt);
+  });
+});
+
+describe('a conversation kept on a session', () => {
+  it('keeps both sides, in the order they were said', async () => {
+    const created = await service.create(OWNER_ID, keyed('a'));
+    const records = new MongoSessionRecords(testDatabase.db);
+    const sessionId = created.session.sessionId;
+
+    await records.addMessage(OWNER_ID, sessionId, 'keep the old link working', new Date());
+    await records.addAgentMessage(sessionId, 'I found the redirect.', new Date());
+
+    expect((await records.conversationOf(sessionId)).map((one) => one.role)).toStrictEqual([
+      'user',
+      'agent',
+    ]);
+  });
+
+  it('comes back on the session detail, so a reload shows it', async () => {
+    const created = await service.create(OWNER_ID, keyed('a'));
+    const records = new MongoSessionRecords(testDatabase.db);
+
+    await records.addMessage(
+      OWNER_ID,
+      created.session.sessionId,
+      'keep the old link working',
+      new Date(),
+    );
+
+    const detail = await service.detail(OWNER_ID, created.session.sessionId);
+
+    expect(detail.session.messages).toHaveLength(1);
+    expect(detail.session.messages[0]?.role).toBe('user');
+  });
+
+  it('accepts a message written before roles existed, and reads it as the person', async () => {
+    const created = await service.create(OWNER_ID, keyed('a'));
+    const sessionId = created.session.sessionId;
+
+    await sessionsCollection(testDatabase.db).updateOne(
+      { sessionId },
+      { $push: { messages: { text: 'an older message', sentAt: new Date() } } },
+    );
+
+    const records = new MongoSessionRecords(testDatabase.db);
+    await records.addAgentMessage(sessionId, 'a newer one', new Date());
+
+    const conversation = await records.conversationOf(sessionId);
+
+    expect(conversation.map((one) => one.role)).toStrictEqual(['user', 'agent']);
+  });
+
+  it('keeps the newest turns once it is full, and the validator still accepts it', async () => {
+    const created = await service.create(OWNER_ID, keyed('a'));
+    const records = new MongoSessionRecords(testDatabase.db);
+    const sessionId = created.session.sessionId;
+
+    for (let at = 0; at < LIMITS.maxMessagesPerSession + 3; at += 1) {
+      await records.addAgentMessage(sessionId, `turn ${String(at)}`, new Date());
+    }
+
+    const conversation = await records.conversationOf(sessionId);
+
+    expect(conversation).toHaveLength(LIMITS.maxMessagesPerSession);
+    expect(conversation.at(-1)?.text).toBe(`turn ${String(LIMITS.maxMessagesPerSession + 2)}`);
+  });
+
+  it('refuses to keep anything once the session has ended', async () => {
+    const created = await service.create(OWNER_ID, keyed('a'));
+    const sessionId = created.session.sessionId;
+
+    await service.cancel(OWNER_ID, sessionId);
+
+    const records = new MongoSessionRecords(testDatabase.db);
+
+    expect(await records.addAgentMessage(sessionId, 'too late', new Date())).toBe(false);
+    expect(await records.conversationOf(sessionId)).toHaveLength(0);
   });
 });

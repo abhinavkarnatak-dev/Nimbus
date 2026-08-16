@@ -629,7 +629,26 @@ model cannot smuggle a second action or an extra field alongside the first.
 `clarificationQuestion`, runs before any counting and before any model call, and proceeds regardless
 of what the answer said. A session cannot be made to pause indefinitely.
 
-Owned by feature 031.
+**The model cannot write a turn from the person.** The conversation between a session and its owner is
+kept as roled turns, and the role is set by the backend on the way in: a message posted to the sessions
+route is always a `user` turn, and a note produced by the `message_user` tool is always an `agent` turn.
+Tool output never carries a role. A model that could append a turn labelled `user` could fabricate an
+instruction and read it back as authorization on its next step, which is why the two paths are separate
+methods rather than one method with a role argument taken from anywhere the model can reach.
+
+**What the person says is not wrapped in the untrusted markers,** deliberately. Their words sit at the
+same trust level as the task they already wrote, and marking a principal's own instructions as hostile
+data would be theatre. What bounds them is the same thing that bounds the task: the policy gate decides
+from the tool name and the arguments, so nothing said in a message can widen what an action is allowed
+to do. The prompt says so in as many words, that a person can steer the work and cannot grant
+permission the checking system withholds.
+
+**The conversation is bounded twice, for two different reasons.** The session keeps a fixed number of
+the newest turns so one session cannot grow a document without limit, and the reasoning node is shown
+only the most recent few so a long conversation cannot crowd the repository context out of the request
+or spend the token budget on itself.
+
+Owned by features 031 and 038h.
 
 ## 10g. Execution, observation, and validation
 

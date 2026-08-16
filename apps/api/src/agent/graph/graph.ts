@@ -1,6 +1,11 @@
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 import type { BaseCheckpointSaver } from '@langchain/langgraph';
-import type { AgentState, DescribedImage, PatchValidationReport } from '@nimbus/contracts';
+import type {
+  AgentState,
+  DescribedImage,
+  PatchValidationReport,
+  SessionMessage,
+} from '@nimbus/contracts';
 
 import type { Logger } from '../../logging/logger.js';
 import type { AttachedText } from '../../routing/context.js';
@@ -25,6 +30,10 @@ import { judgeCompletion } from './complete.js';
 import { GRAPH_LIMITS } from './limits.js';
 import { preparePatch, type PreparedPatch } from './patch.js';
 
+export interface ConversationSource {
+  latest(): Promise<readonly SessionMessage[]>;
+}
+
 export interface RunInput {
   state: AgentState;
   sandbox: Sandbox;
@@ -36,6 +45,7 @@ export interface RunInput {
   logger: Logger;
   images?: readonly DescribedImage[];
   attachments?: readonly AttachedText[];
+  conversation?: ConversationSource;
   checkpointer?: BaseCheckpointSaver;
   limits?: PatchCaps;
   signal?: AbortSignal;
@@ -145,6 +155,7 @@ export function buildAgentGraph(input: RunInput) {
       registry: input.registry,
       router: input.router,
       history: current.history.slice(-GRAPH_LIMITS.historyShown),
+      conversation: await latestConversation(input),
     });
 
     if (!chosen.accepted) {
@@ -282,4 +293,22 @@ export function buildAgentGraph(input: RunInput) {
   return input.checkpointer === undefined
     ? graph.compile()
     : graph.compile({ checkpointer: input.checkpointer });
+}
+
+export async function latestConversation(input: RunInput): Promise<readonly SessionMessage[]> {
+  const source = input.conversation;
+
+  if (source === undefined) {
+    return [];
+  }
+
+  try {
+    return await source.latest();
+  } catch (error) {
+    input.logger.warn(
+      { sessionId: input.state.sessionId, error: String(error) },
+      'what the person has said could not be read, this step goes on without it',
+    );
+    return [];
+  }
 }

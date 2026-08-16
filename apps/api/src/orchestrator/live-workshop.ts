@@ -1,5 +1,7 @@
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import type { ModelPlan } from '@nimbus/contracts';
+import type { ModelPlan, SessionMessage } from '@nimbus/contracts';
+
+import type { ConversationSource } from '../agent/graph/graph.js';
 
 import { GitHubRepositorySource } from '../agent/clone/github.js';
 import { CommandRunner } from '../agent/commands/runner.js';
@@ -141,6 +143,7 @@ export class LiveSessionWorkshop implements SessionWorkshop {
         logger: this.#options.logger,
         limits,
         signal: options.signal,
+        ...this.#conversation(session),
         ...(this.#options.checkpointer === undefined
           ? {}
           : { checkpointer: this.#options.checkpointer }),
@@ -154,6 +157,21 @@ export class LiveSessionWorkshop implements SessionWorkshop {
             'a read token could not be revoked, it expires on its own',
           );
         }
+      },
+    };
+  }
+
+  #conversation(session: SessionDocument): { conversation?: ConversationSource } {
+    const records = this.#options.records;
+
+    if (records === undefined) {
+      return {};
+    }
+
+    return {
+      conversation: {
+        latest: async (): Promise<readonly SessionMessage[]> =>
+          records.conversationOf(session.sessionId),
       },
     };
   }
