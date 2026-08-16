@@ -3,6 +3,9 @@ import '@fontsource-variable/jetbrains-mono';
 import './styles/tokens.css';
 import './styles/base.css';
 import './app/shell.css';
+import './ui/ui.css';
+import './screens/landing.css';
+import './screens/signin.css';
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';

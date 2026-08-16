@@ -48,14 +48,9 @@ export class ApiClient {
     if (MUTATING_METHODS.includes(method)) {
       const token = this.#csrf.token();
 
-      if (token === null) {
-        throw new ApiError({
-          code: 'CSRF_TOKEN_INVALID',
-          message: 'Sign in again to continue.',
-          status: 0,
-        });
+      if (token !== null) {
+        headers.set(CSRF_HEADER, token);
       }
-      headers.set(CSRF_HEADER, token);
     }
 
     let response: Response;

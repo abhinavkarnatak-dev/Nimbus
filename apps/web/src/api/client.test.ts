@@ -78,11 +78,13 @@ describe('sending a request', () => {
     expect(new Headers(held.sent[0]?.init.headers).get(CSRF_HEADER)).toBe('a-csrf-token');
   });
 
-  it('refuses to write at all when there is no csrf token to send', async () => {
+  it('still writes when there is no token, because signing in happens before there is one', async () => {
     const held = clientWith(() => json({ ok: true }), null);
 
-    await expect(held.api.post('/auth/logout', {}, Shape)).rejects.toThrow(ApiError);
-    expect(held.sent).toHaveLength(0);
+    await held.api.post('/auth/otp/request', { email: 'person@example.com' }, Shape);
+
+    expect(held.sent).toHaveLength(1);
+    expect(new Headers(held.sent[0]?.init.headers).get(CSRF_HEADER)).toBeNull();
   });
 });
 
