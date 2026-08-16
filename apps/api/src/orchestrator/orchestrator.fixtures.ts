@@ -229,7 +229,7 @@ export interface FakeWorkshopOptions {
   failWith?: Error;
   events?: EventPublisher;
   reporter?: ActionReporter;
-  onPrepare?: (session: SessionDocument) => void;
+  onPrepare?: (session: SessionDocument, signal: AbortSignal) => void;
 }
 
 export class FakeWorkshop implements SessionWorkshop {
@@ -270,7 +270,7 @@ export class FakeWorkshop implements SessionWorkshop {
 
   async prepare(session: SessionDocument, options: { signal: AbortSignal }): Promise<PreparedRun> {
     this.prepared.push(session.sessionId);
-    this.#options.onPrepare?.(session);
+    this.#options.onPrepare?.(session, options.signal);
 
     if (this.#options.failWith !== undefined) {
       throw this.#options.failWith;
@@ -340,6 +340,22 @@ export class FakeWorkshop implements SessionWorkshop {
 
 export function orchestratorLogger(): { logger: Logger; text: () => string } {
   return capturingLogger();
+}
+
+export function whenAborted(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.resolve();
+  }
+
+  return new Promise<void>((resolve) => {
+    signal.addEventListener(
+      'abort',
+      () => {
+        resolve();
+      },
+      { once: true },
+    );
+  });
 }
 
 export class InMemoryLeases implements SessionLeases {

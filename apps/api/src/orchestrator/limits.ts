@@ -7,6 +7,9 @@ export const ORCHESTRATOR_LIMITS = {
   claimBatch: 10,
   maxRecoveries: 3,
   runningConcurrently: 2,
+  drainMs: 10_000,
+  drainGraceMs: 5_000,
+  drainPollMs: 25,
 } as const;
 
 export const WAIT_LIMITS = {

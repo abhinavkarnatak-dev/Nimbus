@@ -19,6 +19,30 @@ class FailingRemover implements ExpiredAttachmentRemover {
   }
 }
 
+class HeldRemover implements ExpiredAttachmentRemover {
+  finished = false;
+
+  #open: () => void = () => undefined;
+
+  readonly #held: Promise<void>;
+
+  constructor() {
+    this.#held = new Promise<void>((resolve) => {
+      this.#open = resolve;
+    });
+  }
+
+  release(): void {
+    this.#open();
+  }
+
+  async removeExpired(): Promise<string[]> {
+    await this.#held;
+    this.finished = true;
+    return [];
+  }
+}
+
 describe('AttachmentSweeper', () => {
   it('asks for expired attachments and reports what went', async () => {
     const remover = new RecordingRemover(['att_a', 'att_b']);
@@ -58,7 +82,7 @@ describe('AttachmentSweeper', () => {
     expect(await sweeper.sweep()).toBeNull();
   });
 
-  it('starting twice does not run two timers', () => {
+  it('starting twice does not run two timers', async () => {
     const sweeper = new AttachmentSweeper({
       attachments: new RecordingRemover(),
       intervalMs: 60_000,
@@ -66,7 +90,33 @@ describe('AttachmentSweeper', () => {
 
     sweeper.start();
     sweeper.start();
-    sweeper.stop();
-    sweeper.stop();
+    await sweeper.stop();
+    await sweeper.stop();
+  });
+
+  it('waits for the sweep it is in the middle of before it stops', async () => {
+    const remover = new HeldRemover();
+    const sweeper = new AttachmentSweeper({ attachments: remover });
+
+    const sweeping = sweeper.sweep();
+    const stopping = sweeper.stop();
+
+    expect(remover.finished).toBe(false);
+
+    remover.release();
+    await stopping;
+
+    expect(remover.finished).toBe(true);
+    await sweeping;
+  });
+
+  it('starts no new sweep once it has stopped, so nothing runs against a closed store', async () => {
+    const remover = new RecordingRemover();
+    const sweeper = new AttachmentSweeper({ attachments: remover });
+
+    await sweeper.stop();
+
+    expect(await sweeper.sweep()).toBeNull();
+    expect(remover.limits).toHaveLength(0);
   });
 });

@@ -1,3 +1,4 @@
+import { InFlight } from '../lib/in-flight.js';
 import type { Logger } from '../logging/logger.js';
 
 export const SWEEP_INTERVAL_MS = 900_000;
@@ -23,9 +24,9 @@ export class AttachmentSweeper {
 
   private readonly maxRemovals: number;
 
-  private timer: NodeJS.Timeout | null = null;
+  private readonly inFlight = new InFlight();
 
-  private sweeping = false;
+  private timer: NodeJS.Timeout | null = null;
 
   constructor(options: AttachmentSweeperOptions) {
     this.options = options;
@@ -44,31 +45,28 @@ export class AttachmentSweeper {
     this.timer.unref();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.timer !== null) {
       clearInterval(this.timer);
       this.timer = null;
     }
+
+    await this.inFlight.settle();
   }
 
   async sweep(): Promise<string[] | null> {
-    if (this.sweeping) {
-      return null;
-    }
-
-    this.sweeping = true;
-    try {
-      const withLock = this.options.withLock;
-      if (withLock === undefined) {
-        return await this.sweepOnce();
+    return this.inFlight.run(async () => {
+      try {
+        const withLock = this.options.withLock;
+        if (withLock === undefined) {
+          return await this.sweepOnce();
+        }
+        return await withLock(SWEEP_RESOURCE, () => this.sweepOnce());
+      } catch (error) {
+        this.options.logger?.error({ err: error }, 'attachment sweep failed');
+        return null;
       }
-      return await withLock(SWEEP_RESOURCE, () => this.sweepOnce());
-    } catch (error) {
-      this.options.logger?.error({ err: error }, 'attachment sweep failed');
-      return null;
-    } finally {
-      this.sweeping = false;
-    }
+    });
   }
 
   async sweepOnce(): Promise<string[]> {

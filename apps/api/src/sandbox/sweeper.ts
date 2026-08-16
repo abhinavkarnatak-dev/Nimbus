@@ -1,3 +1,4 @@
+import { InFlight } from '../lib/in-flight.js';
 import type { Logger } from '../logging/logger.js';
 import type { LeaseManager } from '../redis/lease.js';
 import type { E2bClient, E2bRunningSandbox } from './e2b-client.js';
@@ -81,8 +82,9 @@ export class SandboxSweeper {
   private readonly now: () => number;
   private readonly intervalMs: number;
 
+  private readonly inFlight = new InFlight();
+
   private timer: NodeJS.Timeout | null = null;
-  private sweeping = false;
 
   constructor(options: SandboxSweeperOptions) {
     this.options = options;
@@ -101,31 +103,28 @@ export class SandboxSweeper {
     this.timer.unref();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.timer !== null) {
       clearInterval(this.timer);
       this.timer = null;
     }
+
+    await this.inFlight.settle();
   }
 
   async sweep(): Promise<SweepResult | null> {
-    if (this.sweeping) {
-      return null;
-    }
-
-    this.sweeping = true;
-    try {
-      const withLock = this.options.withLock;
-      if (withLock === undefined) {
-        return await this.sweepOnce();
+    return this.inFlight.run(async () => {
+      try {
+        const withLock = this.options.withLock;
+        if (withLock === undefined) {
+          return await this.sweepOnce();
+        }
+        return await withLock(SWEEP_RESOURCE, () => this.sweepOnce());
+      } catch (error) {
+        this.options.logger?.error({ err: error }, 'sandbox sweep failed');
+        return null;
       }
-      return await withLock(SWEEP_RESOURCE, () => this.sweepOnce());
-    } catch (error) {
-      this.options.logger?.error({ err: error }, 'sandbox sweep failed');
-      return null;
-    } finally {
-      this.sweeping = false;
-    }
+    });
   }
 
   async sweepOnce(): Promise<SweepResult> {

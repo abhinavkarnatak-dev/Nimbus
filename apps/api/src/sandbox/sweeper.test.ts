@@ -321,7 +321,7 @@ describe('SandboxSweeper timer', () => {
 
     sweeper.start();
     await vi.advanceTimersByTimeAsync(3_500);
-    sweeper.stop();
+    await sweeper.stop();
 
     expect(client.listQueries).toHaveLength(3);
   });
@@ -332,7 +332,7 @@ describe('SandboxSweeper timer', () => {
 
     sweeper.start();
     await vi.advanceTimersByTimeAsync(1_500);
-    sweeper.stop();
+    await sweeper.stop();
     await vi.advanceTimersByTimeAsync(10_000);
 
     expect(client.listQueries).toHaveLength(1);
@@ -345,20 +345,59 @@ describe('SandboxSweeper timer', () => {
     sweeper.start();
     sweeper.start();
     await vi.advanceTimersByTimeAsync(2_500);
-    sweeper.stop();
+    await sweeper.stop();
 
     expect(client.listQueries).toHaveLength(2);
   });
 
-  it('stopping without starting is harmless', () => {
+  it('stopping without starting is harmless', async () => {
     const sweeper = new SandboxSweeper({ client: new FakeE2bClient() });
 
-    expect(() => {
-      sweeper.stop();
-    }).not.toThrow();
+    await expect(sweeper.stop()).resolves.toBeUndefined();
   });
 
   it('defaults to a quiet interval rather than a busy one', () => {
     expect(SWEEP_INTERVAL_MS).toBeGreaterThanOrEqual(60_000);
+  });
+});
+
+describe('SandboxSweeper shutting down', () => {
+  it('waits for the sweep it is in the middle of before it stops', async () => {
+    const client = new FakeE2bClient({ running: [] });
+
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const sweeper = new SandboxSweeper({
+      client,
+      now: () => NOW,
+      withLock: async (_resource, run) => {
+        await held;
+        return run();
+      },
+    });
+
+    const sweeping = sweeper.sweep();
+    const stopping = sweeper.stop();
+
+    expect(client.listQueries).toHaveLength(0);
+
+    release();
+    await stopping;
+
+    expect(client.listQueries).toHaveLength(1);
+    await sweeping;
+  });
+
+  it('starts no new sweep once it has stopped, so nothing runs against a closed connection', async () => {
+    const client = new FakeE2bClient({ running: [] });
+    const sweeper = new SandboxSweeper({ client, now: () => NOW });
+
+    await sweeper.stop();
+
+    expect(await sweeper.sweep()).toBeNull();
+    expect(client.listQueries).toHaveLength(0);
   });
 });

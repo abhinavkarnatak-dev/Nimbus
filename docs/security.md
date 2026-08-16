@@ -255,6 +255,31 @@ cancelled tears down its sandbox, releases its lease, and announces nothing.
 
 Owned by features 034, 035, and 038e.
 
+## 8b. Shutting a worker down
+
+A worker that is shutting down claims no further sessions, waits for the runs it already holds to
+finish on their own, and only then aborts whatever is left. The abort travels through the same signal
+a cancellation uses, so the same five liveness questions are asked before every remaining external
+write and the same guarantee applies: no branch is pushed and no pull request is opened once the
+worker has begun stopping a run.
+
+A run interrupted by a shutdown is not a cancelled run, and the difference is written into the code
+rather than left to interpretation. Nobody asked for this session to stop, so nothing is written about
+it, its lease is released, and it stays in an active status where the existing recovery path claims it.
+Writing `cancelled` would tell a person their work was cancelled when the machine it was on was
+restarted, and it would also make that state terminal, so the session could never be recovered.
+
+Every background worker in the process settles the work it is in the middle of before its dependencies
+are closed, in an order that closes nothing under live work: runs drain, then the session and sandbox
+and attachment sweepers, then the event stream, then in flight HTTP requests, and only then the mail
+transport, Redis, and MongoDB. Each sweeper holds a Redis lease while it works, so a connection closed
+under a sweep would strand that lease until its time to live expired and would leave the sweeper's own
+deletions half done. Anything still running when the deadline passes is logged and abandoned to lease
+expiry rather than allowed to hang the shutdown, because a process that will not die is worse than a
+session another worker picks up.
+
+Owned by features 038e and 038f.
+
 ## 9. Input validation
 
 Every request, response, and socket event is validated against a Zod schema from

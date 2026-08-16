@@ -452,12 +452,18 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   const shutdown = (reason: string): Promise<void> => {
     shuttingDown ??= (async () => {
       logger.info({ reason }, 'Shutting down');
-      await orchestrator?.stop();
-      waitingSweeper.stop();
+
+      const drain = await orchestrator?.stop();
+
+      if (drain !== undefined) {
+        logger.info(drain, 'Active runs drained');
+      }
+
+      await waitingSweeper.stop();
       await hub.stop();
       eventListener.disconnect();
-      sweeper?.stop();
-      attachmentSweeper?.stop();
+      await sweeper?.stop();
+      await attachmentSweeper?.stop();
       attachmentStore?.destroy();
       await closeHttpServer(server);
       await mail.close();

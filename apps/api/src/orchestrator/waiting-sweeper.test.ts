@@ -282,3 +282,50 @@ describe('when the sweep itself goes wrong', () => {
     expect(captured.text()).toContain('sweep of waiting sessions failed');
   });
 });
+
+describe('shutting the sweeper down', () => {
+  it('waits for the sweep it is in the middle of', async () => {
+    const captured = orchestratorLogger();
+    const records = new InMemorySessionRecords();
+
+    records.documents.push(waitingDocument(WAIT_LIMITS.clarificationMs + A_MINUTE));
+
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const sweeper = new WaitingSessionSweeper({
+      records,
+      logger: captured.logger,
+      withLock: async (_resource, run) => {
+        await held;
+        return await run();
+      },
+    });
+
+    const sweeping = sweeper.sweep();
+    const stopping = sweeper.stop();
+
+    expect(records.documents[0]?.status).toBe('awaiting_user');
+
+    release();
+    await stopping;
+
+    expect(records.documents[0]?.status).toBe('failed');
+    await sweeping;
+  });
+
+  it('starts no new sweep once it has stopped, so nothing runs against a closed database', async () => {
+    const captured = orchestratorLogger();
+    const records = new InMemorySessionRecords();
+
+    records.documents.push(waitingDocument(WAIT_LIMITS.clarificationMs + A_MINUTE));
+
+    const sweeper = new WaitingSessionSweeper({ records, logger: captured.logger });
+    await sweeper.stop();
+
+    expect(await sweeper.sweep()).toBeNull();
+    expect(records.documents[0]?.status).toBe('awaiting_user');
+  });
+});

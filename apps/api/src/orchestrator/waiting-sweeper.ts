@@ -3,6 +3,7 @@ import type { FailureCode } from '@nimbus/contracts';
 import type { SessionDocument } from '../db/models/session.js';
 import type { MailService } from '../email/mail-service.js';
 import type { EventPublisher } from '../events/publisher.js';
+import { InFlight } from '../lib/in-flight.js';
 import type { Logger } from '../logging/logger.js';
 import type { SessionRecords } from '../sessions/repository.js';
 import { WAIT_LIMITS, type WaitLimits } from './limits.js';
@@ -69,9 +70,9 @@ export class WaitingSessionSweeper {
 
   readonly #now: () => Date;
 
-  #timer: NodeJS.Timeout | null = null;
+  readonly #inFlight = new InFlight();
 
-  #sweeping = false;
+  #timer: NodeJS.Timeout | null = null;
 
   constructor(options: WaitingSweeperOptions) {
     this.#options = options;
@@ -91,36 +92,32 @@ export class WaitingSessionSweeper {
     this.#timer.unref();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.#timer !== null) {
       clearInterval(this.#timer);
       this.#timer = null;
     }
+
+    await this.#inFlight.settle();
   }
 
   async sweep(): Promise<string[] | null> {
-    if (this.#sweeping) {
-      return null;
-    }
+    return this.#inFlight.run(async () => {
+      try {
+        const withLock = this.#options.withLock;
 
-    this.#sweeping = true;
-
-    try {
-      const withLock = this.#options.withLock;
-
-      if (withLock === undefined) {
-        return await this.sweepOnce();
+        if (withLock === undefined) {
+          return await this.sweepOnce();
+        }
+        return await withLock(WAIT_SWEEP_RESOURCE, () => this.sweepOnce());
+      } catch (error) {
+        this.#options.logger.error(
+          { error: String(error) },
+          'a sweep of waiting sessions failed, the next one tries again',
+        );
+        return null;
       }
-      return await withLock(WAIT_SWEEP_RESOURCE, () => this.sweepOnce());
-    } catch (error) {
-      this.#options.logger.error(
-        { error: String(error) },
-        'a sweep of waiting sessions failed, the next one tries again',
-      );
-      return null;
-    } finally {
-      this.#sweeping = false;
-    }
+    });
   }
 
   async sweepOnce(): Promise<string[]> {

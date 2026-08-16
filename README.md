@@ -107,8 +107,12 @@ pnpm dev            # the API on http://localhost:4000, and the web client
 
 Startup connects to MongoDB, waits for a real ping, applies collection validators and indexes,
 connects to Redis, and only then begins listening, so the server is never accepting requests it
-cannot serve. Shutdown on `SIGINT` or `SIGTERM` stops accepting connections, lets in flight requests
-finish, closes both databases, and exits, with a fifteen second cap.
+cannot serve. Shutdown on `SIGINT` or `SIGTERM` claims no further sessions, waits up to ten seconds
+for the runs this worker is already holding to finish on their own, tells whatever is left to stop and
+gives it five more seconds to release its sandbox and its lease, then stops the sweepers and the event
+stream, lets in flight requests finish, closes both databases, and exits, with a fifteen second cap on
+the HTTP half. A run interrupted this way has nothing written about it and goes back to being
+claimable, because nobody cancelled it. A second signal exits immediately.
 
 | Route         | Answers                                                                     |
 | ------------- | --------------------------------------------------------------------------- |

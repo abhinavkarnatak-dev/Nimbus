@@ -20,8 +20,17 @@ export interface OrchestratorOptions {
   claimBatch?: number;
   maxRecoveries?: number;
   runningConcurrently?: number;
+  drainMs?: number;
+  drainGraceMs?: number;
+  drainPollMs?: number;
   cancellations?: CancelWatcher;
   now?: () => Date;
+}
+
+export interface DrainReport {
+  finished: number;
+  stopped: number;
+  abandoned: number;
 }
 
 export class Orchestrator {
@@ -45,15 +54,25 @@ export class Orchestrator {
 
   readonly #runningConcurrently: number;
 
+  readonly #drainMs: number;
+
+  readonly #drainGraceMs: number;
+
+  readonly #drainPollMs: number;
+
   readonly #now: () => Date;
 
   readonly #cancellations: CancelWatcher | null;
 
   readonly #running = new Map<string, AbortController>();
 
+  readonly #drained = new Set<string>();
+
   #timer: NodeJS.Timeout | null = null;
 
   #stopping = false;
+
+  #stopped: Promise<DrainReport> | null = null;
 
   constructor(options: OrchestratorOptions) {
     this.#records = options.records;
@@ -67,6 +86,9 @@ export class Orchestrator {
     this.#maxRecoveries = options.maxRecoveries ?? ORCHESTRATOR_LIMITS.maxRecoveries;
     this.#runningConcurrently =
       options.runningConcurrently ?? ORCHESTRATOR_LIMITS.runningConcurrently;
+    this.#drainMs = options.drainMs ?? ORCHESTRATOR_LIMITS.drainMs;
+    this.#drainGraceMs = options.drainGraceMs ?? ORCHESTRATOR_LIMITS.drainGraceMs;
+    this.#drainPollMs = options.drainPollMs ?? ORCHESTRATOR_LIMITS.drainPollMs;
     this.#cancellations = options.cancellations ?? null;
     this.#now = options.now ?? ((): Date => new Date());
   }
@@ -110,7 +132,12 @@ export class Orchestrator {
     });
   }
 
-  async stop(): Promise<void> {
+  async stop(): Promise<DrainReport> {
+    this.#stopped ??= this.#drain();
+    return this.#stopped;
+  }
+
+  async #drain(): Promise<DrainReport> {
     this.#stopping = true;
 
     if (this.#timer !== null) {
@@ -118,7 +145,57 @@ export class Orchestrator {
       this.#timer = null;
     }
 
+    const held = this.#running.size;
+
+    if (held > 0) {
+      this.#logger.info(
+        { running: held, waitingMs: this.#drainMs },
+        'this worker is shutting down and is waiting for the sessions it is running',
+      );
+    }
+
+    await this.#settle(this.#drainMs);
+
+    const stubborn = [...this.#running.keys()];
+
+    for (const sessionId of stubborn) {
+      this.#drained.add(sessionId);
+      this.#running.get(sessionId)?.abort();
+    }
+
+    if (stubborn.length > 0) {
+      this.#logger.warn(
+        { sessions: stubborn.length, unwindingMs: this.#drainGraceMs },
+        'these sessions were told to stop so this worker can shut down, and nothing will be written about them',
+      );
+    }
+
+    await this.#settle(this.#drainGraceMs);
+
+    const abandoned = this.#running.size;
+
+    if (abandoned > 0) {
+      this.#logger.error(
+        { sessions: abandoned },
+        'these sessions were still running when the shutdown deadline passed, their leases will expire and another worker will pick them up',
+      );
+    }
+
     await this.#cancellations?.stop();
+
+    return {
+      finished: held - stubborn.length,
+      stopped: stubborn.length - abandoned,
+      abandoned,
+    };
+  }
+
+  async #settle(withinMs: number): Promise<void> {
+    const deadline = Date.now() + withinMs;
+
+    while (this.#running.size > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, this.#drainPollMs));
+    }
   }
 
   async tick(): Promise<number> {
@@ -255,6 +332,16 @@ export class Orchestrator {
       return;
     }
 
+    if (this.#interrupted(session.sessionId, outcome)) {
+      this.#logger.warn(
+        { sessionId: session.sessionId },
+        'a shutdown interrupted this session rather than anybody cancelling it, so nothing was written and another worker will pick it up',
+      );
+      await release();
+      this.#running.delete(session.sessionId);
+      return;
+    }
+
     const stillOurs = await heartbeat.beat();
 
     if (!stillOurs) {
@@ -275,9 +362,18 @@ export class Orchestrator {
           'a session had already ended, so this outcome was not written',
         );
       }
+    } catch (error) {
+      this.#logger.error(
+        { sessionId: session.sessionId, wanted: outcome.status, error: String(error) },
+        'a session outcome could not be written, so another worker will pick this session up',
+      );
     } finally {
       await release();
       this.#running.delete(session.sessionId);
     }
+  }
+
+  #interrupted(sessionId: string, outcome: RunOutcome): boolean {
+    return this.#drained.has(sessionId) && outcome.status === 'cancelled';
   }
 }

@@ -7,7 +7,7 @@ import {
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ensureDatabaseSchema } from '../../src/db/bootstrap.js';
-import { sessionsCollection } from '../../src/db/models/session.js';
+import { sessionsCollection, type SessionDocument } from '../../src/db/models/session.js';
 import { capturingLogger } from '../../src/llm/llm.fixtures.js';
 import { RedisCancelAnnouncer, RedisCancelWatcher } from '../../src/orchestrator/cancellation.js';
 import { leaseResource } from '../../src/orchestrator/claim.js';
@@ -25,6 +25,7 @@ import {
   RecordingPushGateway,
   pendingApproval,
   sessionDocument,
+  whenAborted,
 } from '../../src/orchestrator/orchestrator.fixtures.js';
 import { SessionRunner } from '../../src/orchestrator/runner.js';
 import { WaitingSessionSweeper } from '../../src/orchestrator/waiting-sweeper.js';
@@ -41,7 +42,14 @@ const push = new RecordingPushGateway();
 const pullRequests = new RecordingPullRequestGateway();
 
 function workerWith(
-  options: { answers?: readonly { value: unknown }[]; hang?: boolean; watchCancels?: boolean } = {},
+  options: {
+    answers?: readonly { value: unknown }[];
+    hang?: boolean;
+    watchCancels?: boolean;
+    drainMs?: number;
+    drainGraceMs?: number;
+    onPrepare?: (session: SessionDocument, signal: AbortSignal) => void;
+  } = {},
 ): {
   orchestrator: Orchestrator;
   workshop: FakeWorkshop;
@@ -52,6 +60,7 @@ function workerWith(
   const workshop = new FakeWorkshop({
     logger: captured.logger,
     answers: options.answers ?? FINISHING_ANSWERS,
+    ...(options.onPrepare === undefined ? {} : { onPrepare: options.onPrepare }),
   });
 
   const runner = new SessionRunner({
@@ -70,6 +79,9 @@ function workerWith(
       logger: captured.logger,
       heartbeatMs: 60_000,
       leaseSeconds: 2,
+      drainPollMs: 2,
+      drainMs: options.drainMs ?? 5_000,
+      drainGraceMs: options.drainGraceMs ?? 5_000,
       ...(options.watchCancels === true
         ? {
             cancellations: new RedisCancelWatcher({
@@ -109,6 +121,7 @@ beforeEach(async () => {
   await redis.client.flushdb();
   push.calls.length = 0;
   pullRequests.calls.length = 0;
+  push.justAfter(async () => Promise.resolve());
 });
 
 describe('two workers reaching for one session', () => {
@@ -492,5 +505,95 @@ describe('a cancel raised by one process against a worker in another', () => {
 
     expect(written).toBeNull();
     expect((await sessionsCollection(testDatabase.db).findOne({}))?.status).toBe('cancelled');
+  });
+});
+
+describe('a worker shutting down with a session in its hands', () => {
+  it('waits for a run that is about to finish and lets it record its outcome', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    push.justAfter(async () => held);
+
+    const worker = workerWith();
+    await worker.orchestrator.take(session);
+    await settle();
+
+    setTimeout(release, 20);
+    const report = await worker.orchestrator.stop();
+
+    expect(report).toStrictEqual({ finished: 1, stopped: 0, abandoned: 0 });
+    expect((await sessionsCollection(testDatabase.db).findOne({}))?.status).toBe('pr_created');
+  });
+
+  it('writes nothing about a run it had to interrupt, and hands the session back', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+
+    let signal: AbortSignal | null = null;
+
+    push.justAfter(async () => {
+      if (signal !== null) {
+        await whenAborted(signal);
+      }
+    });
+
+    const worker = workerWith({
+      drainMs: 50,
+      onPrepare: (_session, given) => {
+        signal = given;
+      },
+    });
+
+    await worker.orchestrator.take(session);
+    await settle();
+
+    const report = await worker.orchestrator.stop();
+    const stored = await sessionsCollection(testDatabase.db).findOne({});
+
+    expect(report).toStrictEqual({ finished: 0, stopped: 1, abandoned: 0 });
+    expect(stored?.status).toBe('queued');
+    expect(stored?.pullRequest).toBeNull();
+    expect(pullRequests.calls).toHaveLength(0);
+  });
+
+  it('releases the lease in Redis so another worker takes the session straight away', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+
+    let signal: AbortSignal | null = null;
+
+    push.justAfter(async () => {
+      if (signal !== null) {
+        await whenAborted(signal);
+      }
+    });
+
+    const worker = workerWith({
+      drainMs: 50,
+      onPrepare: (_session, given) => {
+        signal = given;
+      },
+    });
+
+    await worker.orchestrator.take(session);
+    await settle();
+    await worker.orchestrator.stop();
+
+    expect(await leases.holderOf(leaseResource(session.sessionId))).toBeNull();
+
+    push.justAfter(async () => Promise.resolve());
+    const next = workerWith();
+
+    expect(await next.orchestrator.tick()).toBe(1);
+    await settle();
+
+    expect((await sessionsCollection(testDatabase.db).findOne({}))?.status).toBe('pr_created');
+    await next.orchestrator.stop();
   });
 });
