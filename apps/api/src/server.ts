@@ -33,6 +33,7 @@ import { ImageDescriber } from './routing/describe.js';
 import { Orchestrator } from './orchestrator/orchestrator.js';
 import { LiveSessionWorkshop } from './orchestrator/live-workshop.js';
 import { SessionRunner } from './orchestrator/runner.js';
+import { WaitingSessionSweeper } from './orchestrator/waiting-sweeper.js';
 import { OctokitPullRequestClientFactory } from './pull-request/octokit-client.js';
 import { TrustedPullRequestGateway } from './pull-request/gateway.js';
 import { OctokitGitDataFactory } from './push/octokit-git-data.js';
@@ -327,6 +328,18 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   orchestrator?.start();
   logger.info({ orchestrator: orchestrator !== null }, 'Session orchestrator ready');
 
+  const waitingSweeper = new WaitingSessionSweeper({
+    records: sessionRecords,
+    logger,
+    events,
+    mail,
+    notifyEmailFor: async (session) => emailOf(handle.db, session.userId),
+    withLock: leaseLock(new LeaseManager(redis)),
+  });
+
+  waitingSweeper.start();
+  logger.info({ waitingSessionSweeper: true }, 'Session wait timeouts ready');
+
   const attachmentSweeper =
     attachments === null
       ? null
@@ -388,6 +401,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     shuttingDown ??= (async () => {
       logger.info({ reason }, 'Shutting down');
       await orchestrator?.stop();
+      waitingSweeper.stop();
       await hub.stop();
       eventListener.disconnect();
       sweeper?.stop();

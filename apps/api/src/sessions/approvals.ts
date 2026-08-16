@@ -111,6 +111,7 @@ export class MongoApprovals implements ApprovalStore {
         $set: {
           'approvals.$[card].status': status,
           'approvals.$[card].decidedAt': decidedAt,
+          waitingSince: null,
         },
       },
       { arrayFilters: [{ 'card.approvalId': approvalId }] },
@@ -132,6 +133,16 @@ export class MongoApprovals implements ApprovalStore {
           one.actionHash === actionHash &&
           one.usedAt === null &&
           statusNow(one, this.#now()) === 'approved',
+      ) ?? null
+    );
+  }
+
+  async findRefused(actionHash: string): Promise<StoredApproval | null> {
+    const held = await this.#held();
+
+    return (
+      held.find(
+        (one) => one.actionHash === actionHash && statusNow(one, this.#now()) === 'rejected',
       ) ?? null
     );
   }

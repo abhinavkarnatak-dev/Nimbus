@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import type { SessionDocument } from '../db/models/session.js';
 import { InMemorySessionRecords } from '../sessions/repository.js';
 import { leaseResource } from './claim.js';
 import { Orchestrator } from './orchestrator.js';
@@ -7,6 +8,7 @@ import {
   FINISHING_ANSWERS,
   FakeWorkshop,
   InMemoryLeases,
+  NEVER_CLEAR_ANSWERS,
   RecordingPullRequestGateway,
   RecordingPushGateway,
   orchestratorLogger,
@@ -308,6 +310,111 @@ describe('a session that was already ended', () => {
 
     expect(held.records.documents[0]?.status).toBe('cancelled');
     expect(held.logs()).toContain('already ended');
+  });
+});
+
+describe('a session that is waiting for a person', () => {
+  async function paused(): Promise<{ held: Harness; session: SessionDocument }> {
+    const held = harness({ answers: NEVER_CLEAR_ANSWERS });
+    const session = sessionDocument();
+
+    await held.records.insert(session);
+    await held.orchestrator.tick();
+    await settle();
+
+    return { held, session };
+  }
+
+  it('stops and says so', async () => {
+    const { held } = await paused();
+
+    expect(held.records.documents[0]?.status).toBe('awaiting_user');
+    expect(held.records.documents[0]?.waitingSince).not.toBeNull();
+  });
+
+  it('is not taken again on the very next tick', async () => {
+    const { held } = await paused();
+
+    await held.orchestrator.tick();
+    await settle();
+
+    expect(held.workshop.prepared).toHaveLength(1);
+  });
+
+  it('is left alone however many times the worker looks', async () => {
+    const { held } = await paused();
+
+    for (let round = 0; round < 5; round += 1) {
+      await held.orchestrator.tick();
+      await settle();
+    }
+
+    expect(held.workshop.prepared).toHaveLength(1);
+    expect(held.records.documents[0]?.status).toBe('awaiting_user');
+  });
+
+  it('does not spend the recovery budget on waiting, since waiting is not crashing', async () => {
+    const { held } = await paused();
+
+    for (let round = 0; round < 5; round += 1) {
+      await held.orchestrator.tick();
+      await settle();
+    }
+
+    expect(held.records.documents[0]?.retryCount).toBe(0);
+    expect(held.records.documents[0]?.failure).toBeNull();
+  });
+
+  it('rents no second machine while it waits', async () => {
+    const { held } = await paused();
+
+    await held.orchestrator.tick();
+    await settle();
+
+    expect(held.workshop.sandboxes).toHaveLength(1);
+  });
+});
+
+describe('a session that has been answered', () => {
+  it('is picked up again at once', async () => {
+    const held = harness({ answers: NEVER_CLEAR_ANSWERS });
+    const session = sessionDocument();
+
+    await held.records.insert(session);
+    await held.orchestrator.tick();
+    await settle();
+
+    await held.records.answerOnce(session.userId, session.sessionId, 'the dashboard', new Date());
+    await held.orchestrator.tick();
+    await settle();
+
+    expect(held.workshop.prepared).toHaveLength(2);
+  });
+
+  it('stops counting as waiting the moment the answer lands', async () => {
+    const held = harness({ answers: NEVER_CLEAR_ANSWERS });
+    const session = sessionDocument();
+
+    await held.records.insert(session);
+    await held.orchestrator.tick();
+    await settle();
+
+    await held.records.answerOnce(session.userId, session.sessionId, 'the dashboard', new Date());
+
+    expect(held.records.documents[0]?.waitingSince).toBeNull();
+  });
+});
+
+describe('a session left behind by a worker that died', () => {
+  it('is still recovered, because it was never waiting for anybody', async () => {
+    const held = harness();
+
+    await held.records.insert(sessionDocument({ status: 'working' }));
+    await held.orchestrator.tick();
+    await settle();
+
+    expect(held.workshop.prepared).toHaveLength(1);
+    expect(held.records.documents[0]?.retryCount).toBe(1);
   });
 });
 

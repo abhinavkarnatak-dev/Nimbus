@@ -20,10 +20,11 @@ import type { PullRequestGateway } from '../pull-request/gateway.js';
 import type { PushGateway } from '../push/gateway.js';
 import type { ApprovalStore } from '../agent/policy/approvals.js';
 import type { RunOutcome, SessionRecords } from '../sessions/repository.js';
+import { WAIT_LIMITS } from './limits.js';
 import { failureOf, failureForStop, isPaused } from './outcome.js';
 import { WorkshopError, type SessionWorkshop } from './workshop.js';
 
-export const PAUSE_EXPIRY_MS = 24 * 60 * 60 * 1_000;
+export const PAUSE_EXPIRY_MS = WAIT_LIMITS.clarificationMs;
 
 export const REPORTED_OUTCOME: Readonly<Record<ToolEventSummary['outcome'], ToolOutcome>> = {
   ok: 'succeeded',

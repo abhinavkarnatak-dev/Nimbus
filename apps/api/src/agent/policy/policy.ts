@@ -13,6 +13,9 @@ import { actionHash } from './hash.js';
 import { POLICY_LIMITS } from './limits.js';
 import { classifyAction } from './rules.js';
 
+export const REFUSED_BY_PERSON =
+  'a person was shown this exact action and refused it, so it is settled for this session';
+
 export interface ProposedTool {
   tool: string;
   input: unknown;
@@ -90,6 +93,23 @@ export class PolicyGate {
     }
 
     const effect = this.effectFor(action.tool, found);
+    const refused = await this.approvals.findRefused(hash);
+
+    if (refused !== null) {
+      return this.record(action, {
+        decision: 'denied',
+        actionHash: hash,
+        category: found.category,
+        risk: found.risk,
+        reason: REFUSED_BY_PERSON,
+        paths: found.paths,
+        effect,
+        approval: refused,
+        approvedByUser: false,
+        decidedAtMs,
+      });
+    }
+
     const usable = await this.approvals.findUsable(hash);
 
     if (usable === null) {

@@ -209,3 +209,47 @@ describe('InMemoryApprovals', () => {
     expect(request.effect).toEqual(EFFECT);
   });
 });
+
+describe('remembering that a person said no', () => {
+  it('finds the refusal for the action it was about', async () => {
+    const store = new InMemoryApprovals();
+    const card = await store.request(HASH, EFFECT);
+    await store.decide(card.approvalId, HASH, false);
+
+    expect((await store.findRefused(HASH))?.approvalId).toBe(card.approvalId);
+  });
+
+  it('finds nothing for a different action', async () => {
+    const store = new InMemoryApprovals();
+    const card = await store.request(HASH, EFFECT);
+    await store.decide(card.approvalId, HASH, false);
+
+    expect(await store.findRefused(OTHER_HASH)).toBeNull();
+  });
+
+  it('finds nothing while nobody has decided', async () => {
+    const store = new InMemoryApprovals();
+    await store.request(HASH, EFFECT);
+
+    expect(await store.findRefused(HASH)).toBeNull();
+  });
+
+  it('finds nothing when the person said yes', async () => {
+    const store = new InMemoryApprovals();
+    const card = await store.request(HASH, EFFECT);
+    await store.decide(card.approvalId, HASH, true);
+
+    expect(await store.findRefused(HASH)).toBeNull();
+  });
+
+  it('remembers the refusal even after the card would have expired', async () => {
+    let clock = 1_000_000;
+    const store = new InMemoryApprovals({ ttlMs: 1_000, now: () => clock });
+    const card = await store.request(HASH, EFFECT);
+    await store.decide(card.approvalId, HASH, false);
+
+    clock += 60_000;
+
+    expect(await store.findRefused(HASH)).not.toBeNull();
+  });
+});

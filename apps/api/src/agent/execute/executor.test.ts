@@ -84,6 +84,31 @@ describe('nothing happens before policy has said so', () => {
     expect(third.status).toBe('approval_required');
   });
 
+  it('tells the model to stop proposing an action a person refused', async () => {
+    const harness = await executeHarness();
+    const asked = await harness.executor.execute(WORKFLOW);
+
+    await harness.approvals.decide(asked.approvalId ?? '', asked.actionHash, false);
+    const after = await harness.executor.execute(WORKFLOW);
+
+    expect(after.status).toBe('denied');
+    expect(after.observation.text).toContain('never be allowed');
+    expect(after.observation.text).toContain('Find another way');
+  });
+
+  it('never runs the refused action and never asks about it again', async () => {
+    const harness = await executeHarness();
+    const asked = await harness.executor.execute(WORKFLOW);
+
+    await harness.approvals.decide(asked.approvalId ?? '', asked.actionHash, false);
+    await harness.executor.execute(WORKFLOW);
+    const third = await harness.executor.execute(WORKFLOW);
+
+    expect(third.approvalId).toBeNull();
+    expect(await harness.approvals.list()).toHaveLength(1);
+    expect(await holds(harness.sandbox, '.github/workflows/deploy.yml')).toBe(false);
+  });
+
   it('does not consult policy at all when the arguments are unusable', async () => {
     const harness = await executeHarness();
     const result = await harness.executor.execute(actionFor('read_file', { path: 42 }));

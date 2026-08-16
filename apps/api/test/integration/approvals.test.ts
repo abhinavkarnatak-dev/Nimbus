@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ApprovalError } from '../../src/agent/policy/approvals.js';
 import { POLICY_LIMITS } from '../../src/agent/policy/limits.js';
+import { PolicyGate, REFUSED_BY_PERSON } from '../../src/agent/policy/policy.js';
 import { ensureDatabaseSchema } from '../../src/db/bootstrap.js';
 import { sessionsCollection } from '../../src/db/models/session.js';
 import { capturingLogger } from '../../src/llm/llm.fixtures.js';
@@ -23,6 +24,11 @@ const EFFECT: ApprovalEffect = {
 
 const HASH = 'a'.repeat(64);
 const OTHER_HASH = 'b'.repeat(64);
+
+const PROTECTED_ACTION = {
+  tool: 'create_file',
+  input: { path: '.github/workflows/deploy.yml', contents: 'name: deploy\n' },
+};
 
 function approvals(now?: () => number): MongoApprovals {
   return new MongoApprovals({
@@ -141,6 +147,64 @@ describe('deciding, which is where the action hash earns its keep', () => {
     await approvals().decide(card.approvalId, HASH, false);
 
     expect(await approvals().findUsable(HASH)).toBeNull();
+  });
+});
+
+describe('a person who said no, and a worker that has never heard of them', () => {
+  it('finds the refusal from a store that did not make it', async () => {
+    const card = await approvals().request(HASH, EFFECT);
+    await approvals().decide(card.approvalId, HASH, false);
+
+    const refused = await approvals().findRefused(HASH);
+
+    expect(refused?.approvalId).toBe(card.approvalId);
+    expect(refused?.status).toBe('rejected');
+  });
+
+  it('finds no refusal for an action nobody was asked about', async () => {
+    const card = await approvals().request(HASH, EFFECT);
+    await approvals().decide(card.approvalId, HASH, false);
+
+    expect(await approvals().findRefused(OTHER_HASH)).toBeNull();
+  });
+
+  it('finds no refusal while the card is still pending', async () => {
+    await approvals().request(HASH, EFFECT);
+
+    expect(await approvals().findRefused(HASH)).toBeNull();
+  });
+
+  it('finds no refusal when the person said yes', async () => {
+    const card = await approvals().request(HASH, EFFECT);
+    await approvals().decide(card.approvalId, HASH, true);
+
+    expect(await approvals().findRefused(HASH)).toBeNull();
+  });
+
+  it('stops a worker that never saw the refusal from asking again', async () => {
+    const asking = new PolicyGate({ approvals: approvals(), logger: capturingLogger().logger });
+    const card = await asking.requestApproval(PROTECTED_ACTION);
+
+    expect((await asking.authorize(PROTECTED_ACTION)).decision).toBe('approval_required');
+
+    await approvals().decide(card.approvalId, card.actionHash, false);
+
+    const later = new PolicyGate({ approvals: approvals(), logger: capturingLogger().logger });
+    const decided = await later.authorize(PROTECTED_ACTION);
+
+    expect(decided.decision).toBe('denied');
+    expect(decided.reason).toBe(REFUSED_BY_PERSON);
+  });
+
+  it('makes no second card for an action a person already refused', async () => {
+    const gate = new PolicyGate({ approvals: approvals(), logger: capturingLogger().logger });
+    const card = await gate.requestApproval(PROTECTED_ACTION);
+    await approvals().decide(card.approvalId, card.actionHash, false);
+
+    await gate.authorize(PROTECTED_ACTION);
+    await gate.authorize(PROTECTED_ACTION);
+
+    expect(await approvals().list()).toHaveLength(1);
   });
 });
 

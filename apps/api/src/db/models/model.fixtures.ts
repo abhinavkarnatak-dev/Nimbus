@@ -72,6 +72,7 @@ export function makeSession(
     baseCommitSha: null,
     clarificationQuestion: null,
     clarificationAnswer: null,
+    waitingSince: null,
     messages: [],
     task: 'Add a short setup section to the readme file',
     attachments: [],

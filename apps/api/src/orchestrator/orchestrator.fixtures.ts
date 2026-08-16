@@ -7,7 +7,7 @@ import { InMemoryApprovals } from '../agent/policy/approvals.js';
 import { PolicyGate } from '../agent/policy/policy.js';
 import { ToolRegistry } from '../agent/registry/registry.js';
 import { createState } from '../agent/state/state.js';
-import type { SessionDocument } from '../db/models/session.js';
+import type { SessionApprovalDocument, SessionDocument } from '../db/models/session.js';
 import { FakeTextProvider } from '../llm/fake-text.js';
 import { capturingLogger } from '../llm/llm.fixtures.js';
 import type { Logger } from '../logging/logger.js';
@@ -57,6 +57,50 @@ export function answer(
   };
 }
 
+export const UNCLEAR_SCOPE = {
+  value: { clear: false, question: 'Which page should people land on after signing in?' },
+};
+
+export const NEVER_CLEAR_ANSWERS = [
+  UNCLEAR_SCOPE,
+  UNCLEAR_SCOPE,
+  UNCLEAR_SCOPE,
+  UNCLEAR_SCOPE,
+  UNCLEAR_SCOPE,
+  UNCLEAR_SCOPE,
+];
+
+export function pendingApproval(at: Date): SessionApprovalDocument {
+  return {
+    approvalId: testId('apr', 'card'),
+    actionHash: 'a'.repeat(64),
+    effect: {
+      category: 'file_deletion',
+      summary: 'delete an unused helper',
+      paths: ['src/old.ts'],
+      reason: 'the task says the helper is dead',
+      risk: 'medium',
+    },
+    status: 'pending',
+    requestedAt: at,
+    expiresAt: new Date(at.getTime() + 900_000),
+  };
+}
+
+export function waitingDocument(
+  waitedMs: number,
+  overrides: Partial<SessionDocument> = {},
+): SessionDocument {
+  const since = new Date(Date.now() - waitedMs);
+
+  return sessionDocument({
+    status: 'awaiting_user',
+    waitingSince: since,
+    clarificationQuestion: 'Which page should people land on after signing in?',
+    ...overrides,
+  });
+}
+
 export const FINISHING_ANSWERS = [
   CLEAR_SCOPE,
   answer('apply_patch', { patch: REDIRECT_PATCH }),
@@ -85,6 +129,7 @@ export function sessionDocument(overrides: Partial<SessionDocument> = {}): Sessi
     task: 'the login redirect always sends people to the dashboard',
     clarificationQuestion: null,
     clarificationAnswer: null,
+    waitingSince: null,
     messages: [],
     attachments: [],
     idempotencyKey: testId('idk', 'a'),

@@ -37,6 +37,7 @@ export interface ApprovalStore {
   request(actionHash: string, effect: ApprovalEffect): Promise<StoredApproval>;
   decide(approvalId: string, actionHash: string, approved: boolean): Promise<StoredApproval>;
   findUsable(actionHash: string): Promise<StoredApproval | null>;
+  findRefused(actionHash: string): Promise<StoredApproval | null>;
   consume(approvalId: string): Promise<void>;
   list(): Promise<StoredApproval[]>;
 }
@@ -143,6 +144,15 @@ export class InMemoryApprovals implements ApprovalStore {
       }
 
       if (statusNow(held, this.now()) === 'approved') {
+        return await Promise.resolve(held);
+      }
+    }
+    return await Promise.resolve(null);
+  }
+
+  async findRefused(actionHash: string): Promise<StoredApproval | null> {
+    for (const held of this.held.values()) {
+      if (held.actionHash === actionHash && statusNow(held, this.now()) === 'rejected') {
         return await Promise.resolve(held);
       }
     }

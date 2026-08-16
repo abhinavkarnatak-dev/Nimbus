@@ -16,6 +16,8 @@ export type InsertOutcome = (typeof INSERT_OUTCOMES)[number];
 
 export const DUPLICATE_KEY = 11_000;
 
+export const WAITING_STATUS: SessionStatus = 'awaiting_user';
+
 export interface RunOutcome {
   status: SessionStatus;
   failure?: SessionFailure | null;
@@ -42,6 +44,7 @@ export interface SessionRecords {
     at: Date,
   ): Promise<SessionDocument | null>;
   findClaimable(limit: number): Promise<SessionDocument[]>;
+  findWaitingSince(cutoff: Date, limit: number): Promise<SessionDocument[]>;
   findById(sessionId: string): Promise<SessionDocument | null>;
   recordOutcome(sessionId: string, outcome: RunOutcome, at: Date): Promise<SessionDocument | null>;
   bumpRetry(sessionId: string, at: Date): Promise<number>;
@@ -128,8 +131,19 @@ export class MongoSessionRecords implements SessionRecords {
 
   async findClaimable(limit: number): Promise<SessionDocument[]> {
     return sessionsCollection(this.db)
-      .find({ status: { $in: activeStatuses() } })
+      .find({
+        status: { $in: activeStatuses() },
+        $or: [{ status: { $ne: WAITING_STATUS } }, { waitingSince: null }],
+      })
       .sort({ createdAt: 1 })
+      .limit(limit)
+      .toArray();
+  }
+
+  async findWaitingSince(cutoff: Date, limit: number): Promise<SessionDocument[]> {
+    return sessionsCollection(this.db)
+      .find({ status: WAITING_STATUS, waitingSince: { $ne: null, $lte: cutoff } })
+      .sort({ waitingSince: 1 })
       .limit(limit)
       .toArray();
   }
@@ -174,7 +188,14 @@ export class MongoSessionRecords implements SessionRecords {
   async answerOnce(userId: string, sessionId: string, answer: string, at: Date): Promise<boolean> {
     const changed = await sessionsCollection(this.db).updateOne(
       { sessionId, userId, clarificationAnswer: null, status: { $in: activeStatuses() } },
-      { $set: { clarificationAnswer: answer, updatedAt: at, lastActivityAt: at } },
+      {
+        $set: {
+          clarificationAnswer: answer,
+          waitingSince: null,
+          updatedAt: at,
+          lastActivityAt: at,
+        },
+      },
     );
 
     return changed.modifiedCount === 1;
@@ -283,8 +304,29 @@ export class InMemorySessionRecords implements SessionRecords {
   async findClaimable(limit: number): Promise<SessionDocument[]> {
     return Promise.resolve(
       this.documents
-        .filter((held) => isActiveSessionStatus(held.status))
+        .filter(
+          (held) =>
+            isActiveSessionStatus(held.status) &&
+            (held.status !== WAITING_STATUS || held.waitingSince === null),
+        )
         .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())
+        .slice(0, limit),
+    );
+  }
+
+  async findWaitingSince(cutoff: Date, limit: number): Promise<SessionDocument[]> {
+    return Promise.resolve(
+      this.documents
+        .filter(
+          (held) =>
+            held.status === WAITING_STATUS &&
+            held.waitingSince !== null &&
+            held.waitingSince.getTime() <= cutoff.getTime(),
+        )
+        .sort(
+          (left, right) =>
+            (left.waitingSince?.getTime() ?? 0) - (right.waitingSince?.getTime() ?? 0),
+        )
         .slice(0, limit),
     );
   }
@@ -344,6 +386,7 @@ export class InMemorySessionRecords implements SessionRecords {
     }
 
     held.clarificationAnswer = answer;
+    held.waitingSince = null;
     held.updatedAt = at;
     held.lastActivityAt = at;
     return Promise.resolve(true);
@@ -389,6 +432,7 @@ export function outcomeFields(outcome: RunOutcome, at: Date): Partial<SessionDoc
     updatedAt: at,
     lastActivityAt: at,
     completedAt: terminal ? at : null,
+    waitingSince: outcome.status === WAITING_STATUS ? at : null,
     ...(outcome.failure === undefined ? {} : { failure: outcome.failure }),
     ...(outcome.branch === undefined ? {} : { branch: outcome.branch }),
     ...(outcome.baseCommitSha === undefined ? {} : { baseCommitSha: outcome.baseCommitSha }),

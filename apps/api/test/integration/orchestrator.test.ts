@@ -11,15 +11,20 @@ import { sessionsCollection } from '../../src/db/models/session.js';
 import { capturingLogger } from '../../src/llm/llm.fixtures.js';
 import { leaseResource } from '../../src/orchestrator/claim.js';
 import { Orchestrator } from '../../src/orchestrator/orchestrator.js';
+import { WAIT_LIMITS } from '../../src/orchestrator/limits.js';
 import {
   FINISHING_ANSWERS,
   FakeWorkshop,
+  NEVER_CLEAR_ANSWERS,
   RecordingPullRequestGateway,
   RecordingPushGateway,
+  pendingApproval,
   sessionDocument,
 } from '../../src/orchestrator/orchestrator.fixtures.js';
 import { SessionRunner } from '../../src/orchestrator/runner.js';
+import { WaitingSessionSweeper } from '../../src/orchestrator/waiting-sweeper.js';
 import { LeaseManager } from '../../src/redis/lease.js';
+import { MongoApprovals } from '../../src/sessions/approvals.js';
 import { MongoSessionRecords } from '../../src/sessions/repository.js';
 
 let testDatabase: TestDatabase;
@@ -238,5 +243,104 @@ describe('no orphan sandbox', () => {
     await settle();
 
     expect(await records.isLive(session.sessionId)).toBe(false);
+  });
+});
+
+describe('a session waiting for a person, against a real database', () => {
+  it('is written as waiting and is not claimable', async () => {
+    await records.insert(sessionDocument());
+
+    const worker = workerWith({ answers: NEVER_CLEAR_ANSWERS });
+    await worker.orchestrator.tick();
+    await settle();
+
+    const stored = await sessionsCollection(testDatabase.db).findOne({});
+
+    expect(stored?.status).toBe('awaiting_user');
+    expect(stored?.waitingSince).toBeInstanceOf(Date);
+    expect(await records.findClaimable(10)).toEqual([]);
+  });
+
+  it('becomes claimable the moment the answer is written', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+
+    const worker = workerWith({ answers: NEVER_CLEAR_ANSWERS });
+    await worker.orchestrator.tick();
+    await settle();
+
+    await records.answerOnce(session.userId, session.sessionId, 'the dashboard', new Date());
+
+    const claimable = await records.findClaimable(10);
+
+    expect(claimable.map((one) => one.sessionId)).toEqual([session.sessionId]);
+    expect(claimable[0]?.waitingSince).toBeNull();
+  });
+
+  it('becomes claimable the moment an approval is decided', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+
+    const approvals = new MongoApprovals({
+      db: testDatabase.db,
+      sessionId: session.sessionId,
+    });
+
+    const asked = await approvals.request('b'.repeat(64), pendingApproval(new Date()).effect);
+
+    await records.recordOutcome(
+      session.sessionId,
+      { status: 'awaiting_user', currentActivity: null },
+      new Date(),
+    );
+
+    expect(await records.findClaimable(10)).toEqual([]);
+
+    await approvals.decide(asked.approvalId, 'b'.repeat(64), true);
+
+    expect((await records.findClaimable(10)).map((one) => one.sessionId)).toEqual([
+      session.sessionId,
+    ]);
+  });
+
+  it('is found by the sweeper only once its own timeout has passed', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+
+    await records.askQuestion(session.sessionId, 'Which page?', new Date());
+    await records.recordOutcome(
+      session.sessionId,
+      { status: 'awaiting_user', currentActivity: null },
+      new Date(Date.now() - WAIT_LIMITS.clarificationMs - 60_000),
+    );
+
+    expect(
+      await records.findWaitingSince(new Date(Date.now() - WAIT_LIMITS.approvalMs), 10),
+    ).toHaveLength(1);
+
+    const sweeper = new WaitingSessionSweeper({ records, logger: capturingLogger().logger });
+
+    expect(await sweeper.sweepOnce()).toEqual([session.sessionId]);
+
+    const stored = await sessionsCollection(testDatabase.db).findOne({});
+
+    expect(stored?.status).toBe('failed');
+    expect(stored?.failure?.code).toBe('CLARIFICATION_TIMEOUT');
+    expect(stored?.waitingSince).toBeNull();
+  });
+
+  it('leaves a session that has never waited out of the sweep, field or no field', async () => {
+    const session = sessionDocument();
+    await records.insert(session);
+
+    await sessionsCollection(testDatabase.db).updateOne(
+      { sessionId: session.sessionId },
+      { $unset: { waitingSince: '' } },
+    );
+
+    expect(await records.findWaitingSince(new Date(), 10)).toEqual([]);
+    expect((await records.findClaimable(10)).map((one) => one.sessionId)).toEqual([
+      session.sessionId,
+    ]);
   });
 });

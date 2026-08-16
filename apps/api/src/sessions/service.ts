@@ -344,6 +344,7 @@ export class AgentSessionService {
       task: input.body.task,
       clarificationQuestion: null,
       clarificationAnswer: null,
+      waitingSince: null,
       messages: [],
       attachments: input.attachments,
       idempotencyKey: input.body.idempotencyKey,

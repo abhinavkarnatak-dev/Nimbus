@@ -122,6 +122,7 @@ export interface SessionDocument {
   task: string;
   clarificationQuestion: string | null;
   clarificationAnswer: string | null;
+  waitingSince: Date | null;
   messages: SessionMessageDocument[];
   attachments: SessionAttachmentDocument[];
   idempotencyKey: string;
@@ -334,6 +335,7 @@ export const sessionModel: ModelDefinition = {
           bsonType: ['string', 'null'],
           maxLength: LIMITS.clarificationAnswerMaxChars,
         },
+        waitingSince: { bsonType: ['date', 'null'] },
         messages: {
           bsonType: 'array',
           maxItems: MAX_USER_MESSAGES,
@@ -490,6 +492,7 @@ export const sessionModel: ModelDefinition = {
       name: 'session_idempotency_unique',
       unique: true,
     },
+    { key: { status: 1, waitingSince: 1 }, name: 'session_waiting' },
     { key: { userId: 1, createdAt: -1 }, name: 'session_user_recent' },
     { key: { 'repository.repositoryId': 1, createdAt: -1 }, name: 'session_repository_recent' },
   ],
