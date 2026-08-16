@@ -13,8 +13,9 @@ export const RETRIEVAL_LIMITS = {
   phraseMaxChars: 60,
 
   treeMaxDepth: 6,
-  treeMaxLines: 120,
-  treeExpandMaxFiles: 8,
+  treeMaxLines: 500,
+  treeMaxChars: 12_000,
+  treeExpandMaxFiles: 40,
   treeExtensionsShown: 3,
 
   scanMaxFiles: 1_500,

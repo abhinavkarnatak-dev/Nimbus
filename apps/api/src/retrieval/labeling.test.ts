@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   FLAG_WARNING,
   MARKER_PREFIX,
+  PARTIAL_TREE_WARNING,
   bundleHeader,
   closeMarker,
   flagLine,
@@ -143,5 +144,21 @@ describe('bundleHeader', () => {
 
   it('adds a warning when something was flagged', () => {
     expect(bundleHeader(true)).toContain(FLAG_WARNING);
+  });
+
+  it('warns that the chosen files can miss the right one', () => {
+    const header = bundleHeader(false);
+
+    expect(header).toContain('matching the words of the task against the words in the code');
+    expect(header).toContain('search for that word');
+  });
+
+  it('says nothing about a partial listing when the whole tree fits', () => {
+    expect(bundleHeader(false)).not.toContain(PARTIAL_TREE_WARNING);
+  });
+
+  it('says the listing is partial when the tree had to be cut', () => {
+    expect(bundleHeader(false, true)).toContain(PARTIAL_TREE_WARNING);
+    expect(bundleHeader(false, true)).toContain('List that directory before deciding');
   });
 });

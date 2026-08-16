@@ -91,7 +91,7 @@ export async function retrieveContext(
 
   const material = [tree.text, ...files.flatMap((file) => file.windows.map((one) => one.text))];
   const nonce = makeNonce(material);
-  const rendered = render(nonce, tree, files, scan.flags.length > 0);
+  const rendered = render(nonce, tree, files, scan.flags.length > 0, tree.truncated);
 
   return {
     task: query.task,
@@ -111,8 +111,9 @@ function render(
   tree: TreeSummary,
   files: readonly RetrievedFile[],
   flagged: boolean,
+  partialTree: boolean,
 ): { text: string; truncated: boolean } {
-  const blocks: string[] = [bundleHeader(flagged)];
+  const blocks: string[] = [bundleHeader(flagged, partialTree)];
   let used = blocks[0]?.length ?? 0;
   let truncated = false;
 

@@ -74,12 +74,21 @@ class Renderer {
 
   truncated = false;
 
+  #characters = 0;
+
   add(text: string): boolean {
-    if (this.lines.length >= RETRIEVAL_LIMITS.treeMaxLines) {
+    const wouldBe = this.#characters + text.length + 1;
+
+    if (
+      this.lines.length >= RETRIEVAL_LIMITS.treeMaxLines ||
+      wouldBe > RETRIEVAL_LIMITS.treeMaxChars
+    ) {
       this.truncated = true;
       return false;
     }
+
     this.lines.push(text);
+    this.#characters = wouldBe;
     return true;
   }
 

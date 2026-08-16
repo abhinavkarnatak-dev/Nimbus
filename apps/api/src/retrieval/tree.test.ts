@@ -92,6 +92,35 @@ describe('summarizeTree', () => {
     expect(summary.truncated).toBe(true);
   });
 
+  it('stops at its character limit, not only its line limit', () => {
+    const longNames = Array.from(
+      { length: 200 },
+      (_value, index) => `src/area${String(index)}/${'a'.repeat(120)}.ts`,
+    );
+
+    const summary = summarizeTree(files(...longNames));
+
+    expect(summary.text.length).toBeLessThanOrEqual(RETRIEVAL_LIMITS.treeMaxChars);
+    expect(summary.lines.length).toBeLessThan(RETRIEVAL_LIMITS.treeMaxLines);
+    expect(summary.truncated).toBe(true);
+  });
+
+  it('names the files of a repository the size this one actually is', () => {
+    const areas = ['auth', 'agent', 'events', 'orchestrator', 'retrieval', 'routing', 'sessions'];
+    const paths = areas.flatMap((area) =>
+      Array.from(
+        { length: 14 },
+        (_value, index) => `apps/api/src/${area}/thing${String(index)}.ts`,
+      ),
+    );
+
+    const summary = summarizeTree(files(...paths, 'apps/api/src/auth/otp-service.ts'));
+
+    expect(summary.truncated).toBe(false);
+    expect(summary.text).toContain('otp-service.ts');
+    expect(summary.text).not.toContain('files here');
+  });
+
   it('counts directories', () => {
     const summary = summarizeTree(files('src/auth/login.ts', 'src/http/router.ts', 'README.md'));
     expect(summary.directories).toBe(3);
