@@ -224,6 +224,18 @@ export class InstallationService {
       } satisfies GitHubInstallationDocument);
     }
 
+    const superseded = await collection.updateMany(
+      { userId: input.userId, installationId: { $ne: installationId }, status: { $ne: 'removed' } },
+      { $set: { status: 'removed', removedAt: now, updatedAt: now } },
+    );
+
+    if (superseded.modifiedCount > 0) {
+      this.logger.info(
+        { userId: input.userId, installationId, superseded: superseded.modifiedCount },
+        'Marked older installations removed, because one account holds one installation',
+      );
+    }
+
     const saved = await collection.findOne({ installationId });
     if (saved === null) {
       throw new ApiError('INTERNAL_ERROR', 'Something went wrong. Please try again.');
@@ -260,7 +272,10 @@ export class InstallationService {
   }
 
   async activeInstallation(userId: string): Promise<GitHubInstallationDocument | null> {
-    return githubInstallationsCollection(this.db).findOne({ userId, status: 'active' });
+    return githubInstallationsCollection(this.db).findOne(
+      { userId, status: 'active' },
+      { sort: { updatedAt: -1 } },
+    );
   }
 
   async summaryFor(userId: string): Promise<InstallationSummary | null> {
