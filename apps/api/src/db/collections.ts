@@ -7,6 +7,7 @@ export const COLLECTIONS = {
   repoIndexes: 'repo_indexes',
   auditEvents: 'audit_events',
   checkpoints: 'checkpoints',
+  providerKeys: 'provider_keys',
 } as const;
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];

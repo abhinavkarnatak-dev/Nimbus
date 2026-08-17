@@ -5,8 +5,6 @@ import { loadConfig } from '../../src/config/load.js';
 import {
   GeminiTextProvider,
   GeminiVisionProvider,
-  GroqTextProvider,
-  DEFAULT_GROQ_TEXT_MODEL,
   DEFAULT_LIGHT_MODEL,
   DEFAULT_REASONING_MODEL,
   SessionBudget,
@@ -62,13 +60,14 @@ async function main(): Promise<void> {
   const logger = createLogger({ level: 'warn', environment: config.env });
   const budget = new SessionBudget();
 
-  if (config.llm.groqApiKey === undefined || config.llm.geminiApiKey === undefined) {
-    throw new Error('GROQ_API_KEY and GEMINI_API_KEY must both be set in .env');
+  const geminiApiKey = (process.env['GEMINI_API_KEY'] ?? '').trim();
+
+  if (geminiApiKey === '') {
+    throw new Error('GEMINI_API_KEY must be set in .env for this demo');
   }
 
-  const text = new GeminiTextProvider({ apiKey: config.llm.geminiApiKey, logger });
-  const groq = new GroqTextProvider({ apiKey: config.llm.groqApiKey, logger });
-  const vision = new GeminiVisionProvider({ apiKey: config.llm.geminiApiKey, logger });
+  const text = new GeminiTextProvider({ apiKey: geminiApiKey, logger });
+  const vision = new GeminiVisionProvider({ apiKey: geminiApiKey, logger });
 
   heading('Plain completion');
   budget.assertCanSpend();
@@ -104,7 +103,7 @@ async function main(): Promise<void> {
   line('cost', money(loose.report.cost.microCents));
 
   heading('Structured, on a model with json_schema');
-  const strict = await groq.completeStructured({
+  const strict = await text.completeStructured({
     model: DEFAULT_REASONING_MODEL,
     schema: AnswerSchema,
     schemaName: 'answer',
@@ -115,7 +114,7 @@ async function main(): Promise<void> {
     ],
   });
   budget.charge(strict.report);
-  line('mode', 'groq json_schema, validated locally');
+  line('mode', 'json_schema, validated locally');
   line('summary', strict.value.summary.slice(0, 70));
   line('files', strict.value.files.join(', '));
   line('reasoning tokens', strict.report.usage.reasoningTokens);
@@ -134,7 +133,7 @@ async function main(): Promise<void> {
   heading('A request that must not be retried');
   const started = Date.now();
   try {
-    await groq.complete({
+    await text.complete({
       model: 'no-such-model-at-all',
       messages: [{ role: 'user', content: 'hi' }],
     });
@@ -146,7 +145,7 @@ async function main(): Promise<void> {
     line('detail', failure.detail);
     line('retryable', failure.retryable);
     line('took', `${String(Date.now() - started)} ms, so it did not back off`);
-    line('key in message', JSON.stringify(failure.message).includes('gsk_'));
+    line('key in message', JSON.stringify(failure.message).includes(geminiApiKey));
   }
 
   heading('Cancelling in flight');
@@ -173,7 +172,6 @@ async function main(): Promise<void> {
   line('exhausted', state.exhausted);
   line('default text model', DEFAULT_TEXT_MODEL);
   line('default vision model', DEFAULT_VISION_MODEL);
-  line('groq text default', DEFAULT_GROQ_TEXT_MODEL);
 }
 
 await main();

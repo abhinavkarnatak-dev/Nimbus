@@ -6,7 +6,7 @@ import { LlmError } from '../llm/errors.js';
 import { FakeVisionProvider } from '../llm/fake-vision.js';
 import { capturingLogger } from '../llm/llm.fixtures.js';
 import { SessionAttachments, type LoadedAttachments } from './attached.js';
-import { ImageDescriber, type ImageBytes } from './describe.js';
+import { ImageDescriber, fixedDescriber, type ImageBytes } from './describe.js';
 import { ROUTING_LIMITS } from './limits.js';
 import { FakeImageBytes, OWNER_ID, attachment, textAttachment } from './routing.fixtures.js';
 
@@ -44,7 +44,9 @@ async function setup(
   const attachments = new SessionAttachments({
     records,
     bytes,
-    describer: new ImageDescriber({ vision, records, bytes, logger: captured.logger }),
+    describers: fixedDescriber(
+      new ImageDescriber({ vision, records, bytes, logger: captured.logger }),
+    ),
     logger: captured.logger,
   });
 

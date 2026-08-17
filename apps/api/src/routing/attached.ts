@@ -5,7 +5,7 @@ import { decodeUtf8 } from '../attachments/text.js';
 import type { AttachmentDocument } from '../db/models/attachment.js';
 import type { Logger } from '../logging/logger.js';
 import type { AttachedText } from './context.js';
-import type { ImageBytes, ImageDescriber } from './describe.js';
+import type { DescribeResult, DescriberSource, ImageBytes } from './describe.js';
 import { ROUTING_LIMITS } from './limits.js';
 
 export interface AttachmentOwner {
@@ -30,7 +30,7 @@ export const NOTHING_ATTACHED: LoadedAttachments = {
 export interface SessionAttachmentsOptions {
   records: AttachmentRecords;
   bytes: ImageBytes;
-  describer: ImageDescriber;
+  describers: DescriberSource;
   logger: Logger;
 }
 
@@ -39,14 +39,14 @@ export class SessionAttachments {
 
   readonly #bytes: ImageBytes;
 
-  readonly #describer: ImageDescriber;
+  readonly #describers: DescriberSource;
 
   readonly #logger: Logger;
 
   constructor(options: SessionAttachmentsOptions) {
     this.#records = options.records;
     this.#bytes = options.bytes;
-    this.#describer = options.describer;
+    this.#describers = options.describers;
     this.#logger = options.logger;
   }
 
@@ -56,9 +56,8 @@ export class SessionAttachments {
     }
 
     const found = await this.#documents(owner);
-    const described = await this.#describer.describeAll(
-      found.documents.filter((one) => one.kind === 'image'),
-    );
+    const images = found.documents.filter((one) => one.kind === 'image');
+    const described = await this.#describe(owner, images);
     const texts = await this.#texts(found.documents.filter((one) => one.kind === 'text'));
 
     return {
@@ -67,6 +66,27 @@ export class SessionAttachments {
       reports: described.reports,
       lost: found.lost + described.skipped + texts.lost,
     };
+  }
+
+  async #describe(
+    owner: AttachmentOwner,
+    images: readonly AttachmentDocument[],
+  ): Promise<DescribeResult> {
+    if (images.length === 0) {
+      return { images: [], reports: [], skipped: 0 };
+    }
+
+    const describer = await this.#describers.for(owner.userId);
+
+    if (describer === null) {
+      this.#logger.warn(
+        { userId: owner.userId, images: images.length },
+        'this account has no key for a model that can read images, the run carries on without them',
+      );
+      return { images: [], reports: [], skipped: images.length };
+    }
+
+    return describer.describeAll(images);
   }
 
   async #documents(

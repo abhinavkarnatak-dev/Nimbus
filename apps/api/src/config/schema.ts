@@ -99,8 +99,6 @@ export const environmentSchema = z.object({
   S3_ACCESS_KEY_ID: optionalText,
   S3_SECRET_ACCESS_KEY: optionalText,
 
-  GROQ_API_KEY: optionalText,
-  GEMINI_API_KEY: optionalText,
   DEFAULT_TEXT_MODEL: optionalText,
   DEFAULT_VISION_MODEL: optionalText,
 

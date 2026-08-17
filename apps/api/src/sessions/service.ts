@@ -33,8 +33,10 @@ import {
 import { ApiError } from '../http/api-error.js';
 import { newPrefixedId } from '../lib/id.js';
 import { LlmError } from '../llm/errors.js';
+import { NO_PROVIDER_KEYS } from '../llm/provider-keys.js';
+import type { ProviderKeyDirectory } from '../llm/sources.js';
 import type { Logger } from '../logging/logger.js';
-import { SelectableModelCatalogue } from '../routing/selection.js';
+import { SelectableModelCatalogue, catalogueFor } from '../routing/selection.js';
 import type { SessionRecords } from './repository.js';
 
 export const DEFAULT_MAX_STEPS = DEFAULT_LIMITS.maxAgentSteps;
@@ -56,7 +58,7 @@ export interface AgentSessionServiceOptions {
   notifyCancelled?: (session: SessionDocument) => Promise<void>;
   maxSteps?: number;
   now?: () => Date;
-  models?: SelectableModelCatalogue;
+  providerKeys: ProviderKeyDirectory;
 }
 
 export const APPROVAL_ERROR_TO_API: Readonly<Record<string, ErrorCode>> = {
@@ -127,7 +129,7 @@ export class AgentSessionService {
 
   readonly #now: () => Date;
 
-  readonly #models: SelectableModelCatalogue;
+  readonly #providerKeys: ProviderKeyDirectory;
 
   constructor(options: AgentSessionServiceOptions) {
     this.#records = options.records;
@@ -140,7 +142,7 @@ export class AgentSessionService {
     this.#events = options.events ?? null;
     this.#notifyCancelled = options.notifyCancelled ?? null;
     this.#now = options.now ?? ((): Date => new Date());
-    this.#models = options.models ?? new SelectableModelCatalogue();
+    this.#providerKeys = options.providerKeys;
   }
 
   async create(userId: string, body: CreateSessionBody): Promise<CreatedSession> {
@@ -155,7 +157,13 @@ export class AgentSessionService {
       );
     }
 
-    const model = chosenModel(body.model, this.#models);
+    const catalogue = await this.#catalogue(userId);
+
+    if (catalogue.empty) {
+      throw new ApiError('PROVIDER_KEY_MISSING', NO_PROVIDER_KEYS);
+    }
+
+    const model = chosenModel(body.model, catalogue);
     const attachments = await this.#attachmentsFor(userId, body.attachmentIds);
     const at = this.#now();
     const document = this.#newDocument({ userId, body, repository, attachments, model, at });
@@ -192,8 +200,12 @@ export class AgentSessionService {
     });
   }
 
-  modelCatalogue(): ModelCatalogueResponse {
-    return this.#models.response();
+  async modelCatalogue(userId: string): Promise<ModelCatalogueResponse> {
+    return (await this.#catalogue(userId)).response();
+  }
+
+  async #catalogue(userId: string): Promise<SelectableModelCatalogue> {
+    return catalogueFor(await this.#providerKeys.providersFor(userId));
   }
 
   async detail(userId: string, sessionId: string): Promise<SessionDetailResponse> {

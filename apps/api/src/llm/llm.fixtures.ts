@@ -55,14 +55,6 @@ export function capturingLogger(): CapturedLogger {
   return { logger, lines, text: () => lines.join('\n') };
 }
 
-export function groqReply(content: string, overrides: Record<string, unknown> = {}): unknown {
-  return {
-    choices: [{ message: { content }, finish_reason: 'stop' }],
-    usage: { prompt_tokens: 100, completion_tokens: 40 },
-    ...overrides,
-  };
-}
-
 export function geminiReply(text: string, overrides: Record<string, unknown> = {}): unknown {
   return {
     candidates: [{ content: { parts: [{ text }] }, finishReason: 'STOP' }],

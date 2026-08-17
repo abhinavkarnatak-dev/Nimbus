@@ -6,6 +6,7 @@ export type Route =
   | { name: 'auth_callback' }
   | { name: 'connect' }
   | { name: 'github_callback' }
+  | { name: 'keys' }
   | { name: 'dashboard' }
   | { name: 'settings' }
   | { name: 'session'; sessionId: SessionId }
@@ -17,6 +18,7 @@ export const ROUTE_PATHS = {
   auth_callback: '/auth/callback',
   connect: '/connect',
   github_callback: '/github/callback',
+  keys: '/keys',
   dashboard: '/dashboard',
   settings: '/settings',
 } as const;
@@ -58,6 +60,10 @@ export function matchRoute(path: string): Route {
     return { name: 'github_callback' };
   }
 
+  if (normalised === ROUTE_PATHS.keys) {
+    return { name: 'keys' };
+  }
+
   if (normalised === ROUTE_PATHS.dashboard) {
     return { name: 'dashboard' };
   }
@@ -87,6 +93,8 @@ export function pathFor(route: Route): string {
       return ROUTE_PATHS.connect;
     case 'github_callback':
       return ROUTE_PATHS.github_callback;
+    case 'keys':
+      return ROUTE_PATHS.keys;
     case 'dashboard':
       return ROUTE_PATHS.dashboard;
     case 'settings':

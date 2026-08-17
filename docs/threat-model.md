@@ -22,33 +22,33 @@ so its output is a proposal, never an authorization.
 
 Ranked by what an attacker gains from them.
 
-| Asset                                        | Impact if compromised                                  |
-| -------------------------------------------- | ------------------------------------------------------ |
-| GitHub installation tokens                   | Write access to a user's repositories                  |
-| GitHub App private key                       | Ability to mint tokens for every installation          |
-| Application session cookies                  | Full account takeover                                  |
-| One time passwords in flight                 | Account takeover without a password                    |
-| Model provider API keys                      | Financial loss and data exfiltration channel           |
-| SMTP credentials                             | Phishing from a trusted sender                         |
-| User to repository mapping                   | Discloses what a user is working on                    |
-| Private repository content held in a session | Source code disclosure                                 |
-| Attachments                                  | May contain sensitive user material                    |
-| Audit log                                    | Discloses activity patterns; tampering hides an attack |
+| Asset                                        | Impact if compromised                                      |
+| -------------------------------------------- | ---------------------------------------------------------- |
+| GitHub installation tokens                   | Write access to a user's repositories                      |
+| GitHub App private key                       | Ability to mint tokens for every installation              |
+| Application session cookies                  | Full account takeover                                      |
+| One time passwords in flight                 | Account takeover without a password                        |
+| Model provider API keys held for an account  | Financial loss to that account and an exfiltration channel |
+| SMTP credentials                             | Phishing from a trusted sender                             |
+| User to repository mapping                   | Discloses what a user is working on                        |
+| Private repository content held in a session | Source code disclosure                                     |
+| Attachments                                  | May contain sensitive user material                        |
+| Audit log                                    | Discloses activity patterns; tampering hides an attack     |
 
 ## 3. Trust boundaries
 
-| #   | Boundary                               | Crossing                     | Primary risk                                                  |
-| --- | -------------------------------------- | ---------------------------- | ------------------------------------------------------------- |
-| B1  | Browser to API                         | HTTPS, cookie authenticated  | CSRF, session theft, cross-user access                        |
-| B2  | Browser to socket                      | WSS, handshake authenticated | Origin abuse, cross-session subscription, stale authorization |
-| B3  | API to MongoDB and Redis               | Private network              | Injection, unauthorized read across tenants                   |
-| B4  | API to GitHub                          | HTTPS with a minted token    | Token scope too broad, token leakage, unintended writes       |
-| B5  | API to model providers                 | HTTPS with an API key        | Sending secrets or excess source code                         |
-| B6  | API to sandbox                         | Provider control plane       | Command injection, resource exhaustion, credential leakage    |
-| B7  | Sandbox to internet                    | Denied by default            | Exfiltration, dependency confusion, metadata service access   |
-| B8  | Repository content into the model      | Text                         | Prompt injection                                              |
-| B9  | Attachment upload into the system      | Multipart                    | Malicious file, decompression bomb, spoofed type              |
-| B10 | Sandbox patch into the trusted backend | Patch or bundle              | Path traversal, protected file change, smuggled secret        |
+| #   | Boundary                               | Crossing                        | Primary risk                                                        |
+| --- | -------------------------------------- | ------------------------------- | ------------------------------------------------------------------- |
+| B1  | Browser to API                         | HTTPS, cookie authenticated     | CSRF, session theft, cross-user access                              |
+| B2  | Browser to socket                      | WSS, handshake authenticated    | Origin abuse, cross-session subscription, stale authorization       |
+| B3  | API to MongoDB and Redis               | Private network                 | Injection, unauthorized read across tenants                         |
+| B4  | API to GitHub                          | HTTPS with a minted token       | Token scope too broad, token leakage, unintended writes             |
+| B5  | API to model providers                 | HTTPS with an account's API key | Sending secrets or excess source code, spending somebody else's key |
+| B6  | API to sandbox                         | Provider control plane          | Command injection, resource exhaustion, credential leakage          |
+| B7  | Sandbox to internet                    | Denied by default               | Exfiltration, dependency confusion, metadata service access         |
+| B8  | Repository content into the model      | Text                            | Prompt injection                                                    |
+| B9  | Attachment upload into the system      | Multipart                       | Malicious file, decompression bomb, spoofed type                    |
+| B10 | Sandbox patch into the trusted backend | Patch or bundle                 | Path traversal, protected file change, smuggled secret              |
 
 B10 is the boundary that matters most. It is the only path by which anything produced under model
 influence becomes a real effect on a real repository.
@@ -175,12 +175,15 @@ as an instruction.
 
 ### 5.10 Model providers
 
-| Threat                                  | Mitigation                                                                           | Feature  |
-| --------------------------------------- | ------------------------------------------------------------------------------------ | -------- |
-| Sending secrets to a third party        | Environment values, tokens, cookies, and key material are never included in a prompt | 025, 026 |
-| Sending more source code than needed    | Minimal context, bounded snippets, documented in the README                          | 024, 026 |
-| Unbounded spend                         | Per session token and monetary budgets, with a safe stop on exhaustion               | 026      |
-| Prompt or response leaking through logs | Logs record metadata and usage, never full prompts or completions                    | 004, 025 |
+| Threat                                             | Mitigation                                                                                                       | Feature  |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------- |
+| Sending secrets to a third party                   | Environment values, tokens, cookies, and key material are never included in a prompt                             | 025, 026 |
+| Sending more source code than needed               | Minimal context, bounded snippets, documented in the README                                                      | 024, 026 |
+| Unbounded spend                                    | Per session token and monetary budgets, with a safe stop on exhaustion                                           | 026      |
+| Prompt or response leaking through logs            | Logs record metadata and usage, never full prompts or completions                                                | 004, 025 |
+| One account spending another account's key         | Keys are scoped by user id, and the account and provider are bound into the encryption as authenticated data     | 044a     |
+| A stored key read straight out of the database     | Keys are encrypted with AES-256-GCM before they are written, and only the last four characters are ever returned | 044a     |
+| A wrong key blamed on the provider, or the reverse | The key is verified with the provider before storing, and a refusal is told apart from an outage                 | 044a     |
 
 ### 5.11 Trusted patch gateway, boundary B10
 
@@ -240,8 +243,12 @@ Stated plainly rather than hidden.
 - **A user can approve something harmful.** Approvals show the exact effect, but a user who
   approves without reading has authorized it. Nimbus reduces this with precise, non-generic
   approval text, not by refusing to ask.
-- **Provider trust.** Repository snippets are sent to Groq and Gemini under their terms. This is
-  documented for the user rather than obscured.
+- **Provider trust.** Repository snippets are sent to Groq and Gemini under their terms, billed to
+  the key the account owner added. This is documented for the user rather than obscured.
+- **Stored provider keys survive a database-only compromise, and nothing beyond it.** There is no key
+  management service in V1, so the encryption key is derived from `SESSION_SECRET`. Anybody holding
+  both the database and that secret can read every stored key. Rotating `SESSION_SECRET` makes every
+  stored key unreadable and each account must save its key again.
 - **Sandbox provider trust.** Isolation ultimately depends on E2B. Nimbus reduces the value of a
   break by ensuring nothing sensitive is inside.
 - **Public repositories only in V1.** This deliberately keeps the worst case disclosure at zero for

@@ -58,7 +58,6 @@ describe('valid configuration', () => {
     expect(config.github).toBeNull();
     expect(config.smtp).toBeNull();
     expect(config.qdrant).toBeNull();
-    expect(config.llm.groqApiKey).toBeUndefined();
   });
 
   it('decodes the GitHub private key from base64 into a PEM', () => {
@@ -94,9 +93,13 @@ describe('valid configuration', () => {
   });
 
   it('treats blank optional values as absent rather than empty text', () => {
-    const config = loadConfig({ ...minimalEnv(), GROQ_API_KEY: '   ', SANDBOX_TEMPLATE_ID: '' });
+    const config = loadConfig({
+      ...minimalEnv(),
+      DEFAULT_TEXT_MODEL: '   ',
+      SANDBOX_TEMPLATE_ID: '',
+    });
 
-    expect(config.llm.groqApiKey).toBeUndefined();
+    expect(config.llm.defaultTextModel).toBeUndefined();
     expect(config.sandbox.templateId).toBeUndefined();
   });
 });
@@ -213,7 +216,7 @@ describe('production rules', () => {
     expect(config.google).not.toBeNull();
   });
 
-  it('refuses to start in production without provider credentials', () => {
+  it('refuses to start in production without the credentials the server itself holds', () => {
     const error = expectConfigError({
       ...minimalEnv(),
       NODE_ENV: 'production',
@@ -225,8 +228,9 @@ describe('production rules', () => {
     expect(joined).toContain('GITHUB_APP_ID');
     expect(joined).toContain('GOOGLE_CLIENT_ID');
     expect(joined).toContain('E2B_API_KEY');
-    expect(joined).toContain('GROQ_API_KEY');
     expect(joined).toContain('SMTP_HOST');
+    expect(joined).not.toContain('GROQ_API_KEY');
+    expect(joined).not.toContain('GEMINI_API_KEY');
   });
 
   it('refuses sandbox internet access in production', () => {
@@ -275,25 +279,12 @@ describe('production rules', () => {
   });
 });
 
-describe('production needs a provider for every model the plan can reach', () => {
-  it('refuses production with Groq alone, because most roles are Gemini', () => {
-    const error = expectConfigError({ ...productionEnv(), GEMINI_API_KEY: undefined });
+describe('the models a plan can reach', () => {
+  it('never asks the server for a provider key, because every key belongs to an account', () => {
+    const config = loadConfig(productionEnv());
 
-    expect(error.issues.join('\n')).toContain('GEMINI_API_KEY');
-  });
-
-  it('refuses production with Gemini alone, because the reasoning role is Groq', () => {
-    const error = expectConfigError({ ...productionEnv(), GROQ_API_KEY: undefined });
-
-    expect(error.issues.join('\n')).toContain('GROQ_API_KEY');
-  });
-
-  it('says which role needs the provider it is asking for', () => {
-    const error = expectConfigError({ ...productionEnv(), GEMINI_API_KEY: undefined });
-    const said = error.issues.find((issue) => issue.startsWith('GEMINI_API_KEY'));
-
-    expect(said).toBeDefined();
-    expect(said).toContain('role uses');
+    expect(Object.keys(config.llm)).not.toContain('geminiApiKey');
+    expect(Object.keys(config.llm)).not.toContain('groqApiKey');
   });
 
   it('refuses an unknown default text model in every environment', () => {
@@ -315,25 +306,5 @@ describe('production needs a provider for every model the plan can reach', () =>
     });
 
     expect(error.issues.join()).toContain('DEFAULT_VISION_MODEL');
-  });
-
-  it('leaves development alone when no provider key exists at all', () => {
-    const config = loadConfig(minimalEnv());
-
-    expect(config.llm.geminiApiKey).toBeUndefined();
-    expect(config.llm.groqApiKey).toBeUndefined();
-  });
-
-  it('names the setting and the model but never a key value', () => {
-    const key = 'gsk_a-real-looking-secret-value';
-    const error = expectConfigError({
-      ...productionEnv(),
-      GROQ_API_KEY: key,
-      GEMINI_API_KEY: undefined,
-    });
-
-    expect(error.issues.join('\n')).toContain('GEMINI_API_KEY');
-    expect(error.message).not.toContain(key);
-    expect(error.issues.join('\n')).not.toContain(key);
   });
 });

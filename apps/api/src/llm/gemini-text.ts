@@ -4,7 +4,7 @@ import type { Logger } from '../logging/logger.js';
 import { prepareMessages } from './context.js';
 import { LlmError } from './errors.js';
 import { GEMINI_BASE, readGeminiText, readGeminiUsage, type GeminiOptions } from './gemini.js';
-import { describeIssues, issueCodes, parseJson } from './groq.js';
+import { describeIssues, issueCodes, parseJson } from './json.js';
 import { ProviderRunner } from './http.js';
 import { LLM_LIMITS } from './limits.js';
 import { DEFAULT_GEMINI_TEXT_MODEL, findModel } from './models.js';

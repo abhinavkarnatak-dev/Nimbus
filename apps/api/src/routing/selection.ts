@@ -1,6 +1,8 @@
 import {
+  LLM_PROVIDERS,
   ModelCatalogueResponseSchema,
   SelectableModelSchema,
+  type LlmProviderName,
   type ModelCatalogueResponse,
   type ModelPlan,
   type ModelRole,
@@ -16,11 +18,17 @@ import {
   findModel,
   KNOWN_MODELS,
 } from '../llm/models.js';
-import type { LlmConfig } from '../config/load.js';
 
 export const SELECTABLE_TEXT_MODELS: readonly string[] = KNOWN_MODELS.filter(
   (model) => model.selectable,
 ).map((model) => model.id);
+
+export const ROLE_CANDIDATES: Readonly<Record<ModelRole, readonly string[]>> = {
+  primary: [DEFAULT_TEXT_MODEL, DEFAULT_LIGHT_MODEL],
+  light: [DEFAULT_LIGHT_MODEL, DEFAULT_TEXT_MODEL],
+  reasoning: [DEFAULT_REASONING_MODEL, DEFAULT_TEXT_MODEL],
+  vision: [DEFAULT_VISION_MODEL],
+};
 
 export function selectableModels(): SelectableModel[] {
   return KNOWN_MODELS.filter((model) => model.selectable).map((model) =>
@@ -65,6 +73,10 @@ export class SelectableModelCatalogue {
     this.#models = ModelCatalogueResponseSchema.parse({ models }).models;
   }
 
+  get empty(): boolean {
+    return this.#models.length === 0;
+  }
+
   response(): ModelCatalogueResponse {
     return ModelCatalogueResponseSchema.parse({ models: this.#models });
   }
@@ -75,7 +87,7 @@ export class SelectableModelCatalogue {
     if (!this.#models.some((model) => model.id === selected)) {
       throw new LlmError(
         'LLM_MODEL_UNKNOWN',
-        'That model is not available for a new session on this server.',
+        'That model needs an API key this account has not added.',
         { detail: selected },
       );
     }
@@ -83,30 +95,57 @@ export class SelectableModelCatalogue {
   }
 }
 
-export function modelCatalogueFor(config: LlmConfig): SelectableModelCatalogue {
-  const configured = new Set<string>();
-
-  if (config.geminiApiKey !== undefined) {
-    configured.add('gemini');
-  }
-  if (config.groqApiKey !== undefined) {
-    configured.add('groq');
-  }
-
-  const all = selectableModels();
+export function catalogueFor(providers: readonly LlmProviderName[]): SelectableModelCatalogue {
+  const held = new Set(providers);
   return new SelectableModelCatalogue(
-    configured.size === 0 ? all : all.filter((model) => configured.has(model.provider)),
+    selectableModels().filter((model) => held.has(model.provider)),
   );
 }
 
-export function planFor(selection?: { textModel?: string }): ModelPlan {
+export interface PlanSelection {
+  textModel?: string;
+  providers?: readonly LlmProviderName[];
+}
+
+function servedBy(model: string, providers: readonly LlmProviderName[]): boolean {
+  const facts = findModel(model);
+  return facts !== null && providers.includes(facts.provider);
+}
+
+function modelForCandidates(role: ModelRole, providers: readonly LlmProviderName[]): string {
+  const served = ROLE_CANDIDATES[role].find((model) => servedBy(model, providers));
+
+  if (served === undefined) {
+    throw new LlmError(
+      'LLM_NOT_CONFIGURED',
+      'No model Nimbus can use for this run is covered by the API keys on this account.',
+      { detail: role },
+    );
+  }
+  return served;
+}
+
+export function planFor(selection?: PlanSelection): ModelPlan {
+  const providers = selection?.providers ?? LLM_PROVIDERS;
   const asked = selection?.textModel;
   const chosenByUser = asked !== undefined && asked.trim() !== '';
 
+  const primary = chosenByUser
+    ? assertSelectableModel(asked)
+    : modelForCandidates('primary', providers);
+
+  if (!servedBy(primary, providers)) {
+    throw new LlmError(
+      'LLM_NOT_CONFIGURED',
+      'That model needs an API key this account has not added.',
+      { detail: primary },
+    );
+  }
+
   return {
-    primary: chosenByUser ? assertSelectableModel(asked) : DEFAULT_TEXT_MODEL,
-    light: DEFAULT_LIGHT_MODEL,
-    reasoning: DEFAULT_REASONING_MODEL,
+    primary,
+    light: modelForCandidates('light', providers),
+    reasoning: modelForCandidates('reasoning', providers),
     vision: DEFAULT_VISION_MODEL,
     chosenByUser,
   };

@@ -7,6 +7,7 @@ import './ui/ui.css';
 import './screens/landing.css';
 import './screens/signin.css';
 import './screens/connect.css';
+import './screens/keys.css';
 import './screens/dashboard.css';
 import './screens/settings.css';
 import './screens/session.css';

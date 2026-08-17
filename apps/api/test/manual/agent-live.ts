@@ -14,7 +14,7 @@ import { createMailService } from '../../src/email/mail-service.js';
 import { OctokitGitHubDirectory } from '../../src/github/directory.js';
 import { toRepositorySummaries } from '../../src/github/repositories.js';
 import { GitHubAppTokenProvider } from '../../src/github/token-provider.js';
-import { GeminiTextProvider, GroqTextProvider, RoutedTextProvider } from '../../src/llm/index.js';
+import { GeminiTextProvider, RoutedTextProvider } from '../../src/llm/index.js';
 import { createLogger } from '../../src/logging/logger.js';
 import { OctokitPullRequestClientFactory } from '../../src/pull-request/octokit-client.js';
 import { TrustedPullRequestGateway } from '../../src/pull-request/gateway.js';
@@ -104,8 +104,7 @@ async function main(): Promise<void> {
     throw new Error('GitHub app settings are missing from .env');
   }
 
-  const geminiApiKey = (config.llm.geminiApiKey ?? '').trim();
-  const groqApiKey = (config.llm.groqApiKey ?? '').trim();
+  const geminiApiKey = (process.env['GEMINI_API_KEY'] ?? '').trim();
   const e2bApiKey = (config.sandbox.apiKey ?? '').trim();
   const chosenModel = (process.env['LIVE_MODEL'] ?? '').trim();
   const chosenLight = (process.env['LIVE_LIGHT_MODEL'] ?? '').trim();
@@ -168,10 +167,7 @@ async function main(): Promise<void> {
   line('default branch', repository.defaultBranch);
   line('base commit', head.commitSha);
 
-  const providers = [
-    new GeminiTextProvider({ apiKey: geminiApiKey, logger }),
-    ...(groqApiKey === '' ? [] : [new GroqTextProvider({ apiKey: groqApiKey, logger })]),
-  ];
+  const providers = [new GeminiTextProvider({ apiKey: geminiApiKey, logger })];
 
   const text = new RoutedTextProvider({ providers });
   const router = new SessionRouter({

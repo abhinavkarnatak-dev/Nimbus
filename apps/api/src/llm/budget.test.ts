@@ -8,7 +8,7 @@ import { buildReport } from './provider.js';
 
 function report(model: string, prompt: number, completion: number, reasoning = 0): CallReport {
   return buildReport({
-    provider: 'groq',
+    provider: 'gemini',
     model,
     usage: {
       promptTokens: prompt,
@@ -52,9 +52,9 @@ describe('SessionBudget', () => {
 
   it('charges tokens and money together', () => {
     const budget = new SessionBudget();
-    const state = budget.charge(report('openai/gpt-oss-120b', 100, 40));
+    const state = budget.charge(report('gemini-3.5-flash-lite', 100, 40));
 
-    const rates = ratesFor('openai/gpt-oss-120b');
+    const rates = ratesFor('gemini-3.5-flash-lite');
 
     expect(state.tokensUsed).toBe(140);
     expect(state.microCentsUsed).toBe(100 * rates.input + 40 * rates.output);
@@ -63,17 +63,17 @@ describe('SessionBudget', () => {
 
   it('charges reasoning tokens at the output rate', () => {
     const budget = new SessionBudget();
-    const plain = budget.charge(report('openai/gpt-oss-120b', 0, 100));
+    const plain = budget.charge(report('gemini-3.5-flash-lite', 0, 100));
 
     const other = new SessionBudget();
-    const thinking = other.charge(report('openai/gpt-oss-120b', 0, 50, 50));
+    const thinking = other.charge(report('gemini-3.5-flash-lite', 0, 50, 50));
 
     expect(thinking.microCentsUsed).toBe(plain.microCentsUsed);
   });
 
   it('stops a session that has spent its tokens', () => {
     const budget = new SessionBudget({ tokenLimit: 100 });
-    budget.charge(report('openai/gpt-oss-120b', 60, 40));
+    budget.charge(report('gemini-3.5-flash-lite', 60, 40));
 
     expect(budget.state().exhausted).toBe(true);
     expect(() => {
@@ -83,7 +83,7 @@ describe('SessionBudget', () => {
 
   it('stops a session that has spent its money', () => {
     const budget = new SessionBudget({ microCentLimit: 1_000 });
-    budget.charge(report('openai/gpt-oss-120b', 100, 40));
+    budget.charge(report('gemini-3.5-flash-lite', 100, 40));
 
     expect(() => {
       budget.assertCanSpend();
@@ -92,8 +92,8 @@ describe('SessionBudget', () => {
 
   it('stops a session that has made too many calls', () => {
     const budget = new SessionBudget({ callLimit: 2 });
-    budget.charge(report('openai/gpt-oss-120b', 1, 1));
-    budget.charge(report('openai/gpt-oss-120b', 1, 1));
+    budget.charge(report('gemini-3.5-flash-lite', 1, 1));
+    budget.charge(report('gemini-3.5-flash-lite', 1, 1));
 
     expect(() => {
       budget.assertCanSpend();
@@ -102,7 +102,7 @@ describe('SessionBudget', () => {
 
   it('refuses a call it can see will not fit, rather than starting it', () => {
     const budget = new SessionBudget({ tokenLimit: 1_000 });
-    budget.charge(report('openai/gpt-oss-120b', 400, 100));
+    budget.charge(report('gemini-3.5-flash-lite', 400, 100));
 
     expect(() => {
       budget.assertCanSpend(100);
@@ -114,7 +114,7 @@ describe('SessionBudget', () => {
 
   it('never charges an unknown model nothing', () => {
     const known = new SessionBudget();
-    known.charge(report('openai/gpt-oss-120b', 1_000, 1_000));
+    known.charge(report('gemini-3.5-flash-lite', 1_000, 1_000));
 
     const unknown = new SessionBudget();
     unknown.charge(report('some-model-nobody-priced', 1_000, 1_000));
@@ -131,19 +131,19 @@ describe('SessionBudget', () => {
 
   it('reports how many tokens are left', () => {
     const budget = new SessionBudget({ tokenLimit: 1_000 });
-    budget.charge(report('openai/gpt-oss-120b', 300, 100));
+    budget.charge(report('gemini-3.5-flash-lite', 300, 100));
 
     expect(budget.remainingTokens()).toBe(600);
   });
 
   it('never reports a negative remainder', () => {
     const budget = new SessionBudget({ tokenLimit: 10 });
-    budget.charge(report('openai/gpt-oss-120b', 100, 100));
+    budget.charge(report('gemini-3.5-flash-lite', 100, 100));
 
     expect(budget.remainingTokens()).toBe(0);
   });
 
   it('always says its cost is an estimate', () => {
-    expect(report('openai/gpt-oss-120b', 1, 1).cost.estimated).toBe(true);
+    expect(report('gemini-3.5-flash-lite', 1, 1).cost.estimated).toBe(true);
   });
 });

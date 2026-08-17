@@ -37,16 +37,16 @@ describe('SessionRouter', () => {
   });
 
   it('uses what the user chose', async () => {
-    const { session, text } = router({ selection: { textModel: 'openai/gpt-oss-120b' } });
+    const { session, text } = router({ selection: { textModel: 'gemini-3.5-flash-lite' } });
 
     await session.complete({ messages: ASK });
 
-    expect(text.calls[0]?.model).toBe('openai/gpt-oss-120b');
+    expect(text.calls[0]?.model).toBe('gemini-3.5-flash-lite');
   });
 
   it('takes a whole plan, so a resumed session keeps the models it started with', async () => {
     const plan = {
-      primary: 'openai/gpt-oss-120b',
+      primary: 'gemini-3.5-flash-lite',
       light: 'gemini-3.5-flash-lite',
       reasoning: DEFAULT_REASONING_MODEL,
       vision: DEFAULT_TEXT_MODEL,
@@ -62,7 +62,7 @@ describe('SessionRouter', () => {
 
   it('prefers the plan it was given over working one out from a choice', () => {
     const plan = {
-      primary: 'openai/gpt-oss-120b',
+      primary: 'gemini-3.5-flash-lite',
       light: 'gemini-3.5-flash-lite',
       reasoning: DEFAULT_REASONING_MODEL,
       vision: DEFAULT_TEXT_MODEL,
@@ -70,7 +70,7 @@ describe('SessionRouter', () => {
     };
     const { session } = router({ plan, selection: { textModel: DEFAULT_TEXT_MODEL } });
 
-    expect(session.modelFor('primary')).toBe('openai/gpt-oss-120b');
+    expect(session.modelFor('primary')).toBe('gemini-3.5-flash-lite');
   });
 
   it('refuses a model the user may not choose, before anything is asked', () => {
@@ -80,7 +80,7 @@ describe('SessionRouter', () => {
   });
 
   it('sends a light job to the light model, whatever the user chose', async () => {
-    const { session, text } = router({ selection: { textModel: 'openai/gpt-oss-120b' } });
+    const { session, text } = router({ selection: { textModel: 'gemini-3.5-flash-lite' } });
 
     await session.complete({ messages: ASK, role: 'light' });
 
@@ -88,7 +88,7 @@ describe('SessionRouter', () => {
   });
 
   it('sends a hard job to the reasoning model', async () => {
-    const { session, text } = router({ selection: { textModel: 'openai/gpt-oss-120b' } });
+    const { session, text } = router({ selection: { textModel: 'gemini-3.5-flash-lite' } });
 
     await session.complete({ messages: ASK, role: 'reasoning' });
 

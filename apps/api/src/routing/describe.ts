@@ -4,6 +4,7 @@ import type { AttachmentRecords } from '../attachments/repository.js';
 import type { AttachmentDocument } from '../db/models/attachment.js';
 import { isLlmError } from '../llm/errors.js';
 import type { DescribeImageResult, VisionMimeType, VisionProvider } from '../llm/provider.js';
+import type { VisionProviderSource } from '../llm/sources.js';
 import type { Logger } from '../logging/logger.js';
 import { ROUTING_LIMITS } from './limits.js';
 
@@ -122,4 +123,42 @@ export class ImageDescriber {
     await this.records.saveDescription(document.attachmentId, description, result.report.model);
     return { image, report: result.report };
   }
+}
+
+export interface DescriberSource {
+  for(userId: string): Promise<ImageDescriber | null>;
+}
+
+export interface UserImageDescribersOptions {
+  vision: VisionProviderSource;
+  records: AttachmentRecords;
+  bytes: ImageBytes;
+  logger: Logger;
+}
+
+export class UserImageDescribers implements DescriberSource {
+  readonly #options: UserImageDescribersOptions;
+
+  constructor(options: UserImageDescribersOptions) {
+    this.#options = options;
+  }
+
+  async for(userId: string): Promise<ImageDescriber | null> {
+    const vision = await this.#options.vision.for(userId);
+
+    if (vision === null) {
+      return null;
+    }
+
+    return new ImageDescriber({
+      vision,
+      records: this.#options.records,
+      bytes: this.#options.bytes,
+      logger: this.#options.logger,
+    });
+  }
+}
+
+export function fixedDescriber(describer: ImageDescriber | null): DescriberSource {
+  return { for: (): Promise<ImageDescriber | null> => Promise.resolve(describer) };
 }

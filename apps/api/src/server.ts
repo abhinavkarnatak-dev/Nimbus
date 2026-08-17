@@ -28,11 +28,16 @@ import { createSessionsRouter } from './http/routes/sessions.js';
 import { EventHub, listenForEvents } from './events/hub.js';
 import { LiveEventPublisher } from './events/publisher.js';
 import { MongoEventStore } from './events/store.js';
-import { createRoutedTextProvider, createVisionProvider } from './llm/factory.js';
+import { ProviderKeyService } from './llm/provider-keys.js';
+import { UserProviders, UserVisionProviders } from './llm/user-providers.js';
+import { LiveProviderKeyVerifier } from './llm/verify.js';
+import { SecretBox } from './lib/secret-box.js';
+import { PROVIDER_KEY_INFO, deriveKey } from './auth/csrf.js';
+import { createProviderKeysRouter } from './http/routes/provider-keys.js';
 import { SessionAttachments } from './routing/attached.js';
-import { ImageDescriber } from './routing/describe.js';
+import { UserImageDescribers } from './routing/describe.js';
 import { providersForPlan } from './routing/requirements.js';
-import { modelCatalogueFor, planFor } from './routing/selection.js';
+import { planFor } from './routing/selection.js';
 import { RedisCancelAnnouncer, RedisCancelWatcher } from './orchestrator/cancellation.js';
 import { Orchestrator } from './orchestrator/orchestrator.js';
 import { LiveSessionWorkshop } from './orchestrator/live-workshop.js';
@@ -166,7 +171,6 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   const { config, logger } = options;
 
   const plan = planFor();
-  const modelCatalogue = modelCatalogueFor(config.llm);
 
   logger.info(
     {
@@ -174,8 +178,8 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
       light: plan.light,
       reasoning: plan.reasoning,
       vision: plan.vision,
-      selectable: modelCatalogue.response().models.map((model) => model.id),
       plannedProviders: providersForPlan(config.llm),
+      keysComeFrom: 'each account',
     },
     'Model routing plan ready',
   );
@@ -228,7 +232,16 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     webOrigin: config.api.webOrigin,
   });
 
-  const routers = [authRouter];
+  const providerKeys = new ProviderKeyService({
+    db: handle.db,
+    box: new SecretBox(deriveKey(config.session.secret, PROVIDER_KEY_INFO)),
+    verifier: new LiveProviderKeyVerifier(),
+    logger,
+  });
+
+  const userProviders = new UserProviders({ keys: providerKeys, logger });
+
+  const routers = [authRouter, createProviderKeysRouter({ keys: providerKeys, sessions })];
   let repositories: InstallationService | null = null;
   let githubTokens: GitHubAppTokenProvider | null = null;
 
@@ -282,12 +295,8 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
       : new SessionAttachments({
           records: attachmentRecords,
           bytes: new StoredAttachmentBytes(attachmentStore),
-          describer: new ImageDescriber({
-            vision: createVisionProvider({
-              config: config.llm,
-              logger,
-              isProduction: config.isProduction,
-            }),
+          describers: new UserImageDescribers({
+            vision: new UserVisionProviders(userProviders),
             records: attachmentRecords,
             bytes: new StoredAttachmentBytes(attachmentStore),
             logger,
@@ -334,7 +343,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
           cancellations: cancelAnnouncer,
           events,
           notifyCancelled: tellCancelled,
-          models: modelCatalogue,
+          providerKeys,
         }),
       }),
     );
@@ -359,11 +368,8 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
               installations: repositories,
               tokens: githubTokens,
               sandboxes: sandboxProviderFor(config, logger),
-              text: createRoutedTextProvider({
-                config: config.llm,
-                logger,
-                isProduction: config.isProduction,
-              }),
+              text: userProviders,
+              providerKeys,
               config,
               logger,
               events,

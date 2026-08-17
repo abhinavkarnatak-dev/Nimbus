@@ -5,19 +5,16 @@ import {
   wordsStillNeeded,
   type RepositorySummary,
   type SelectableModel,
-  type SessionSummary,
 } from '@nimbus/contracts';
 import { useEffect, useRef, useState, type KeyboardEvent, type SyntheticEvent } from 'react';
 
 import type { ApiClient, CsrfSource } from '../api/client.js';
 import { ApiError, NetworkError } from '../api/errors.js';
-import { ROUTE_PATHS, sessionPath } from '../app/routes.js';
+import { sessionPath } from '../app/routes.js';
 import { navigate } from '../app/useRoute.js';
 import { ACCEPT_ATTRIBUTE, sizeWords } from '../attachments/attachments.js';
 import { useAttachments } from '../attachments/useAttachments.js';
 import { newPrefixedId } from '../lib/id.js';
-import { plainText } from '../render/safe.js';
-import { statusWords, toneFor, whenWords } from '../sessions/status.js';
 import {
   activeMention,
   fullName,
@@ -26,6 +23,7 @@ import {
   mentionedRepository,
   withoutMentions,
 } from '../sessions/mention.js';
+import { Rail } from '../sessions/Rail.js';
 import type { InstallationHandle } from '../github/useInstallation.js';
 import type { SessionsHandle } from '../sessions/useSessions.js';
 import { Button } from '../ui/Button.js';
@@ -55,28 +53,6 @@ function startProblem(error: unknown): string {
   return known[error.code] ?? 'That did not start. Try again.';
 }
 
-function StatusPill({ status }: { status: SessionSummary['status'] }): React.JSX.Element {
-  return (
-    <span className="status" data-tone={toneFor(status)}>
-      <span className="status__dot" aria-hidden="true" />
-      {statusWords(status)}
-    </span>
-  );
-}
-
-function RunRow({ session, now }: { session: SessionSummary; now: number }): React.JSX.Element {
-  return (
-    <a className="run-row" href={sessionPath(session.sessionId)}>
-      <span className="run-row__task">{plainText(session.task, 240)}</span>
-      <span className="run-row__meta">
-        <StatusPill status={session.status} />
-        <span>{whenWords(session.lastActivityAt, now)}</span>
-        {session.pullRequest === null ? null : <span>#{session.pullRequest.number}</span>}
-      </span>
-    </a>
-  );
-}
-
 export interface DashboardProps {
   api: ApiClient;
   csrf: CsrfSource;
@@ -102,7 +78,6 @@ export function Dashboard({
   const activeOption = useRef<HTMLButtonElement>(null);
   const attachments = useAttachments(api, csrf);
 
-  const now = Date.now();
   const active = sessions.activeSessionId;
   const picked = mentionedRepository(task, repositories);
   const spoken = withoutMentions(task, repositories);
@@ -220,33 +195,7 @@ export function Dashboard({
 
   return (
     <div className="dash">
-      <aside className="rail" aria-label="Your sessions">
-        <div className="rail__body">
-          <div className="rail__group">
-            <p className="rail__word">
-              <span>Recent</span>
-              <span>{String(sessions.sessions.length)}</span>
-            </p>
-
-            {sessions.sessions.length === 0 ? (
-              <p className="empty__why">Nothing yet. The first session you start appears here.</p>
-            ) : (
-              <div className="history__list">
-                {sessions.sessions.map((one) => (
-                  <RunRow key={one.sessionId} session={one} now={now} />
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <a className="rail__settings" href={ROUTE_PATHS.settings}>
-          <span className="rail__gear" aria-hidden="true">
-            &#9881;
-          </span>
-          Settings
-        </a>
-      </aside>
+      <Rail sessions={sessions} />
 
       <div className="dash__main">
         <div className="dash__inner">

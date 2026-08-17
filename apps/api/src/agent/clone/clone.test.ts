@@ -41,7 +41,7 @@ function blob(path: string, size = 100): TreeEntry {
 describe('what the clone refuses to write', () => {
   it('never writes a credential file into the sandbox', async () => {
     const { sandbox, result } = await cloneOf({
-      files: { 'src/a.ts': 'export const a = 1;\n', '.env': 'GROQ_API_KEY=real\n' },
+      files: { 'src/a.ts': 'export const a = 1;\n', '.env': 'GEMINI_API_KEY=real\n' },
     });
 
     const entries = await sandbox.listEntries();

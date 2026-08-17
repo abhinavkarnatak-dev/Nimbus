@@ -9,6 +9,7 @@ import { ensureDatabaseSchema } from '../../src/db/bootstrap.js';
 import { sessionsCollection } from '../../src/db/models/session.js';
 import { ApiError } from '../../src/http/api-error.js';
 import { capturingLogger } from '../../src/llm/llm.fixtures.js';
+import { everyProviderKey } from '../../src/llm/sources.js';
 import { SELECTABLE_TEXT_MODELS } from '../../src/routing/selection.js';
 import { MongoSessionRecords } from '../../src/sessions/repository.js';
 import { AgentSessionService } from '../../src/sessions/service.js';
@@ -47,6 +48,7 @@ beforeAll(async () => {
     attachments: new MongoAttachmentRecords(testDatabase.db),
     repositories: new FakeRepositoryDirectory([SHOPFRONT]),
     logger: capturingLogger().logger,
+    providerKeys: everyProviderKey(),
   });
 }, 60_000);
 
@@ -173,6 +175,7 @@ describe('the configured step budget, against the real collection', () => {
       attachments: new MongoAttachmentRecords(testDatabase.db),
       repositories: new FakeRepositoryDirectory([SHOPFRONT]),
       logger: capturingLogger().logger,
+      providerKeys: everyProviderKey(),
       maxSteps: 7,
     });
 
@@ -191,6 +194,7 @@ describe('the configured step budget, against the real collection', () => {
       attachments: new MongoAttachmentRecords(testDatabase.db),
       repositories: new FakeRepositoryDirectory([SHOPFRONT]),
       logger: capturingLogger().logger,
+      providerKeys: everyProviderKey(),
       maxSteps: HARD_LIMITS.maxAgentSteps,
     });
 
@@ -208,6 +212,7 @@ describe('the configured step budget, against the real collection', () => {
       attachments: new MongoAttachmentRecords(testDatabase.db),
       repositories: new FakeRepositoryDirectory([SHOPFRONT]),
       logger: capturingLogger().logger,
+      providerKeys: everyProviderKey(),
       maxSteps: 7,
     });
 
@@ -238,14 +243,14 @@ describe('a chosen model, against the real collection', () => {
   it('is read back by a worker that never saw the request', async () => {
     const created = await service.create(OWNER_ID, {
       ...keyed('a'),
-      model: { textModel: 'openai/gpt-oss-120b' },
+      model: { textModel: 'gemini-3.6-flash' },
     });
 
     const worker = new MongoSessionRecords(testDatabase.db);
     const claimable = await worker.findClaimable(10);
     const found = claimable.find((one) => one.sessionId === created.session.sessionId);
 
-    expect(found?.model).toEqual({ textModel: 'openai/gpt-oss-120b' });
+    expect(found?.model).toEqual({ textModel: 'gemini-3.6-flash' });
   });
 
   it('writes null rather than leaving the field out when nobody chose', async () => {

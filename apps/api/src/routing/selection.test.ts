@@ -1,3 +1,4 @@
+import { LLM_PROVIDERS } from '@nimbus/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -10,12 +11,14 @@ import {
 import {
   SELECTABLE_TEXT_MODELS,
   assertSelectableModel,
+  catalogueFor,
   isSelectable,
-  modelCatalogueFor,
   modelForRole,
   planFor,
   selectableModels,
 } from './selection.js';
+
+const EVERY_PROVIDER = LLM_PROVIDERS;
 
 describe('SELECTABLE_TEXT_MODELS', () => {
   it('offers only models Nimbus knows about', () => {
@@ -24,9 +27,9 @@ describe('SELECTABLE_TEXT_MODELS', () => {
     }
   });
 
-  it('offers models from both providers', () => {
+  it('offers models from every provider Nimbus talks to', () => {
     const providers = new Set(selectableModels().map((model) => model.provider));
-    expect(providers).toEqual(new Set(['groq', 'gemini']));
+    expect(providers).toEqual(new Set(LLM_PROVIDERS));
   });
 
   it('includes the default, so the default is always a legal choice', () => {
@@ -50,7 +53,7 @@ describe('SELECTABLE_TEXT_MODELS', () => {
   });
 
   it('offers nothing that has been taken away', () => {
-    for (const gone of ['llama-3.3-70b-versatile', 'openai/gpt-oss-20b']) {
+    for (const gone of ['llama-3.3-70b-versatile', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b']) {
       expect(isSelectable(gone)).toBe(false);
       expect(() => assertSelectableModel(gone)).toThrow(
         expect.objectContaining({ code: 'LLM_MODEL_UNKNOWN' }) as Error,
@@ -59,28 +62,35 @@ describe('SELECTABLE_TEXT_MODELS', () => {
   });
 });
 
-describe('the catalogue exposed by this server', () => {
-  it('uses every fake-backed model when development has no provider keys', () => {
+describe('the catalogue an account can choose from', () => {
+  it('offers every model when the account holds a key for every provider', () => {
     expect(
-      modelCatalogueFor({})
+      catalogueFor(EVERY_PROVIDER)
         .response()
         .models.map((model) => model.id),
     ).toEqual(SELECTABLE_TEXT_MODELS);
   });
 
-  it('offers only models whose real provider is configured when one key is present', () => {
-    const catalogue = modelCatalogueFor({ geminiApiKey: 'configured' });
+  it('offers only the models the saved keys pay for', () => {
+    const catalogue = catalogueFor(['gemini']);
 
     expect(new Set(catalogue.response().models.map((model) => model.provider))).toEqual(
       new Set(['gemini']),
     );
-    expect(() => catalogue.assertAvailable('openai/gpt-oss-120b')).toThrow(
+    expect(() => catalogue.assertAvailable('a-model-nobody-holds-a-key-for')).toThrow(
       expect.objectContaining({ code: 'LLM_MODEL_UNKNOWN' }) as Error,
     );
   });
 
+  it('offers nothing at all when the account has saved no key', () => {
+    const catalogue = catalogueFor([]);
+
+    expect(catalogue.response().models).toEqual([]);
+    expect(catalogue.empty).toBe(true);
+  });
+
   it('contains only registry-derived public fields', () => {
-    for (const model of modelCatalogueFor({}).response().models) {
+    for (const model of catalogueFor(EVERY_PROVIDER).response().models) {
       expect(Object.keys(model).sort()).toEqual(['id', 'provider', 'reasoning', 'vision']);
     }
   });
@@ -140,9 +150,9 @@ describe('planFor', () => {
   });
 
   it('uses what the user chose', () => {
-    const plan = planFor({ textModel: 'openai/gpt-oss-120b' });
+    const plan = planFor({ textModel: 'gemini-3.5-flash-lite' });
 
-    expect(plan.primary).toBe('openai/gpt-oss-120b');
+    expect(plan.primary).toBe('gemini-3.5-flash-lite');
     expect(plan.chosenByUser).toBe(true);
   });
 
@@ -153,16 +163,16 @@ describe('planFor', () => {
   });
 
   it('keeps the light model out of the user choice', () => {
-    expect(planFor({ textModel: 'openai/gpt-oss-120b' }).light).toBe(DEFAULT_LIGHT_MODEL);
+    expect(planFor({ textModel: 'gemini-3.5-flash-lite' }).light).toBe(DEFAULT_LIGHT_MODEL);
     expect(planFor().light).toBe(DEFAULT_LIGHT_MODEL);
   });
 
   it('keeps the reasoning model out of the user choice', () => {
-    expect(planFor({ textModel: 'openai/gpt-oss-120b' }).reasoning).toBe(DEFAULT_REASONING_MODEL);
+    expect(planFor({ textModel: 'gemini-3.5-flash-lite' }).reasoning).toBe(DEFAULT_REASONING_MODEL);
   });
 
   it('keeps the vision model out of the user choice', () => {
-    expect(planFor({ textModel: 'openai/gpt-oss-120b' }).vision).toBe(DEFAULT_VISION_MODEL);
+    expect(planFor({ textModel: 'gemini-3.5-flash-lite' }).vision).toBe(DEFAULT_VISION_MODEL);
   });
 
   it('never lets a model that cannot see become the vision model', () => {
@@ -173,6 +183,38 @@ describe('planFor', () => {
 
   it('picks a light model that spends nothing thinking', () => {
     expect(findModel(planFor().light)?.thinks).toBe(false);
+  });
+
+  it('fills every role from one provider alone when that is the only key on the account', () => {
+    for (const provider of LLM_PROVIDERS) {
+      const plan = planFor({ providers: [provider] });
+
+      for (const role of ['primary', 'light', 'reasoning'] as const) {
+        expect(findModel(plan[role])?.provider).toBe(provider);
+      }
+    }
+  });
+
+  it('fills every text role from Gemini alone when that is the only key on the account', () => {
+    const plan = planFor({ providers: ['gemini'] });
+
+    for (const role of ['primary', 'light', 'reasoning'] as const) {
+      expect(findModel(plan[role])?.provider).toBe('gemini');
+    }
+  });
+
+  it('refuses a chosen model no key on the account pays for', () => {
+    for (const model of SELECTABLE_TEXT_MODELS) {
+      expect(() => planFor({ textModel: model, providers: [] })).toThrow(
+        expect.objectContaining({ code: 'LLM_NOT_CONFIGURED' }) as Error,
+      );
+    }
+  });
+
+  it('refuses to plan a run for an account that saved no key', () => {
+    expect(() => planFor({ providers: [] })).toThrow(
+      expect.objectContaining({ code: 'LLM_NOT_CONFIGURED' }) as Error,
+    );
   });
 });
 

@@ -430,6 +430,47 @@ than nothing.
 
 Owned by feature 025.
 
+## 10a1. Model provider keys held for an account
+
+The server has no model API key of its own, so every model call a session makes is billed to a key
+the account owner added. That makes the key an asset the account trusts Nimbus with, and the controls
+here are about what is stored, who can read it, and what happens when it stops working.
+
+**A key is checked with the provider before it is stored.** The key is asked to list the provider's
+models. Only a success stores anything. A refusal is reported as a rejected key, and any other
+outcome, including a timeout or a network fault, is reported as the provider being unreachable, so a
+provider outage is never presented to somebody as their key being wrong.
+
+**A key is encrypted before it is written down.** AES-256-GCM under a key derived from
+`SESSION_SECRET`, with the account id and the provider name bound in as additional authenticated
+data, so a row copied to another account or another provider fails to open rather than decrypting.
+The nonce is fresh per seal, so the same key stored twice produces different ciphertext.
+
+This protects against a database-only compromise, and against nothing more. There is no key
+management service in this project, so anybody who holds both the database and `SESSION_SECRET` can
+read every stored key. That is stated rather than implied, because the alternative is a reader
+assuming a guarantee that is not there.
+
+**A key is never sent back out.** The list endpoint returns the provider, the last four characters,
+when it was added and when it was last verified. The response schema is strict, so a field carrying
+the key cannot be added by accident. The browser stores nothing and re-reads the list after every
+change.
+
+**A key that cannot be opened is reported, not guessed at.** If `SESSION_SECRET` changes, the
+affected keys stop opening. Those providers disappear from what the account can use and the fault is
+logged as the account and the provider, never as the ciphertext, and the account is asked to save the
+key again.
+
+**Adding, rejecting and removing a key are audited.** Each writes an event naming the provider and
+the caller's IP, and never the key. A rejected key records the verdict and the provider's status code
+so a run of failures is attributable.
+
+**One account can never read or remove another account's key.** Every query is scoped by user id, the
+unique index is on the pair of account and provider, and a removal that matches nothing is a
+`NOT_FOUND` rather than a success.
+
+Owned by feature 044a.
+
 ## 10b. Model and vision routing
 
 Routing decides which model is asked, what it is told, and when a session must stop, so its controls
@@ -444,6 +485,12 @@ no way to observe it.
 **Only the primary text model is a user choice.** The vision, light and reasoning models are chosen by
 the server. This removes any path by which a user could select a model that cannot see for an image
 job, and prevents a cheaper primary from changing the cost of unrelated internal work.
+
+**Every role in a plan is covered by a key the account holds.** The server picks each role from an
+ordered list of candidates and takes the first one a saved key pays for, so an account with only a
+Groq key gets an all-Groq plan rather than a plan that fails at the first Gemini call. A primary the
+account cannot pay for is refused when the plan is built, not swapped for something cheaper, and an
+account with no key at all cannot create a session in the first place.
 
 **An image is described once and the description is persisted** on the attachment record along with
 the model that wrote it and the time. Sessions are resumable, and a resume that re-describes every

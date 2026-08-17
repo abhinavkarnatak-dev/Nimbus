@@ -1,21 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
-import { createRoutedTextProvider, createTextProvider, createVisionProvider } from './factory.js';
-import { capturingLogger } from './llm.fixtures.js';
 import {
   DEFAULT_GEMINI_TEXT_MODEL,
-  DEFAULT_GROQ_TEXT_MODEL,
   DEFAULT_TEXT_MODEL,
   DEFAULT_VISION_MODEL,
   KNOWN_MODELS,
+  defaultTextModelFor,
   findModel,
   highestInputRate,
   highestOutputRate,
-  modelsFor,
   ratesFor,
 } from './models.js';
 import { costOf } from './provider.js';
-import { RoutedTextProvider } from './routed-text.js';
 
 describe('KNOWN_MODELS', () => {
   it('has no duplicate ids', () => {
@@ -50,21 +46,19 @@ describe('KNOWN_MODELS', () => {
     expect(findModel('gemini-3.5-flash-lite')?.thinks).toBe(false);
   });
 
-  it('offers a model from each provider that can hold a schema', () => {
+  it('offers only models that can hold a schema', () => {
     const schemaCapable = KNOWN_MODELS.filter((model) => model.structuredOutput === 'json_schema');
-    expect(schemaCapable.some((model) => model.provider === 'groq')).toBe(true);
-    expect(schemaCapable.some((model) => model.provider === 'gemini')).toBe(true);
+
+    expect(schemaCapable).toHaveLength(KNOWN_MODELS.length);
   });
 
   it('has a per provider text default that belongs to that provider', () => {
-    expect(findModel(DEFAULT_GROQ_TEXT_MODEL)?.provider).toBe('groq');
     expect(findModel(DEFAULT_GEMINI_TEXT_MODEL)?.provider).toBe('gemini');
   });
 
-  it('groups models by provider', () => {
-    expect(modelsFor('groq').every((model) => model.provider === 'groq')).toBe(true);
-    expect(modelsFor('gemini').every((model) => model.provider === 'gemini')).toBe(true);
-    expect(modelsFor('groq').length + modelsFor('gemini').length).toBe(KNOWN_MODELS.length);
+  it('picks a text default the account actually holds a key for', () => {
+    expect(defaultTextModelFor(['gemini'])).toBe(DEFAULT_GEMINI_TEXT_MODEL);
+    expect(findModel(defaultTextModelFor([]))).not.toBeNull();
   });
 
   it('carries no model that cannot hold a schema, because the agent asks for one every step', () => {
@@ -74,7 +68,12 @@ describe('KNOWN_MODELS', () => {
   });
 
   it('carries no model that has been taken away', () => {
-    for (const gone of ['llama-3.3-70b-versatile', 'openai/gpt-oss-20b', 'qwen/qwen3.6-27b']) {
+    for (const gone of [
+      'llama-3.3-70b-versatile',
+      'openai/gpt-oss-20b',
+      'openai/gpt-oss-120b',
+      'qwen/qwen3.6-27b',
+    ]) {
       expect(findModel(gone)).toBeNull();
     }
   });
@@ -82,7 +81,7 @@ describe('KNOWN_MODELS', () => {
 
 describe('ratesFor', () => {
   it('returns the price of a model it knows', () => {
-    expect(ratesFor('openai/gpt-oss-120b')).toEqual({ input: 15, output: 75, known: true });
+    expect(ratesFor('gemini-3.5-flash-lite')).toEqual({ input: 10, output: 40, known: true });
   });
 
   it('charges an unknown model the highest rate it knows', () => {
@@ -102,29 +101,29 @@ describe('ratesFor', () => {
 
 describe('costOf', () => {
   it('multiplies tokens by the rate', () => {
-    const cost = costOf('openai/gpt-oss-120b', {
+    const cost = costOf('gemini-3.5-flash-lite', {
       promptTokens: 100,
       completionTokens: 40,
       reasoningTokens: 0,
       totalTokens: 140,
     });
 
-    expect(cost.microCents).toBe(100 * 15 + 40 * 75);
+    expect(cost.microCents).toBe(100 * 10 + 40 * 40);
   });
 
   it('bills thinking the same as speaking', () => {
-    const cost = costOf('openai/gpt-oss-120b', {
+    const cost = costOf('gemini-3.5-flash-lite', {
       promptTokens: 0,
       completionTokens: 0,
       reasoningTokens: 100,
       totalTokens: 100,
     });
 
-    expect(cost.microCents).toBe(100 * 75);
+    expect(cost.microCents).toBe(100 * 40);
   });
 
   it('always says it is an estimate', () => {
-    const cost = costOf('openai/gpt-oss-120b', {
+    const cost = costOf('gemini-3.5-flash-lite', {
       promptTokens: 1,
       completionTokens: 1,
       reasoningTokens: 0,
@@ -132,221 +131,5 @@ describe('costOf', () => {
     });
 
     expect(cost.estimated).toBe(true);
-  });
-});
-
-describe('the factory', () => {
-  it('follows the model to its own provider', () => {
-    const { logger } = capturingLogger();
-
-    const gemini = createTextProvider({
-      config: { geminiApiKey: 'AIza'.repeat(6), defaultTextModel: 'gemini-3.6-flash' },
-      logger,
-      isProduction: false,
-    });
-    expect(gemini.name).toBe('gemini');
-    expect(gemini.real).toBe(true);
-
-    const groq = createTextProvider({
-      config: { groqApiKey: 'gsk_x'.repeat(6), defaultTextModel: 'openai/gpt-oss-120b' },
-      logger,
-      isProduction: false,
-    });
-    expect(groq.name).toBe('groq');
-    expect(groq.real).toBe(true);
-  });
-
-  it('asks for the key of the provider the model belongs to', () => {
-    const { logger } = capturingLogger();
-
-    const noGroqKey = createTextProvider({
-      config: { geminiApiKey: 'AIza'.repeat(6), defaultTextModel: 'openai/gpt-oss-120b' },
-      logger,
-      isProduction: false,
-    });
-
-    expect(noGroqKey.real).toBe(false);
-  });
-
-  it('falls back to a fake when the key is missing, and says so', () => {
-    const captured = capturingLogger();
-    const text = createTextProvider({
-      config: {},
-      logger: captured.logger,
-      isProduction: false,
-    });
-
-    expect(text.real).toBe(false);
-    expect(captured.text()).toContain('no API key');
-    expect(captured.text()).toContain('developmentOnly');
-  });
-
-  it('gives the fake the model that was configured', () => {
-    const { logger } = capturingLogger();
-    const text = createTextProvider({
-      config: { defaultTextModel: 'openai/gpt-oss-120b' },
-      logger,
-      isProduction: false,
-    });
-
-    expect(text.defaultModel).toBe('openai/gpt-oss-120b');
-    expect(text.name).toBe('groq');
-  });
-
-  it('falls back to a fake when the key is blank', () => {
-    const { logger } = capturingLogger();
-    expect(
-      createVisionProvider({ config: { geminiApiKey: '   ' }, logger, isProduction: false }).real,
-    ).toBe(false);
-  });
-
-  it('uses the configured model when it is one we know', () => {
-    const { logger } = capturingLogger();
-    const text = createTextProvider({
-      config: { groqApiKey: 'gsk_x'.repeat(6), defaultTextModel: 'openai/gpt-oss-120b' },
-      logger,
-      isProduction: false,
-    });
-
-    expect(text.defaultModel).toBe('openai/gpt-oss-120b');
-  });
-
-  it('refuses a model it has never heard of', () => {
-    const { logger } = capturingLogger();
-
-    expect(() =>
-      createTextProvider({
-        config: { defaultTextModel: 'made-up-model' },
-        logger,
-        isProduction: false,
-      }),
-    ).toThrow(expect.objectContaining({ code: 'LLM_MODEL_UNKNOWN' }) as Error);
-  });
-
-  it('refuses a model that cannot see where a vision model is wanted', () => {
-    const { logger } = capturingLogger();
-
-    expect(() =>
-      createVisionProvider({
-        config: { defaultVisionModel: 'openai/gpt-oss-120b' },
-        logger,
-        isProduction: false,
-      }),
-    ).toThrow(expect.objectContaining({ code: 'LLM_MODEL_UNKNOWN' }) as Error);
-  });
-
-  it('routes across every provider that has a key, because a plan spans them', () => {
-    const { logger } = capturingLogger();
-    const text = createRoutedTextProvider({
-      config: { geminiApiKey: 'AIza'.repeat(6), groqApiKey: 'gsk_x'.repeat(6) },
-      logger,
-      isProduction: false,
-    });
-
-    expect(text.real).toBe(true);
-    expect(text).toBeInstanceOf(RoutedTextProvider);
-  });
-
-  it('still works with one provider configured', () => {
-    const { logger } = capturingLogger();
-    const text = createRoutedTextProvider({
-      config: { geminiApiKey: 'AIza'.repeat(6) },
-      logger,
-      isProduction: false,
-    });
-
-    expect(text.real).toBe(true);
-  });
-
-  it('falls back to a fake when nothing is configured, and says so', () => {
-    const captured = capturingLogger();
-    const text = createRoutedTextProvider({
-      config: {},
-      logger: captured.logger,
-      isProduction: false,
-    });
-
-    expect(text.real).toBe(false);
-    expect(captured.text()).toContain('no model provider has an API key');
-  });
-
-  it('defaults to the model the project chose', () => {
-    const { logger } = capturingLogger();
-    expect(createTextProvider({ config: {}, logger, isProduction: false }).defaultModel).toBe(
-      DEFAULT_TEXT_MODEL,
-    );
-    expect(createVisionProvider({ config: {}, logger, isProduction: false }).defaultModel).toBe(
-      DEFAULT_VISION_MODEL,
-    );
-  });
-});
-
-describe('the factory in production', () => {
-  const BOTH_KEYS = { geminiApiKey: 'AIza'.repeat(6), groqApiKey: 'gsk_x'.repeat(6) };
-
-  it('never builds a fake text provider', () => {
-    const { logger } = capturingLogger();
-
-    expect(() => createTextProvider({ config: {}, logger, isProduction: true })).toThrow(
-      expect.objectContaining({ code: 'LLM_NOT_CONFIGURED' }) as Error,
-    );
-  });
-
-  it('never builds a fake vision provider', () => {
-    const { logger } = capturingLogger();
-
-    expect(() => createVisionProvider({ config: {}, logger, isProduction: true })).toThrow(
-      expect.objectContaining({ code: 'LLM_NOT_CONFIGURED' }) as Error,
-    );
-  });
-
-  it('never builds a fake routed provider', () => {
-    const { logger } = capturingLogger();
-
-    expect(() => createRoutedTextProvider({ config: {}, logger, isProduction: true })).toThrow(
-      expect.objectContaining({ code: 'LLM_NOT_CONFIGURED' }) as Error,
-    );
-  });
-
-  it('refuses a routed provider that is missing a provider the plan needs', () => {
-    const { logger } = capturingLogger();
-
-    expect(() =>
-      createRoutedTextProvider({
-        config: { groqApiKey: 'gsk_x'.repeat(6) },
-        logger,
-        isProduction: true,
-      }),
-    ).toThrow(expect.objectContaining({ code: 'LLM_NOT_CONFIGURED' }) as Error);
-
-    expect(() =>
-      createRoutedTextProvider({
-        config: { geminiApiKey: 'AIza'.repeat(6) },
-        logger,
-        isProduction: true,
-      }),
-    ).toThrow(expect.objectContaining({ code: 'LLM_NOT_CONFIGURED' }) as Error);
-  });
-
-  it('builds real providers when every planned provider has a key', () => {
-    const { logger } = capturingLogger();
-
-    const text = createRoutedTextProvider({ config: BOTH_KEYS, logger, isProduction: true });
-    const vision = createVisionProvider({ config: BOTH_KEYS, logger, isProduction: true });
-
-    expect(text.real).toBe(true);
-    expect(vision.real).toBe(true);
-  });
-
-  it('never puts a key value in the refusal', () => {
-    const { logger } = capturingLogger();
-    const key = 'gsk_a-real-looking-secret-value';
-
-    try {
-      createRoutedTextProvider({ config: { groqApiKey: key }, logger, isProduction: true });
-      expect.unreachable('production should have refused to build a provider');
-    } catch (error) {
-      expect(JSON.stringify(error, Object.getOwnPropertyNames(error))).not.toContain(key);
-    }
   });
 });

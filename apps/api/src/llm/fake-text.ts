@@ -2,7 +2,7 @@ import type { CallReport, LlmProviderName, TokenUsage } from '@nimbus/contracts'
 
 import { prepareMessages } from './context.js';
 import { LlmError } from './errors.js';
-import { issueCodes } from './groq.js';
+import { issueCodes } from './json.js';
 import { LLM_LIMITS } from './limits.js';
 import { DEFAULT_TEXT_MODEL, findModel } from './models.js';
 import {
@@ -66,7 +66,7 @@ export class FakeTextProvider implements TextProvider {
     this.answers = [...(options.answers ?? [])];
     this.defaultAnswer = options.defaultAnswer ?? { text: 'a fake answer' };
     this.defaultModel = options.defaultModel ?? DEFAULT_TEXT_MODEL;
-    this.name = findModel(this.defaultModel)?.provider ?? 'groq';
+    this.name = findModel(this.defaultModel)?.provider ?? 'gemini';
   }
 
   queue(answer: FakeAnswer): void {

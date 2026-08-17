@@ -11,8 +11,8 @@ import {
 const usage = { promptTokens: 100, completionTokens: 40, reasoningTokens: 5, totalTokens: 145 };
 
 const report = {
-  provider: 'groq',
-  model: 'openai/gpt-oss-120b',
+  provider: 'gemini',
+  model: 'gemini-3.6-flash',
   usage,
   cost: { microCents: 9_058, estimated: true },
   attempts: 1,
@@ -66,8 +66,8 @@ describe('CallReportSchema', () => {
     expect(CallReportSchema.safeParse(report).success).toBe(true);
   });
 
-  it('knows both providers and nothing else', () => {
-    expect([...LLM_PROVIDERS].sort()).toEqual(['gemini', 'groq']);
+  it('knows the providers it talks to and nothing else', () => {
+    expect([...LLM_PROVIDERS].sort()).toEqual(['gemini']);
     expect(CallReportSchema.safeParse({ ...report, provider: 'openai' }).success).toBe(false);
   });
 

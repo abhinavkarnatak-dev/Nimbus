@@ -8,7 +8,8 @@ import { CollectingEventPublisher } from '../events/publisher.js';
 import { ApiError } from '../http/api-error.js';
 import { CollectingCancelAnnouncer } from '../orchestrator/cancellation.js';
 import { KNOWN_MODELS } from '../llm/models.js';
-import { SELECTABLE_TEXT_MODELS, modelCatalogueFor } from '../routing/selection.js';
+import { heldProviderKeys, noProviderKeys } from '../llm/sources.js';
+import { SELECTABLE_TEXT_MODELS, catalogueFor } from '../routing/selection.js';
 import { DEFAULT_MAX_STEPS } from './service.js';
 import {
   CLEAR_TASK,
@@ -660,29 +661,46 @@ describe('choosing a model', () => {
     });
   }
 
-  it('accepts every model returned by the same catalogue', async () => {
-    const models = modelCatalogueFor({ geminiApiKey: 'configured' });
+  it('accepts every model the keys on the account pay for', async () => {
+    const providerKeys = heldProviderKeys({ gemini: 'a-gemini-key' });
 
-    for (const model of models.response().models) {
-      const harness = sessionHarness({ models });
+    for (const model of catalogueFor(['gemini']).response().models) {
+      const harness = sessionHarness({ providerKeys });
       await harness.service.create(OWNER_ID, newBody({ model: { textModel: model.id } }));
       expect(harness.records.documents[0]?.model?.textModel).toBe(model.id);
     }
   });
 
-  it('rejects a registry model the configured catalogue did not return', async () => {
-    const models = modelCatalogueFor({ geminiApiKey: 'configured' });
-    const harness = sessionHarness({ models });
+  it('rejects a registry model no key on the account pays for', async () => {
+    const harness = sessionHarness({ providerKeys: heldProviderKeys({ gemini: 'a-gemini-key' }) });
+    const unpaid = 'openai/gpt-oss-120b';
 
-    expect(models.response().models.some((model) => model.id === 'openai/gpt-oss-120b')).toBe(
-      false,
-    );
     expect(
-      await codeOf(
-        harness.service.create(OWNER_ID, newBody({ model: { textModel: 'openai/gpt-oss-120b' } })),
-      ),
+      catalogueFor(['gemini'])
+        .response()
+        .models.some((model) => model.id === unpaid),
+    ).toBe(false);
+    expect(
+      await codeOf(harness.service.create(OWNER_ID, newBody({ model: { textModel: unpaid } }))),
     ).toBe('VALIDATION_FAILED');
     expect(harness.records.documents).toHaveLength(0);
+  });
+
+  it('refuses to create a session for an account that saved no key at all', async () => {
+    const harness = sessionHarness({ providerKeys: noProviderKeys() });
+
+    expect(await codeOf(harness.service.create(OWNER_ID, newBody()))).toBe('PROVIDER_KEY_MISSING');
+    expect(harness.records.documents).toHaveLength(0);
+  });
+
+  it('shows an account the selectable models its saved key pays for', async () => {
+    const harness = sessionHarness({ providerKeys: heldProviderKeys({ gemini: 'a-gemini-key' }) });
+    const catalogue = await harness.service.modelCatalogue(OWNER_ID);
+
+    expect(catalogue.models.map((model) => model.id)).toEqual([
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
+    ]);
   });
 
   it('refuses a model nobody has heard of, before a session exists', async () => {
@@ -725,12 +743,12 @@ describe('choosing a model', () => {
     const harness = sessionHarness();
     const created = await harness.service.create(
       OWNER_ID,
-      newBody({ model: { textModel: 'openai/gpt-oss-120b' } }),
+      newBody({ model: { textModel: 'gemini-3.5-flash-lite' } }),
     );
 
     const detail = await harness.service.detail(OWNER_ID, created.session.sessionId);
 
-    expect(detail.session.model).toEqual({ textModel: 'openai/gpt-oss-120b' });
+    expect(detail.session.model).toEqual({ textModel: 'gemini-3.5-flash-lite' });
   });
 
   it('reads null back for a session nobody chose a model for', async () => {
@@ -747,16 +765,16 @@ describe('choosing a model', () => {
 
     const first = await harness.service.create(
       OWNER_ID,
-      newBody({ idempotencyKey: key, model: { textModel: 'openai/gpt-oss-120b' } }),
+      newBody({ idempotencyKey: key, model: { textModel: 'gemini-3.5-flash-lite' } }),
     );
     const again = await harness.service.create(
       OWNER_ID,
-      newBody({ idempotencyKey: key, model: { textModel: 'gemini-3.5-flash-lite' } }),
+      newBody({ idempotencyKey: key, model: { textModel: 'gemini-3.6-flash' } }),
     );
 
     expect(again.created).toBe(false);
     expect(again.session.sessionId).toBe(first.session.sessionId);
     expect(harness.records.documents).toHaveLength(1);
-    expect(harness.records.documents[0]?.model).toEqual({ textModel: 'openai/gpt-oss-120b' });
+    expect(harness.records.documents[0]?.model).toEqual({ textModel: 'gemini-3.5-flash-lite' });
   });
 });

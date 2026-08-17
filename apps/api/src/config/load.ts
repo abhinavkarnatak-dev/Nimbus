@@ -1,7 +1,7 @@
 import type { z } from 'zod';
 
 import type { LogLevel } from '../logging/logger.js';
-import { missingProviderIssues, modelCatalogueIssues } from '../routing/requirements.js';
+import { modelCatalogueIssues } from '../routing/requirements.js';
 import type { EffectiveLimits } from './limits.js';
 import { environmentSchema, type RawEnvironment } from './schema.js';
 
@@ -46,8 +46,6 @@ export interface StorageConfig {
 }
 
 export interface LlmConfig {
-  groqApiKey?: string;
-  geminiApiKey?: string;
   defaultTextModel?: string;
   defaultVisionModel?: string;
 }
@@ -240,12 +238,6 @@ function productionIssues(config: AppConfig): string[] {
   if (config.storage !== null && !config.storage.endpoint.startsWith('https://')) {
     issues.push('S3_ENDPOINT: must use https in production');
   }
-  for (const issue of missingProviderIssues(config.llm, {
-    gemini: config.llm.geminiApiKey !== undefined,
-    groq: config.llm.groqApiKey !== undefined,
-  })) {
-    issues.push(issue);
-  }
   if (config.sandbox.allowInternet) {
     issues.push('SANDBOX_ALLOW_INTERNET: must be false in production');
   }
@@ -297,8 +289,6 @@ function toAppConfig(raw: RawEnvironment): AppConfig {
     },
     storage: buildStorage(raw),
     llm: {
-      ...(raw.GROQ_API_KEY === undefined ? {} : { groqApiKey: raw.GROQ_API_KEY }),
-      ...(raw.GEMINI_API_KEY === undefined ? {} : { geminiApiKey: raw.GEMINI_API_KEY }),
       ...(raw.DEFAULT_TEXT_MODEL === undefined ? {} : { defaultTextModel: raw.DEFAULT_TEXT_MODEL }),
       ...(raw.DEFAULT_VISION_MODEL === undefined
         ? {}

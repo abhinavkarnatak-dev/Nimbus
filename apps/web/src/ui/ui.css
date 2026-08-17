@@ -49,6 +49,16 @@
   --button-border: var(--border-strong);
 }
 
+.button--danger {
+  --button-fg: var(--danger-text);
+  --button-border: var(--danger-border);
+}
+
+.button--danger:hover:not(:disabled) {
+  --button-bg: var(--danger-hover);
+  --button-border: var(--danger-text);
+}
+
 .button--quiet {
   --button-border: transparent;
   min-height: 2rem;

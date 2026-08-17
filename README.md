@@ -86,9 +86,14 @@ The whole environment is validated once at startup, and the process refuses to s
 missing or malformed. Error messages name the setting and the reason but never print the value, so a
 bad connection string cannot leak its password into a log.
 
-Google, GitHub, SMTP, E2B, and the model providers may all be left blank in development, which is
-what makes the local fake-adapter mode possible. In production they are required, and startup fails
-if they are absent.
+Google, GitHub, SMTP, and E2B may all be left blank in development, which is what makes the local
+fake-adapter mode possible. In production they are required, and startup fails if they are absent.
+
+There is no model provider setting at all, because the server holds no model key of its own. Each
+account adds its own Gemini or Groq key after connecting GitHub, and every model call a session makes
+is billed to that key. The two live model demos below are the exception: they are run by hand, so
+they read `GEMINI_API_KEY` and `GROQ_API_KEY` straight from the environment rather than through the
+configuration module.
 
 Node reads the `.env` file natively, so no extra library is involved:
 
@@ -797,6 +802,24 @@ it is a trap.
 | `gemini-3.6-flash`      | The default, and images | schema     | yes         | yes    |
 | `gemini-3.5-flash-lite` | Small fast jobs         | schema     | yes         | no     |
 | `openai/gpt-oss-120b`   | Hard problems, on Groq  | schema     | no          | yes    |
+
+## Bringing your own key
+
+Nimbus has no model key of its own, so after connecting GitHub you add one. Paste a key from Google
+AI Studio or the Groq console and Nimbus asks that provider to list its models with it. Only a
+success saves anything, and a provider that is merely down is reported as being down rather than as
+your key being wrong.
+
+The key is encrypted with AES-256-GCM before it is written down, bound to your account and to the
+provider it belongs to, and after that only its last four characters are ever shown again. Removing
+it takes it away for good.
+
+Which models you can pick when starting a session follows from which keys you added. Add only a Groq
+key and the whole run is Groq, including the roles you never choose, and images are skipped because
+no Groq model can read one. Add only a Gemini key and it is all Gemini. Add both and you pick.
+
+This is honest about one limit: there is no key management service in V1, so the encryption key is
+derived from `SESSION_SECRET`. It protects a stolen database, not a stolen server.
 
 **The list stays short on purpose.** It held five until two were removed on the same day: Groq
 announced `llama-3.3-70b-versatile` was being decommissioned, and `openai/gpt-oss-20b` had just been

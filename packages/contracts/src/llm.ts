@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const LLM_PROVIDERS = ['groq', 'gemini'] as const;
+export const LLM_PROVIDERS = ['gemini'] as const;
 
 export const LlmProviderSchema = z.enum(LLM_PROVIDERS);
 

@@ -1,4 +1,5 @@
 import {
+  AUTH_PROVIDER_LABELS,
   GitHubDisconnectResponseSchema,
   LogoutResponseSchema,
   type SessionContext,
@@ -15,12 +16,15 @@ import {
   repositoriesUpdated,
 } from '../github/manage.js';
 import type { InstallationHandle } from '../github/useInstallation.js';
+import { ProviderKeys } from '../providers/ProviderKeys.js';
+import type { ProviderKeysHandle } from '../providers/useProviderKeys.js';
 import { Button } from '../ui/Button.js';
 
 export interface SettingsProps {
   api: ApiClient;
   context: SessionContext | null;
   installation: InstallationHandle;
+  keys: ProviderKeysHandle;
   onSignedOut: () => void;
 }
 
@@ -28,6 +32,7 @@ export function Settings({
   api,
   context,
   installation,
+  keys,
   onSignedOut,
 }: SettingsProps): React.JSX.Element {
   const [asking, setAsking] = useState(false);
@@ -109,7 +114,11 @@ export function Settings({
 
             <div className="fact">
               <dt>Sign in methods</dt>
-              <dd>{(context?.user.authProviders ?? []).join(', ') || 'unknown'}</dd>
+              <dd>
+                {(context?.user.authProviders ?? [])
+                  .map((one) => AUTH_PROVIDER_LABELS[one])
+                  .join(', ') || 'unknown'}
+              </dd>
             </div>
           </dl>
 
@@ -122,7 +131,7 @@ export function Settings({
 
               <div className="panel__acts">
                 <Button
-                  tone="secondary"
+                  tone="danger"
                   disabled={leaving}
                   onClick={(): void => {
                     void signOut();
@@ -145,7 +154,7 @@ export function Settings({
           ) : (
             <div className="panel__acts">
               <Button
-                tone="secondary"
+                tone="danger"
                 onClick={(): void => {
                   setAskingOut(true);
                 }}
@@ -154,6 +163,18 @@ export function Settings({
               </Button>
             </div>
           )}
+        </section>
+
+        <section className="panel">
+          <h2 className="panel__title">Model API keys</h2>
+
+          <p className="panel__body">
+            Nimbus has no model key of its own. Every model call a session makes is billed to the
+            key you add here, and which models you can pick when starting a session is decided by
+            which keys are here.
+          </p>
+
+          <ProviderKeys keys={keys} />
         </section>
 
         <section className="panel">
@@ -258,7 +279,7 @@ export function Settings({
             {asking ? (
               <div className="panel__acts">
                 <Button
-                  tone="secondary"
+                  tone="danger"
                   disabled={working}
                   onClick={(): void => {
                     void disconnect();
@@ -280,7 +301,7 @@ export function Settings({
             ) : (
               <div className="panel__acts">
                 <Button
-                  tone="secondary"
+                  tone="danger"
                   onClick={(): void => {
                     setSaid(null);
                     setAsking(true);

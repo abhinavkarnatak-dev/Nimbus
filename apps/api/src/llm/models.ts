@@ -15,9 +15,8 @@ export interface ModelFacts {
 export const DEFAULT_TEXT_MODEL = 'gemini-3.6-flash';
 export const DEFAULT_VISION_MODEL = 'gemini-3.5-flash-lite';
 export const DEFAULT_LIGHT_MODEL = 'gemini-3.5-flash-lite';
-export const DEFAULT_REASONING_MODEL = 'openai/gpt-oss-120b';
+export const DEFAULT_REASONING_MODEL = 'gemini-3.6-flash';
 
-export const DEFAULT_GROQ_TEXT_MODEL = 'openai/gpt-oss-120b';
 export const DEFAULT_GEMINI_TEXT_MODEL = 'gemini-3.6-flash';
 
 export const KNOWN_MODELS: readonly ModelFacts[] = [
@@ -43,17 +42,6 @@ export const KNOWN_MODELS: readonly ModelFacts[] = [
     thinks: false,
     selectable: true,
   },
-  {
-    id: 'openai/gpt-oss-120b',
-    provider: 'groq',
-    contextTokens: 131_072,
-    inputMicroCentsPerToken: 15,
-    outputMicroCentsPerToken: 75,
-    structuredOutput: 'json_schema',
-    vision: false,
-    thinks: true,
-    selectable: true,
-  },
 ];
 
 const BY_ID = new Map(KNOWN_MODELS.map((model) => [model.id, model]));
@@ -62,8 +50,8 @@ export function findModel(id: string): ModelFacts | null {
   return BY_ID.get(id) ?? null;
 }
 
-export function modelsFor(provider: LlmProviderName): ModelFacts[] {
-  return KNOWN_MODELS.filter((model) => model.provider === provider);
+export function defaultTextModelFor(_providers: readonly LlmProviderName[]): string {
+  return DEFAULT_GEMINI_TEXT_MODEL;
 }
 
 export function highestInputRate(): number {

@@ -61,8 +61,9 @@ The only component that holds secrets. Internally divided into:
 
 ### Datastores
 
-- **MongoDB** holds durable state: users, installations, sessions, repository index metadata, audit
-  events, and the sequenced event log that makes reconnect replay possible.
+- **MongoDB** holds durable state: users, installations, sessions, encrypted per account model
+  provider keys, repository index metadata, audit events, and the sequenced event log that makes
+  reconnect replay possible.
 - **Redis** holds only ephemeral, expiring state: hashed one time passwords, rate limit counters,
   OAuth and setup nonces, session advance leases, and idempotency keys.
 - **Qdrant** is optional and off by default behind `ENABLE_SEMANTIC_SEARCH`.
@@ -186,6 +187,15 @@ mapping. An image is converted to a bounded textual description by the vision pr
 then continues on the selected text model. A session is never wholesale rerouted to a different
 provider merely because it contains an image. Token and monetary budgets are tracked per session
 and exhaustion stops the session safely rather than silently degrading it.
+
+The server holds no model API key of its own. Every key belongs to an account, is checked against
+the provider that issued it before it is saved, and is stored encrypted with AES-256-GCM under a key
+derived from `SESSION_SECRET` and bound to the account and provider it was saved for. Text and
+vision providers are therefore built per run from the keys of the account that owns the session,
+never once at startup. Which models an account may choose, and which roles a run can fill, follow
+from which keys that account saved: an account with only a Groq key gets a plan made entirely of
+Groq models and no image understanding at all, and a session refuses to start before it exists if
+the account has saved nothing.
 
 ## 9. Shared contracts and versioning
 

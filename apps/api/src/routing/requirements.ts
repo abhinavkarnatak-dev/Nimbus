@@ -9,16 +9,6 @@ import {
 } from '../llm/models.js';
 import { SELECTABLE_TEXT_MODELS } from './selection.js';
 
-export const PROVIDER_SETTINGS: Readonly<Record<LlmProviderName, string>> = {
-  gemini: 'GEMINI_API_KEY',
-  groq: 'GROQ_API_KEY',
-};
-
-export interface ConfiguredProviders {
-  gemini: boolean;
-  groq: boolean;
-}
-
 export interface ModelDefaults {
   defaultTextModel?: string;
   defaultVisionModel?: string;
@@ -100,38 +90,10 @@ export function modelCatalogueIssues(defaults: ModelDefaults): string[] {
       continue;
     }
 
-    if (planned.role === 'vision' && facts.provider !== 'gemini') {
-      issues.push(issueFor(planned, 'names a model no image describer exists for'));
-      continue;
-    }
-
     if (planned.role !== 'vision' && facts.structuredOutput !== 'json_schema') {
       issues.push(issueFor(planned, 'names a model that cannot hold a schema'));
     }
   }
 
   return issues.sort((a, b) => a.localeCompare(b));
-}
-
-export function missingProviderIssues(
-  defaults: ModelDefaults,
-  configured: ConfiguredProviders,
-): string[] {
-  const missing = new Map<LlmProviderName, PlannedModel>();
-
-  for (const planned of plannedModels(defaults)) {
-    const facts = findModel(planned.model);
-
-    if (facts === null || configured[facts.provider] || missing.has(facts.provider)) {
-      continue;
-    }
-    missing.set(facts.provider, planned);
-  }
-
-  return [...missing]
-    .map(
-      ([provider, planned]) =>
-        `${PROVIDER_SETTINGS[provider]}: required because the ${planned.role} role uses ${planned.model}`,
-    )
-    .sort((a, b) => a.localeCompare(b));
 }

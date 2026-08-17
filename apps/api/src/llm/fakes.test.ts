@@ -4,7 +4,7 @@ import { LlmError } from './errors.js';
 import { FakeTextProvider } from './fake-text.js';
 import { FakeVisionProvider } from './fake-vision.js';
 import { GeminiVisionProvider } from './gemini.js';
-import { GroqTextProvider } from './groq.js';
+import { GeminiTextProvider } from './gemini-text.js';
 import { LLM_LIMITS } from './limits.js';
 import { AnswerSchema, GOOD_ANSWER, capturingLogger } from './llm.fixtures.js';
 import { DEFAULT_TEXT_MODEL, DEFAULT_VISION_MODEL } from './models.js';
@@ -16,7 +16,7 @@ describe('FakeTextProvider', () => {
   it('says plainly that it is not real', () => {
     expect(new FakeTextProvider().real).toBe(false);
     expect(
-      new GroqTextProvider({ apiKey: 'gsk_x'.repeat(6), logger: capturingLogger().logger }).real,
+      new GeminiTextProvider({ apiKey: 'AIzax'.repeat(8), logger: capturingLogger().logger }).real,
     ).toBe(true);
   });
 

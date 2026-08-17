@@ -116,6 +116,10 @@
   --accent-text: var(--gray-0);
   --accent-hover: var(--gray-850);
 
+  --danger-text: #8f524d;
+  --danger-border: #d9b6b3;
+  --danger-hover: #f8efee;
+
   --focus-ring: var(--gray-1000);
   --focus-offset: var(--surface-page);
 
@@ -150,6 +154,10 @@
   --accent-text: var(--gray-1000);
   --accent-hover: var(--gray-0);
 
+  --danger-text: #cf9a94;
+  --danger-border: #5e403d;
+  --danger-hover: #241a19;
+
   --focus-ring: var(--gray-100);
   --focus-offset: var(--surface-page);
 
@@ -183,6 +191,10 @@
     --accent-surface: var(--gray-1000);
     --accent-text: var(--gray-0);
     --accent-hover: var(--gray-850);
+
+    --danger-text: #8f524d;
+    --danger-border: #d9b6b3;
+    --danger-hover: #f8efee;
 
     --focus-ring: var(--gray-1000);
     --focus-offset: var(--surface-page);
