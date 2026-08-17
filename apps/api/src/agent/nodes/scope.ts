@@ -1,13 +1,14 @@
 import {
   ScopeResultSchema,
   ScopeVerdictSchema,
+  taskThinness,
   type AgentState,
   type ScopeResult,
   type ScopeVerdict,
 } from '@nimbus/contracts';
 
 import type { SessionRouter } from '../../routing/router.js';
-import { FILLER_WORDS, NODE_LIMITS } from './limits.js';
+import { NODE_LIMITS } from './limits.js';
 
 export const SCOPE_SYSTEM = [
   'You judge whether a coding request is specific enough for an engineer to start work on,',
@@ -35,24 +36,14 @@ export const SCOPE_JSON_SCHEMA: Readonly<Record<string, unknown>> = {
   additionalProperties: false,
 };
 
-export function meaningfulWords(task: string): string[] {
-  return task
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((word) => word !== '' && !FILLER_WORDS.has(word));
-}
-
 export function tooThinToJudge(task: string): string | null {
-  const trimmed = task.trim();
+  const thin = taskThinness(task);
 
-  if (trimmed.length < NODE_LIMITS.taskMinChars) {
+  if (thin === 'too_short') {
     return 'that task is too short to act on';
   }
 
-  if (meaningfulWords(trimmed).length < NODE_LIMITS.taskMinWords) {
-    return 'that task does not name anything specific';
-  }
-  return null;
+  return thin === 'nothing_specific' ? 'that task does not name anything specific' : null;
 }
 
 export interface ScopeOptions {

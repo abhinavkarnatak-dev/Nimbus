@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { CLEAR_TASK, SLIPPERY_TASK, TINY_TASK, VAGUE_TASK, nodeHarness } from './nodes.fixtures.js';
-import { NODE_LIMITS } from './limits.js';
-import { meaningfulWords, tooThinToJudge, validateScope } from './scope.js';
+import { TASK_MIN_CHARS, meaningfulWords } from '@nimbus/contracts';
+
+import { tooThinToJudge, validateScope } from './scope.js';
 
 const CLEAR = { value: { clear: true, question: '' } };
 const UNCLEAR = {
@@ -50,7 +51,7 @@ describe('tooThinToJudge', () => {
   it('needs enough real words, not just enough characters', () => {
     const padded = 'the the the the the the the the the the the the';
 
-    expect(padded.length).toBeGreaterThan(NODE_LIMITS.taskMinChars);
+    expect(padded.length).toBeGreaterThan(TASK_MIN_CHARS);
     expect(tooThinToJudge(padded)).not.toBeNull();
   });
 });

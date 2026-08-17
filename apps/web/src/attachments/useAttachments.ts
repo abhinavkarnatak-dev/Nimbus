@@ -1,7 +1,8 @@
 import { AttachmentUploadResponseSchema, LIMITS } from '@nimbus/contracts';
 import { useCallback, useRef, useState } from 'react';
+import { z } from 'zod';
 
-import type { CsrfSource } from '../api/client.js';
+import type { ApiClient, CsrfSource } from '../api/client.js';
 import { uploadFile } from '../api/upload.js';
 import { API_BASE_URL } from '../config.js';
 import { newPrefixedId } from '../lib/id.js';
@@ -25,7 +26,9 @@ export interface AttachmentsHandle {
   room: number;
 }
 
-export function useAttachments(csrf: CsrfSource): AttachmentsHandle {
+const NOTHING = z.unknown();
+
+export function useAttachments(api: ApiClient, csrf: CsrfSource): AttachmentsHandle {
   const [held, setHeld] = useState<readonly HeldAttachment[]>([]);
   const [refusals, setRefusals] = useState<readonly string[]>([]);
   const previews = useRef(new Map<string, string>());
@@ -128,9 +131,25 @@ export function useAttachments(csrf: CsrfSource): AttachmentsHandle {
   const remove = useCallback(
     (localId: string): void => {
       forget(localId);
-      setHeld((all) => all.filter((one) => one.localId !== localId));
+
+      setHeld((all) => {
+        const going = all.find((one) => one.localId === localId);
+        const saved = going?.saved ?? null;
+
+        if (saved !== null) {
+          void api
+            .send({
+              method: 'DELETE',
+              path: `/attachments/${saved.attachmentId}`,
+              schema: NOTHING,
+            })
+            .catch(() => undefined);
+        }
+
+        return all.filter((one) => one.localId !== localId);
+      });
     },
-    [forget],
+    [api, forget],
   );
 
   const clear = useCallback((): void => {

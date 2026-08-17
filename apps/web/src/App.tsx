@@ -9,25 +9,15 @@ import { useInstallation } from './github/useInstallation.js';
 import { Connect } from './screens/Connect.js';
 import { Dashboard } from './screens/Dashboard.js';
 import { Landing } from './screens/Landing.js';
+import { Session } from './screens/Session.js';
 import { Settings } from './screens/Settings.js';
 import { SignIn } from './screens/SignIn.js';
 import { useSession } from './session/useSession.js';
+import { useLiveSession } from './sessions/useLiveSession.js';
 import { useSessions } from './sessions/useSessions.js';
 import { ConnectSkeleton, DashboardSkeleton, HeroSkeleton, SignInSkeleton } from './ui/Skeleton.js';
 
 const AWAY_ONCE_SIGNED_IN: readonly string[] = ['landing', 'sign_in', 'auth_callback'];
-
-function Soon({ title }: { title: string }): React.JSX.Element {
-  return (
-    <div className="container">
-      <section className="placeholder">
-        <p className="placeholder__eyebrow">{title}</p>
-        <h1 className="placeholder__title">Not built yet</h1>
-        <p className="placeholder__body">This screen arrives with the next feature.</p>
-      </section>
-    </div>
-  );
-}
 
 function NotFound({ path }: { path: string }): React.JSX.Element {
   return (
@@ -50,6 +40,8 @@ export function App(): React.JSX.Element {
   const signedIn = session.state === 'signed_in';
   const installation = useInstallation(session.api, signedIn);
   const sessions = useSessions(session.api, signedIn && gateIsOpen(installation.gate));
+  const watching = route.name === 'session' ? route.sessionId : null;
+  const liveView = useLiveSession(session.api, watching);
 
   const onGitHubCallback = route.name === 'github_callback';
   const onAuthCallback = route.name === 'auth_callback';
@@ -136,7 +128,7 @@ export function App(): React.JSX.Element {
     }
 
     if (route.name === 'session') {
-      return <Soon title="Session" />;
+      return <Session api={session.api} sessionId={route.sessionId} view={liveView} />;
     }
 
     if (sessions.state === 'loading') {

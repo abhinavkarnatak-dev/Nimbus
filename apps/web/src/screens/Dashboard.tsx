@@ -1,6 +1,8 @@
 import {
   CreateSessionResponseSchema,
   LIMITS,
+  taskThinness,
+  wordsStillNeeded,
   type RepositorySummary,
   type SelectableModel,
   type SessionSummary,
@@ -37,9 +39,12 @@ function startProblem(error: unknown): string {
     return 'That did not start. Try again.';
   }
 
+  if (error.code === 'TASK_TOO_BROAD') {
+    return error.message;
+  }
+
   const known: Partial<Record<string, string>> = {
     ACTIVE_SESSION_EXISTS: 'You already have a session running. Finish or cancel it first.',
-    TASK_TOO_BROAD: 'That task is too broad. Name the file or the behaviour you want changed.',
     REPOSITORY_NOT_AVAILABLE: 'Nimbus can no longer see that repository. Check it on GitHub.',
     REPOSITORY_NOT_PUBLIC: 'Nimbus only works on public repositories.',
     GITHUB_NOT_CONNECTED: 'Connect GitHub before starting a session.',
@@ -95,13 +100,15 @@ export function Dashboard({
   const input = useRef<HTMLTextAreaElement>(null);
   const chooser = useRef<HTMLInputElement>(null);
   const activeOption = useRef<HTMLButtonElement>(null);
-  const attachments = useAttachments(csrf);
+  const attachments = useAttachments(api, csrf);
 
   const now = Date.now();
   const active = sessions.activeSessionId;
   const picked = mentionedRepository(task, repositories);
   const spoken = withoutMentions(task, repositories);
   const tooLong = task.length > LIMITS.taskMaxChars;
+  const thin = spoken === '' ? null : taskThinness(spoken);
+  const shortBy = wordsStillNeeded(spoken);
   const matches = mention === null ? [] : matchRepositories(repositories, mention.query);
   const ready = picked !== null && !tooLong && active === null && !attachments.busy;
 
@@ -128,6 +135,17 @@ export function Dashboard({
       input.current?.focus();
       input.current?.setSelectionRange(next.caret, next.caret);
     });
+  };
+
+  const onPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    const dropped = [...event.clipboardData.files];
+
+    if (dropped.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    attachments.add(dropped);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -345,6 +363,7 @@ export function Dashboard({
                 disabled={active !== null}
                 placeholder="Ask Nimbus to fix a bug or make a small change."
                 onKeyDown={onKeyDown}
+                onPaste={onPaste}
                 onChange={(event): void => {
                   setTask(event.target.value);
                   readMention(event.target.value, event.target.selectionStart);
@@ -430,8 +449,22 @@ export function Dashboard({
               </p>
             )}
 
-            <p className="compose__count" data-over={tooLong}>
-              {String(task.length)} / {String(LIMITS.taskMaxChars)}
+            <p className="compose__foot-row">
+              <span className="compose__guide" data-thin={thin !== null}>
+                {thin === null
+                  ? 'Nimbus can act on this.'
+                  : thin === 'too_short'
+                    ? 'Say a little more about what should change.'
+                    : `Name the file, function or behaviour. ${
+                        shortBy === 1
+                          ? 'One more specific word'
+                          : `${String(shortBy)} more specific words`
+                      } and this is actionable.`}
+              </span>
+
+              <span className="compose__count" data-over={tooLong}>
+                {String(task.length)} / {String(LIMITS.taskMaxChars)}
+              </span>
             </p>
           </form>
         </div>

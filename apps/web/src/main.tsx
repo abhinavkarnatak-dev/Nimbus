@@ -9,6 +9,7 @@ import './screens/signin.css';
 import './screens/connect.css';
 import './screens/dashboard.css';
 import './screens/settings.css';
+import './screens/session.css';
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';

@@ -1,6 +1,4 @@
 export const NODE_LIMITS = {
-  taskMinChars: 15,
-  taskMinWords: 4,
   scopeMaxOutputTokens: 300,
   reasonMaxOutputTokens: 1_500,
 
@@ -10,46 +8,5 @@ export const NODE_LIMITS = {
   intentMaxChars: 300,
   conversationShown: 10,
 } as const;
-
-export const FILLER_WORDS: ReadonlySet<string> = new Set([
-  'fix',
-  'it',
-  'this',
-  'that',
-  'the',
-  'a',
-  'an',
-  'please',
-  'thing',
-  'stuff',
-  'code',
-  'app',
-  'project',
-  'everything',
-  'anything',
-  'something',
-  'better',
-  'improve',
-  'clean',
-  'up',
-  'nice',
-  'good',
-  'work',
-  'make',
-  'do',
-  'help',
-  'me',
-  'my',
-  'our',
-  'and',
-  'or',
-  'to',
-  'of',
-  'in',
-  'on',
-  'for',
-  'with',
-  'all',
-]);
 
 export type NodeLimits = typeof NODE_LIMITS;

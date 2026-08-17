@@ -18,4 +18,5 @@ export * from './agent.js';
 export * from './reasoning.js';
 export * from './pull-request.js';
 export * from './sessions.js';
+export * from './task.js';
 export * from './events.js';

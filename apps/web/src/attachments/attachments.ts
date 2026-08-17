@@ -68,8 +68,11 @@ export function uploadProblem(error: unknown): string {
     return 'That upload failed. Try again.';
   }
 
+  if (error.code === 'ATTACHMENT_REJECTED') {
+    return error.message;
+  }
+
   const known: Partial<Record<string, string>> = {
-    ATTACHMENT_REJECTED: 'Nimbus would not accept that file.',
     PAYLOAD_TOO_LARGE: `That file is over the ${sizeWords(LIMITS.maxAttachmentBytes)} limit.`,
     UNSUPPORTED_MEDIA_TYPE: 'Nimbus only accepts png, jpeg, webp, txt and markdown files.',
     VALIDATION_FAILED: 'Nimbus would not accept that file.',

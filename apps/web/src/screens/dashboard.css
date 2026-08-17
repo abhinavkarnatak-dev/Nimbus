@@ -426,8 +426,24 @@
   color: var(--text-faint);
 }
 
+.compose__foot-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.compose__guide {
+  font-size: var(--text-2xs);
+  color: var(--signal-positive);
+  min-width: 0;
+}
+
+.compose__guide[data-thin='true'] {
+  color: var(--text-muted);
+}
+
 .compose__count {
-  justify-self: end;
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   color: var(--text-faint);
