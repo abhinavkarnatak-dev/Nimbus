@@ -7,10 +7,12 @@ import { readSignInResult, signInResultProblem } from './auth/signin.js';
 import { gateIsOpen, readSetupResult } from './github/installation.js';
 import { useInstallation } from './github/useInstallation.js';
 import { Connect } from './screens/Connect.js';
+import { Dashboard } from './screens/Dashboard.js';
 import { Landing } from './screens/Landing.js';
 import { SignIn } from './screens/SignIn.js';
 import { useSession } from './session/useSession.js';
-import { ConnectSkeleton, HeroSkeleton, SignInSkeleton } from './ui/Skeleton.js';
+import { useSessions } from './sessions/useSessions.js';
+import { ConnectSkeleton, DashboardSkeleton, HeroSkeleton, SignInSkeleton } from './ui/Skeleton.js';
 
 const AWAY_ONCE_SIGNED_IN: readonly string[] = ['landing', 'sign_in', 'auth_callback'];
 
@@ -46,6 +48,7 @@ export function App(): React.JSX.Element {
 
   const signedIn = session.state === 'signed_in';
   const installation = useInstallation(session.api, signedIn);
+  const sessions = useSessions(session.api, signedIn && gateIsOpen(installation.gate));
 
   const onGitHubCallback = route.name === 'github_callback';
   const onAuthCallback = route.name === 'auth_callback';
@@ -120,7 +123,22 @@ export function App(): React.JSX.Element {
       return <Connect api={session.api} installation={installation} />;
     }
 
-    return <Soon title={route.name === 'session' ? 'Session' : 'Dashboard'} />;
+    if (route.name === 'session') {
+      return <Soon title="Session" />;
+    }
+
+    if (sessions.state === 'loading') {
+      return <DashboardSkeleton />;
+    }
+
+    return (
+      <Dashboard
+        api={session.api}
+        csrf={session.csrf}
+        sessions={sessions}
+        repositories={installation.repositories}
+      />
+    );
   })();
 
   const auth = session.state === 'checking' ? 'checking' : signedIn ? 'signed_in' : 'signed_out';

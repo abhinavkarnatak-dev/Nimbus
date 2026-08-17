@@ -115,3 +115,33 @@ export function HeroSkeleton(): React.JSX.Element {
     </div>
   );
 }
+
+export function DashboardSkeleton(): React.JSX.Element {
+  return (
+    <div className="dash">
+      <aside className="rail">
+        <Skeleton shape="button" />
+        <div className="skeleton-stack">
+          <Skeleton shape="text" width="5rem" />
+          <Skeleton shape="block" height="3.5rem" />
+          <Skeleton shape="block" height="3.5rem" />
+          <Skeleton shape="block" height="3.5rem" />
+        </div>
+      </aside>
+
+      <div className="dash__main">
+        <div className="dash__inner">
+          <Loading what="Loading your sessions.">
+            <div className="skeleton-stack">
+              <Skeleton shape="pill" width="5rem" />
+              <Skeleton shape="title" width="20rem" />
+              <Skeleton shape="text" width="80%" />
+            </div>
+          </Loading>
+
+          <Skeleton shape="block" height="19rem" />
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -11,6 +11,7 @@ export interface SessionHandle {
   state: SignedInState;
   context: SessionContext | null;
   api: ApiClient;
+  csrf: CsrfSource;
   refresh: () => Promise<void>;
 }
 
@@ -53,5 +54,5 @@ export function useSession(): SessionHandle {
     void refresh();
   }, [refresh]);
 
-  return { state, context, api, refresh };
+  return { state, context, api, csrf, refresh };
 }

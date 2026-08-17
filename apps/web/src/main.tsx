@@ -7,6 +7,7 @@ import './ui/ui.css';
 import './screens/landing.css';
 import './screens/signin.css';
 import './screens/connect.css';
+import './screens/dashboard.css';
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';

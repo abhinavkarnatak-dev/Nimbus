@@ -32,7 +32,7 @@ export function bound(text: string, maxChars: number): string {
   return text.length <= maxChars ? text : `${text.slice(0, maxChars)}…`;
 }
 
-export function plainText(text: string, maxChars = RENDER_LIMITS.inlineMaxChars): string {
+export function plainText(text: string, maxChars: number = RENDER_LIMITS.inlineMaxChars): string {
   return bound(stripEscapes(text).replace(/\s+/g, ' ').trim(), maxChars);
 }
 
