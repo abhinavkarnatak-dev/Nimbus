@@ -1,20 +1,19 @@
 .dash {
   display: grid;
   grid-template-columns: minmax(0, 18rem) minmax(0, 1fr);
-  align-items: start;
   min-height: 100%;
 }
 
 .rail {
   position: sticky;
-  top: 3.25rem;
+  top: var(--bar-height);
   display: grid;
-  gap: var(--space-5);
-  align-content: start;
-  padding: var(--space-6) var(--space-5);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-4);
   border-right: 1px solid var(--border-subtle);
-  max-height: calc(100dvh - 3.25rem);
-  overflow-y: auto;
+  height: calc(100dvh - var(--bar-height));
+  min-height: 0;
 }
 
 .rail__new {
@@ -40,12 +39,48 @@
   color: var(--text-faint);
 }
 
+.rail__body {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.rail__settings {
+  align-self: end;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-decoration: none;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.rail__settings:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.rail__gear {
+  font-size: var(--text-sm);
+  line-height: 1;
+}
+
 .dash__main {
   display: grid;
   justify-items: center;
   align-content: start;
   padding: var(--section) var(--gutter);
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .dash__inner {
@@ -347,8 +382,9 @@
   border-radius: var(--radius-md);
   background: var(--surface-overlay);
   box-shadow: var(--shadow-lg);
-  max-height: 15rem;
+  max-height: 13.5rem;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .picker__item {
@@ -516,20 +552,114 @@
 @media (width < 60rem) {
   .dash {
     grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    overflow: visible;
   }
 
   .rail {
-    position: static;
-    max-height: none;
+    grid-template-rows: auto auto auto;
+    overflow: visible;
     order: 2;
     border-right: none;
     border-top: 1px solid var(--border-subtle);
     padding-inline: var(--gutter);
   }
 
+  .rail__body {
+    display: grid;
+    gap: var(--space-5);
+    align-content: start;
+    min-height: 0;
+  }
+
+  .settings {
+    display: grid;
+    gap: var(--space-3);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .settings__facts {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .settings__fact {
+    display: grid;
+    gap: 0.1rem;
+    min-width: 0;
+  }
+
+  .settings__fact dt {
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    color: var(--text-faint);
+  }
+
+  .settings__fact dd {
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+  }
+
+  .settings__acts {
+    display: grid;
+    gap: var(--space-1);
+    justify-items: start;
+  }
+
+  .settings__link {
+    padding-inline: 0;
+    min-height: 1.75rem;
+    font-size: var(--text-xs);
+    text-decoration: none;
+    justify-content: flex-start;
+  }
+
+  .settings__confirm {
+    display: grid;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border: 1px solid color-mix(in srgb, var(--signal-negative) 45%, var(--border-default));
+    border-radius: var(--radius-sm);
+    background: var(--surface-sunken);
+  }
+
+  .settings__warn {
+    font-size: var(--text-2xs);
+    color: var(--text-secondary);
+    line-height: var(--leading-normal);
+  }
+
+  .settings__buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .settings__buttons .button {
+    min-height: 1.875rem;
+    font-size: var(--text-xs);
+  }
+
+  .settings__said {
+    font-size: var(--text-2xs);
+    color: var(--text-muted);
+    line-height: var(--leading-normal);
+  }
+
+  .settings__said--bad {
+    color: var(--signal-negative);
+  }
+
   .dash__main {
     order: 1;
     padding-block: var(--space-10);
+    overflow: visible;
+  }
+
+  .rail__body {
+    overflow: visible;
   }
 }
 

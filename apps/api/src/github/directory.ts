@@ -83,6 +83,27 @@ export class OctokitGitHubDirectory implements GitHubDirectory {
     }
   }
 
+  async deleteInstallation(installationId: number): Promise<boolean> {
+    try {
+      await new Octokit({
+        auth: createAppJwt(this.github.appId, this.github.privateKeyPem),
+        request: { timeout: this.timeoutMs },
+      }).rest.apps.deleteInstallation({ installation_id: installationId });
+
+      return true;
+    } catch (error) {
+      if (statusOf(error) === 404) {
+        return true;
+      }
+
+      this.logger.error(
+        { installationId, status: statusOf(error), err: redactValue(error) },
+        'Could not uninstall a GitHub installation',
+      );
+      return false;
+    }
+  }
+
   async identifyInstaller(code: string): Promise<InstallerIdentity | null> {
     let userToken: string;
 

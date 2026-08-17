@@ -251,7 +251,14 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
       logger,
     });
 
-    routers.push(createGitHubRouter({ installations, webhooks, webOrigin: config.api.webOrigin }));
+    routers.push(
+      createGitHubRouter({
+        installations,
+        webhooks,
+        sessions,
+        webOrigin: config.api.webOrigin,
+      }),
+    );
     repositories = installations;
   }
 

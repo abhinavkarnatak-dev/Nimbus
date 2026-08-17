@@ -7,6 +7,7 @@ export type Route =
   | { name: 'connect' }
   | { name: 'github_callback' }
   | { name: 'dashboard' }
+  | { name: 'settings' }
   | { name: 'session'; sessionId: SessionId }
   | { name: 'not_found'; path: string };
 
@@ -17,6 +18,7 @@ export const ROUTE_PATHS = {
   connect: '/connect',
   github_callback: '/github/callback',
   dashboard: '/dashboard',
+  settings: '/settings',
 } as const;
 
 export function sessionPath(sessionId: SessionId): string {
@@ -42,6 +44,10 @@ export function matchRoute(path: string): Route {
 
   if (normalised === ROUTE_PATHS.auth_callback) {
     return { name: 'auth_callback' };
+  }
+
+  if (normalised === ROUTE_PATHS.settings) {
+    return { name: 'settings' };
   }
 
   if (normalised === ROUTE_PATHS.connect) {
@@ -83,6 +89,8 @@ export function pathFor(route: Route): string {
       return ROUTE_PATHS.github_callback;
     case 'dashboard':
       return ROUTE_PATHS.dashboard;
+    case 'settings':
+      return ROUTE_PATHS.settings;
     case 'session':
       return sessionPath(route.sessionId);
     case 'not_found':

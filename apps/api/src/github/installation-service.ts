@@ -50,6 +50,7 @@ export interface GitHubDirectory {
   getInstallation(installationId: number): Promise<InstallationDetails | null>;
   listRepositories(token: string): Promise<GitHubRepositoryPayload[]>;
   identifyInstaller(code: string): Promise<InstallerIdentity | null>;
+  deleteInstallation(installationId: number): Promise<boolean>;
 }
 
 export interface InstallationServiceOptions {
@@ -60,6 +61,10 @@ export interface InstallationServiceOptions {
   github: GitHubConfig;
   logger: Logger;
   stateTtlSeconds?: number;
+}
+
+export interface DisconnectResult {
+  uninstalledOnGitHub: boolean;
 }
 
 export interface ConnectResult {
@@ -271,6 +276,15 @@ export class InstallationService {
     return null;
   }
 
+  async ownsInstallation(userId: string, installationId: number): Promise<boolean> {
+    const found = await githubInstallationsCollection(this.db).countDocuments(
+      { userId, installationId },
+      { limit: 1 },
+    );
+
+    return found > 0;
+  }
+
   async activeInstallation(userId: string): Promise<GitHubInstallationDocument | null> {
     return githubInstallationsCollection(this.db).findOne(
       { userId, status: 'active' },
@@ -282,6 +296,39 @@ export class InstallationService {
     const document = await this.activeInstallation(userId);
 
     return document === null ? null : toInstallationSummary(document);
+  }
+
+  async disconnect(userId: string, ip: string): Promise<DisconnectResult> {
+    const installation = await this.activeInstallation(userId);
+
+    if (installation === null) {
+      throw new ApiError('GITHUB_NOT_CONNECTED', 'There is no GitHub connection to remove.');
+    }
+
+    const uninstalled = await this.directory.deleteInstallation(installation.installationId);
+    const now = new Date();
+
+    await githubInstallationsCollection(this.db).updateMany(
+      { userId, status: { $ne: 'removed' } },
+      { $set: { status: 'removed', removedAt: now, updatedAt: now } },
+    );
+
+    await recordAuditEvent(this.db, this.logger, {
+      action: 'github.installation.removed',
+      outcome: 'success',
+      actorType: 'user',
+      userId,
+      installationRecordId: installation.installationRecordId,
+      ip,
+      metadata: { uninstalledOnGitHub: uninstalled },
+    });
+
+    this.logger.info(
+      { userId, installationId: installation.installationId, uninstalled },
+      'A person disconnected their GitHub installation',
+    );
+
+    return { uninstalledOnGitHub: uninstalled };
   }
 
   async listRepositories(userId: string): Promise<RepositoriesResult> {

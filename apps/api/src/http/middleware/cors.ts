@@ -1,6 +1,6 @@
 import type { RequestHandler } from 'express';
 
-export const ALLOWED_METHODS = 'GET,POST,OPTIONS';
+export const ALLOWED_METHODS = 'GET,POST,DELETE,OPTIONS';
 export const ALLOWED_HEADERS = 'Content-Type,X-CSRF-Token,X-Request-Id';
 export const EXPOSED_HEADERS = 'X-Request-Id';
 export const PREFLIGHT_MAX_AGE_SECONDS = 600;

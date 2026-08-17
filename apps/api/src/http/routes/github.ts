@@ -1,5 +1,6 @@
 import {
   GitHubConnectResponseSchema,
+  GitHubDisconnectResponseSchema,
   RepositoriesResponseSchema,
   type InstallationSummary,
 } from '@nimbus/contracts';
@@ -8,8 +9,9 @@ import { Router } from 'express';
 import type { RepositoriesResult } from '../../github/installation-service.js';
 import { DELIVERY_HEADER, EVENT_HEADER, SIGNATURE_HEADER } from '../../github/webhook-signature.js';
 import type { WebhookDelivery, WebhookResult } from '../../github/webhook-service.js';
+import type { CsrfChecker } from '../../auth/session-service.js';
 import { ApiError } from '../api-error.js';
-import { createRequireAuth, requireSession } from '../middleware/session.js';
+import { createRequireAuth, createRequireCsrf, requireSession } from '../middleware/session.js';
 import { clientIp } from './auth.js';
 
 export interface GitHubSetupService {
@@ -26,6 +28,8 @@ export interface GitHubSetupService {
     ip: string;
   }): Promise<InstallationSummary>;
   listRepositories(userId: string): Promise<RepositoriesResult>;
+  disconnect(userId: string, ip: string): Promise<{ uninstalledOnGitHub: boolean }>;
+  ownsInstallation(userId: string, installationId: number): Promise<boolean>;
 }
 
 export interface GitHubWebhookHandler {
@@ -35,6 +39,7 @@ export interface GitHubWebhookHandler {
 export interface GitHubRouterOptions {
   installations: GitHubSetupService;
   webhooks: GitHubWebhookHandler;
+  sessions: CsrfChecker;
   webOrigin: string;
 }
 
@@ -43,6 +48,13 @@ export function singleHeader(value: string | string[] | undefined): string {
 }
 
 export const SETUP_LANDING_PATH = '/github/callback';
+export const SETTINGS_LANDING_PATH = '/settings';
+
+export function settingsRedirect(webOrigin: string, outcome: string): string {
+  const url = new URL(SETTINGS_LANDING_PATH, webOrigin);
+  url.searchParams.set('github', outcome);
+  return url.toString();
+}
 
 export function setupRedirect(webOrigin: string, outcome: string, reason?: string): string {
   const url = new URL(SETUP_LANDING_PATH, webOrigin);
@@ -66,6 +78,7 @@ export function parseInstallationId(value: unknown): number | null {
 export function createGitHubRouter(options: GitHubRouterOptions): Router {
   const router = Router();
   const requireAuth = createRequireAuth();
+  const requireCsrf = createRequireCsrf(options.sessions);
 
   router.get('/github/connect', requireAuth, async (request, response) => {
     const session = requireSession(request);
@@ -94,7 +107,16 @@ export function createGitHubRouter(options: GitHubRouterOptions): Router {
     const code = typeof query['code'] === 'string' ? query['code'] : '';
 
     if (state === '') {
-      response.redirect(302, setupRedirect(options.webOrigin, 'failed', 'OAUTH_STATE_INVALID'));
+      const known =
+        installationId !== null &&
+        (await options.installations.ownsInstallation(session.user.userId, installationId));
+
+      response.redirect(
+        302,
+        known
+          ? settingsRedirect(options.webOrigin, 'updated')
+          : setupRedirect(options.webOrigin, 'failed', 'OAUTH_STATE_INVALID'),
+      );
       return;
     }
 
@@ -133,6 +155,17 @@ export function createGitHubRouter(options: GitHubRouterOptions): Router {
     });
 
     response.status(200).json({ outcome: result.outcome });
+  });
+
+  router.delete('/github/installation', requireAuth, requireCsrf, async (request, response) => {
+    const session = requireSession(request);
+
+    const result = await options.installations.disconnect(
+      session.user.userId,
+      clientIp(request.ip),
+    );
+
+    response.status(200).json(GitHubDisconnectResponseSchema.parse(result));
   });
 
   router.get('/github/repositories', requireAuth, async (request, response) => {

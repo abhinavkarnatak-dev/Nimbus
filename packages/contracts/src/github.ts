@@ -61,9 +61,14 @@ export const GitHubConnectResponseSchema = z.strictObject({
   installUrl: z.url().max(2048).nullable(),
 });
 
+export const GitHubDisconnectResponseSchema = z.strictObject({
+  uninstalledOnGitHub: z.boolean(),
+});
+
 export type InstallationStatus = z.infer<typeof InstallationStatusSchema>;
 export type GitHubAccountType = z.infer<typeof GitHubAccountTypeSchema>;
 export type RepositorySummary = z.infer<typeof RepositorySummarySchema>;
 export type InstallationSummary = z.infer<typeof InstallationSummarySchema>;
 export type RepositoriesResponse = z.infer<typeof RepositoriesResponseSchema>;
 export type GitHubConnectResponse = z.infer<typeof GitHubConnectResponseSchema>;
+export type GitHubDisconnectResponse = z.infer<typeof GitHubDisconnectResponseSchema>;

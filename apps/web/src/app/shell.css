@@ -4,6 +4,17 @@
   min-height: 100dvh;
 }
 
+.shell[data-chrome='false'] {
+  grid-template-rows: var(--bar-height) 1fr;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.shell[data-chrome='false'] .shell__main {
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .shell__bar {
   position: sticky;
   top: 0;
@@ -12,8 +23,9 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
+  height: var(--bar-height);
+  flex: none;
   padding-inline: var(--gutter);
-  padding-block: var(--space-3);
   background: color-mix(in srgb, var(--surface-page) 82%, transparent);
   backdrop-filter: blur(14px) saturate(140%);
   border-bottom: 1px solid var(--border-subtle);
@@ -46,14 +58,71 @@
 .shell__end {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--space-4);
   min-width: 0;
+  min-height: 2.125rem;
 }
 
-.shell__links {
+.shell__action {
+  min-height: 2.125rem;
+  padding-inline: var(--space-3);
+  font-size: var(--text-xs);
+  text-decoration: none;
+}
+
+.shell__main {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.shell__bar {
+  position: sticky;
+  top: 0;
+  z-index: var(--layer-sticky);
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  justify-content: space-between;
+  gap: var(--space-4);
+  height: var(--bar-height);
+  flex: none;
+  padding-inline: var(--gutter);
+  background: color-mix(in srgb, var(--surface-page) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.shell__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-snug);
+  text-decoration: none;
+}
+
+.shell__mark {
+  width: 1.375rem;
+  height: 1.375rem;
+  flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent-surface);
+  color: var(--accent-text);
+  display: grid;
+  place-items: center;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0;
+}
+
+.shell__end {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-4);
+  min-width: 0;
+  min-height: 2.125rem;
 }
 
 .shell__action {
@@ -214,14 +283,4 @@
 
 .fallback__action:active {
   transform: translateY(1px);
-}
-
-@media (width < 40rem) {
-  .shell__bar {
-    padding-block: var(--space-2);
-  }
-
-  .shell__status-text {
-    display: none;
-  }
 }

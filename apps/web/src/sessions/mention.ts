@@ -1,7 +1,5 @@
 import type { RepositorySummary } from '@nimbus/contracts';
 
-export const MENTION_SHOWN = 6;
-
 export interface ActiveMention {
   start: number;
   query: string;
@@ -39,12 +37,9 @@ export function matchRepositories(
 ): readonly RepositorySummary[] {
   const wanted = query.trim().toLowerCase();
 
-  const found =
-    wanted === ''
-      ? repositories
-      : repositories.filter((one) => fullName(one).toLowerCase().includes(wanted));
-
-  return found.slice(0, MENTION_SHOWN);
+  return wanted === ''
+    ? repositories
+    : repositories.filter((one) => fullName(one).toLowerCase().includes(wanted));
 }
 
 export function mentionedRepository(

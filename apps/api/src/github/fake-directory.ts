@@ -36,6 +36,8 @@ export class FakeGitHubDirectory implements GitHubDirectory {
   readonly installationLookups: number[] = [];
   readonly listingTokens: string[] = [];
   readonly installerCodes: string[] = [];
+  readonly deleted: number[] = [];
+  refusesDelete = false;
 
   private installations = new Map<number, InstallationDetails>();
   private repositoriesByInstallation = new Map<number, GitHubRepositoryPayload[]>();
@@ -54,6 +56,16 @@ export class FakeGitHubDirectory implements GitHubDirectory {
       accountType: overrides.accountType ?? 'User',
       suspended: overrides.suspended ?? false,
     });
+  }
+
+  async deleteInstallation(installationId: number): Promise<boolean> {
+    if (this.refusesDelete) {
+      return Promise.resolve(false);
+    }
+
+    this.deleted.push(installationId);
+    this.installations.delete(installationId);
+    return Promise.resolve(true);
   }
 
   hasRepositories(repositories: readonly GitHubRepositoryPayload[]): void {

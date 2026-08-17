@@ -9,6 +9,7 @@ import { useInstallation } from './github/useInstallation.js';
 import { Connect } from './screens/Connect.js';
 import { Dashboard } from './screens/Dashboard.js';
 import { Landing } from './screens/Landing.js';
+import { Settings } from './screens/Settings.js';
 import { SignIn } from './screens/SignIn.js';
 import { useSession } from './session/useSession.js';
 import { useSessions } from './sessions/useSessions.js';
@@ -123,6 +124,17 @@ export function App(): React.JSX.Element {
       return <Connect api={session.api} installation={installation} />;
     }
 
+    if (route.name === 'settings') {
+      return (
+        <Settings
+          api={session.api}
+          context={session.context}
+          installation={installation}
+          onSignedOut={(): void => void session.refresh()}
+        />
+      );
+    }
+
     if (route.name === 'session') {
       return <Soon title="Session" />;
     }
@@ -136,15 +148,18 @@ export function App(): React.JSX.Element {
         api={session.api}
         csrf={session.csrf}
         sessions={sessions}
-        repositories={installation.repositories}
+        installation={installation}
       />
     );
   })();
 
+  const bareRoutes: readonly string[] = ['dashboard', 'settings', 'session'];
+  const chrome = !bareRoutes.includes(route.name) && session.state !== 'checking';
+
   const auth = session.state === 'checking' ? 'checking' : signedIn ? 'signed_in' : 'signed_out';
 
   return (
-    <AppShell connection={signedIn ? 'live' : 'idle'} auth={auth}>
+    <AppShell auth={auth} chrome={chrome}>
       {body}
     </AppShell>
   );

@@ -5,11 +5,11 @@ import {
   type SelectableModel,
   type SessionSummary,
 } from '@nimbus/contracts';
-import { useRef, useState, type KeyboardEvent, type SyntheticEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type SyntheticEvent } from 'react';
 
 import type { ApiClient, CsrfSource } from '../api/client.js';
 import { ApiError, NetworkError } from '../api/errors.js';
-import { sessionPath } from '../app/routes.js';
+import { ROUTE_PATHS, sessionPath } from '../app/routes.js';
 import { navigate } from '../app/useRoute.js';
 import { ACCEPT_ATTRIBUTE, sizeWords } from '../attachments/attachments.js';
 import { useAttachments } from '../attachments/useAttachments.js';
@@ -24,6 +24,7 @@ import {
   mentionedRepository,
   withoutMentions,
 } from '../sessions/mention.js';
+import type { InstallationHandle } from '../github/useInstallation.js';
 import type { SessionsHandle } from '../sessions/useSessions.js';
 import { Button } from '../ui/Button.js';
 
@@ -75,15 +76,16 @@ export interface DashboardProps {
   api: ApiClient;
   csrf: CsrfSource;
   sessions: SessionsHandle;
-  repositories: readonly RepositorySummary[];
+  installation: InstallationHandle;
 }
 
 export function Dashboard({
   api,
   csrf,
   sessions,
-  repositories,
+  installation,
 }: DashboardProps): React.JSX.Element {
+  const repositories = installation.repositories;
   const [task, setTask] = useState('');
   const [model, setModel] = useState('');
   const [starting, setStarting] = useState(false);
@@ -92,6 +94,7 @@ export function Dashboard({
   const [highlighted, setHighlighted] = useState(0);
   const input = useRef<HTMLTextAreaElement>(null);
   const chooser = useRef<HTMLInputElement>(null);
+  const activeOption = useRef<HTMLButtonElement>(null);
   const attachments = useAttachments(csrf);
 
   const now = Date.now();
@@ -101,6 +104,10 @@ export function Dashboard({
   const tooLong = task.length > LIMITS.taskMaxChars;
   const matches = mention === null ? [] : matchRepositories(repositories, mention.query);
   const ready = picked !== null && !tooLong && active === null && !attachments.busy;
+
+  useEffect(() => {
+    activeOption.current?.scrollIntoView({ block: 'nearest' });
+  }, [highlighted, mention]);
 
   const readMention = (value: string, caret: number): void => {
     const found = activeMention(value, caret);
@@ -196,34 +203,31 @@ export function Dashboard({
   return (
     <div className="dash">
       <aside className="rail" aria-label="Your sessions">
-        <Button
-          tone="secondary"
-          className="rail__new"
-          disabled={active !== null}
-          onClick={(): void => {
-            setTask('');
-            setProblem(null);
-          }}
-        >
-          + New session
-        </Button>
+        <div className="rail__body">
+          <div className="rail__group">
+            <p className="rail__word">
+              <span>Recent</span>
+              <span>{String(sessions.sessions.length)}</span>
+            </p>
 
-        <div className="rail__group">
-          <p className="rail__word">
-            <span>Recent</span>
-            <span>{String(sessions.sessions.length)}</span>
-          </p>
-
-          {sessions.sessions.length === 0 ? (
-            <p className="empty__why">Nothing yet. The first session you start appears here.</p>
-          ) : (
-            <div className="history__list">
-              {sessions.sessions.map((one) => (
-                <RunRow key={one.sessionId} session={one} now={now} />
-              ))}
-            </div>
-          )}
+            {sessions.sessions.length === 0 ? (
+              <p className="empty__why">Nothing yet. The first session you start appears here.</p>
+            ) : (
+              <div className="history__list">
+                {sessions.sessions.map((one) => (
+                  <RunRow key={one.sessionId} session={one} now={now} />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
+
+        <a className="rail__settings" href={ROUTE_PATHS.settings}>
+          <span className="rail__gear" aria-hidden="true">
+            &#9881;
+          </span>
+          Settings
+        </a>
       </aside>
 
       <div className="dash__main">
@@ -269,6 +273,7 @@ export function Dashboard({
                         className="picker__item"
                         type="button"
                         key={one.repositoryId}
+                        ref={at === highlighted ? activeOption : null}
                         role="option"
                         aria-selected={at === highlighted}
                         data-active={at === highlighted}
