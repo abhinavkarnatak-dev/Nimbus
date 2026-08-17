@@ -58,6 +58,7 @@ export const RepositoriesResponseSchema = z.strictObject({
 
 export const GitHubConnectResponseSchema = z.strictObject({
   redirectUrl: z.url().max(2048),
+  installUrl: z.url().max(2048).nullable(),
 });
 
 export type InstallationStatus = z.infer<typeof InstallationStatusSchema>;

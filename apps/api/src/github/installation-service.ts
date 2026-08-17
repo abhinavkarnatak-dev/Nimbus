@@ -64,6 +64,7 @@ export interface InstallationServiceOptions {
 
 export interface ConnectResult {
   redirectUrl: string;
+  installUrl: string | null;
   state: string;
 }
 
@@ -102,8 +103,19 @@ export class InstallationService {
     });
   }
 
-  installUrl(): string {
-    return `https://github.com/apps/${this.github.appSlug}/installations/new`;
+  installUrl(state?: string): string | null {
+    const slug = this.github.appSlug.trim();
+
+    if (slug === '') {
+      return null;
+    }
+
+    const url = new URL(`https://github.com/apps/${slug}/installations/new`);
+
+    if (state !== undefined) {
+      url.searchParams.set('state', state);
+    }
+    return url.toString();
   }
 
   async beginConnect(userId: string): Promise<ConnectResult> {
@@ -114,7 +126,7 @@ export class InstallationService {
     url.searchParams.set('redirect_uri', this.github.setupCallbackUrl);
     url.searchParams.set('state', state);
 
-    return { redirectUrl: url.toString(), state };
+    return { redirectUrl: url.toString(), installUrl: this.installUrl(state), state };
   }
 
   async completeSetup(input: CompleteSetupInput): Promise<InstallationSummary> {

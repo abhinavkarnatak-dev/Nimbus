@@ -91,6 +91,45 @@ export function countdownWords(seconds: number): string {
   return rest === 0 ? `${String(minutes)}m` : `${String(minutes)}m ${String(rest)}s`;
 }
 
+export const SIGN_IN_OUTCOMES = ['success', 'cancelled', 'failed'] as const;
+
+export type SignInOutcome = (typeof SIGN_IN_OUTCOMES)[number];
+
+export interface SignInResult {
+  outcome: SignInOutcome;
+  reason: string | null;
+}
+
+export function readSignInResult(search: string): SignInResult | null {
+  const params = new URLSearchParams(search);
+  const outcome = params.get('signin');
+
+  if (outcome === null || !SIGN_IN_OUTCOMES.includes(outcome as SignInOutcome)) {
+    return null;
+  }
+
+  return { outcome: outcome as SignInOutcome, reason: params.get('reason') };
+}
+
+const SIGN_IN_REASONS: Partial<Record<ErrorCode, string>> = {
+  OAUTH_STATE_INVALID: 'That sign in link had expired. Start again here.',
+  ACCOUNT_DISABLED: 'That account cannot sign in.',
+  RATE_LIMITED: 'Too many attempts. Wait a moment and try again.',
+};
+
+export function signInResultProblem(result: SignInResult): string | null {
+  if (result.outcome === 'success') {
+    return null;
+  }
+
+  if (result.outcome === 'cancelled') {
+    return 'You stopped before finishing. Nothing was signed in.';
+  }
+
+  const known = result.reason === null ? undefined : SIGN_IN_REASONS[result.reason as ErrorCode];
+  return known ?? 'That sign in did not finish. Try again.';
+}
+
 export interface CodeSent {
   requestId: string;
   expiresInSeconds: number;

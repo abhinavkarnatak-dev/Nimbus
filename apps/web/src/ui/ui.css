@@ -157,6 +157,80 @@
   background: var(--signal-negative);
 }
 
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  background: var(--surface-hover);
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--text-primary) 6%, transparent),
+    transparent
+  );
+  animation: skeleton-sweep 1.6s var(--ease-in-out) infinite;
+}
+
+.skeleton--text {
+  height: 0.75rem;
+}
+
+.skeleton--line {
+  height: 1rem;
+}
+
+.skeleton--title {
+  height: 1.75rem;
+  border-radius: var(--radius-sm);
+}
+
+.skeleton--block {
+  height: 100%;
+  min-height: 8rem;
+  border-radius: var(--radius-md);
+}
+
+.skeleton--button {
+  height: 2.875rem;
+  border-radius: var(--radius-sm);
+}
+
+.skeleton--pill {
+  height: 1.25rem;
+  width: 5rem;
+  border-radius: var(--radius-full);
+}
+
+.skeleton-stack {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.skeleton-row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+@keyframes skeleton-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    display: none;
+  }
+}
+
 .divider {
   display: grid;
   grid-template-columns: 1fr auto 1fr;

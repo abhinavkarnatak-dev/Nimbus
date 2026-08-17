@@ -13,7 +13,11 @@ import { createRequireAuth, requireSession } from '../middleware/session.js';
 import { clientIp } from './auth.js';
 
 export interface GitHubSetupService {
-  beginConnect(userId: string): Promise<{ redirectUrl: string; state: string }>;
+  beginConnect(userId: string): Promise<{
+    redirectUrl: string;
+    installUrl: string | null;
+    state: string;
+  }>;
   completeSetup(input: {
     userId: string;
     installationId: number;
@@ -67,9 +71,12 @@ export function createGitHubRouter(options: GitHubRouterOptions): Router {
     const session = requireSession(request);
     const started = await options.installations.beginConnect(session.user.userId);
 
-    response
-      .status(200)
-      .json(GitHubConnectResponseSchema.parse({ redirectUrl: started.redirectUrl }));
+    response.status(200).json(
+      GitHubConnectResponseSchema.parse({
+        redirectUrl: started.redirectUrl,
+        installUrl: started.installUrl,
+      }),
+    );
   });
 
   router.get('/github/setup/callback', requireAuth, async (request, response) => {
@@ -88,6 +95,12 @@ export function createGitHubRouter(options: GitHubRouterOptions): Router {
 
     if (state === '') {
       response.redirect(302, setupRedirect(options.webOrigin, 'failed', 'OAUTH_STATE_INVALID'));
+      return;
+    }
+
+    if (code === '' && installationId !== null) {
+      const started = await options.installations.beginConnect(session.user.userId);
+      response.redirect(302, started.redirectUrl);
       return;
     }
 

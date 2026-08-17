@@ -26,6 +26,7 @@ export interface SignInProps {
   api: ApiClient;
   onSignedIn: (context: SessionContext) => void;
   googleAvailable?: boolean;
+  initialProblem?: string | null;
 }
 
 function useNow(active: boolean): number {
@@ -52,8 +53,12 @@ export function SignIn({
   api,
   onSignedIn,
   googleAvailable = true,
+  initialProblem = null,
 }: SignInProps): React.JSX.Element {
-  const [state, dispatch] = useReducer(reduceSignIn, FIRST_STATE);
+  const [state, dispatch] = useReducer(reduceSignIn, {
+    ...FIRST_STATE,
+    problem: initialProblem,
+  });
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [emailTouched, setEmailTouched] = useState(false);

@@ -43,6 +43,26 @@
   letter-spacing: 0;
 }
 
+.shell__end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.shell__links {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.shell__action {
+  min-height: 2.125rem;
+  padding-inline: var(--space-3);
+  font-size: var(--text-xs);
+  text-decoration: none;
+}
+
 .shell__status {
   display: inline-flex;
   align-items: center;
