@@ -131,6 +131,29 @@ describe('saving a provider key, against the real collection', () => {
     expect(await keys.providersFor(OWNER_ID)).toEqual(['gemini']);
   });
 
+  it('ignores a legacy key for a provider Nimbus no longer supports', async () => {
+    const keys = accepting();
+    await keys.save({ userId: OWNER_ID, provider: 'gemini', apiKey: GEMINI_KEY });
+
+    const saved = await providerKeysCollection(testDatabase.db).findOne({ userId: OWNER_ID });
+    expect(saved).not.toBeNull();
+
+    await testDatabase.db.command({
+      insert: 'provider_keys',
+      documents: [
+        {
+          ...saved,
+          providerKeyId: 'pky_ccccccccccccccccccccc',
+          provider: 'groq',
+        },
+      ],
+      bypassDocumentValidation: true,
+    });
+
+    expect((await keys.list(OWNER_ID)).keys.map((one) => one.provider)).toEqual(['gemini']);
+    expect(await keys.providersFor(OWNER_ID)).toEqual(['gemini']);
+  });
+
   it('keeps the first save when the same key is saved twice at once', async () => {
     const keys = accepting();
 

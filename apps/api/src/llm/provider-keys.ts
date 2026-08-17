@@ -206,7 +206,9 @@ export class ProviderKeyService {
   }
 
   async #documents(userId: string): Promise<ProviderKeyDocument[]> {
-    const documents = await providerKeysCollection(this.#db).find({ userId }).toArray();
+    const documents = await providerKeysCollection(this.#db)
+      .find({ userId, provider: { $in: LLM_PROVIDERS } })
+      .toArray();
 
     return documents.sort(
       (left, right) => LLM_PROVIDERS.indexOf(left.provider) - LLM_PROVIDERS.indexOf(right.provider),

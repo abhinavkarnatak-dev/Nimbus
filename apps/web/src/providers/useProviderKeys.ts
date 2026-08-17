@@ -23,6 +23,8 @@ export function useProviderKeys(api: ApiClient, enabled: boolean): ProviderKeysH
   const [keys, setKeys] = useState<readonly ProviderKeySummary[]>([]);
 
   const refresh = useCallback(async (): Promise<void> => {
+    setState('loading');
+
     try {
       const held = await api.get('/provider-keys', ProviderKeysResponseSchema);
       setKeys(held.keys);
