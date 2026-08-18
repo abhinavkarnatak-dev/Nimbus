@@ -60,7 +60,13 @@ Socket events re-authorize the session on each event, because an authenticated c
 standing permission for whatever arrives on it later. Cross-user access attempts have explicit
 negative tests for every session, attachment, event, and repository endpoint.
 
-Owned by features 006, 014, 020, 034, and 036.
+Renaming a session, deleting one, and labelling one of its pull requests are writes like any other:
+each is authenticated, carries a CSRF token, and scopes the query by owner, so one account cannot
+rename, delete, or relabel another account's work. Delete removes the conversation and its events;
+it does not touch the branch or the pull request already on GitHub, because those are no longer
+Nimbus's to withdraw.
+
+Owned by features 006, 014, 020, 034, 036, and 045.
 
 ## 5. GitHub credential handling
 
@@ -219,7 +225,19 @@ everything passed makes no claim of success. The pull request gateway exposes ex
 finding by branch and creating; merging, approving, closing, updating and commenting are absent from
 the port rather than merely disallowed by policy.
 
-Owned by features 021, 022, and 023.
+Delivery is gated on the recorded result of the checks, not on the model's account of them. A run
+whose checks failed or errored cannot be finished as successful, cannot have a patch prepared from
+it, and cannot be pushed, whatever the final answer claims. Artefacts a check itself generates, such
+as compiler output, are written outside the workspace where the toolchain allows it, and otherwise
+removed before the patch is exported, but only when they are recognised untracked check artefacts. A
+tracked source file that a check modified is surfaced for review rather than quietly reverted,
+because silently undoing a real change is worse than showing an unexpected one.
+
+The manual open, merged and closed label a person puts on a pull request is stored on the session and
+is presentation metadata only. It never calls GitHub, never changes the pull request, and is not
+read back from GitHub, so it must not be treated as evidence of the pull request's real state.
+
+Owned by features 021, 022, 023, and 045.
 
 ## 8a. Cancellation and the liveness of an external write
 
@@ -381,9 +399,18 @@ sandbox lifecycle, token minting, push, pull request creation, cancellation, and
 failures. They never contain raw prompts, full source, tokens, one time passwords, cookies,
 authorization headers, or secret values.
 
-Documented deletion behavior exists for sessions, attachments, indexes, and account data.
+Documented deletion behavior exists for sessions, attachments, indexes, and account data. Deleting a
+session removes the conversation, its messages, and its event log; the branch and pull request it
+already opened stay on GitHub, and the screen says so rather than implying they were withdrawn.
 
-Owned by features 004, 006, and 047.
+The per file diff a session shows in the browser is repository source leaving the trusted side, so it
+is bounded and redacted before it is stored, not on the way out. Each file keeps at most 600 lines
+and 60,000 characters, is marked as truncated when it is cut, and is passed through the same secret
+redactor the tool output uses, so a credential the agent wrote into a patch is replaced rather than
+displayed. This preserves the existing promise that a validation report never repeats a credential
+it detected.
+
+Owned by features 004, 006, 045, and 047.
 
 ## 10a. Model providers
 
@@ -487,10 +514,10 @@ the server. This removes any path by which a user could select a model that cann
 job, and prevents a cheaper primary from changing the cost of unrelated internal work.
 
 **Every role in a plan is covered by a key the account holds.** The server picks each role from an
-ordered list of candidates and takes the first one a saved key pays for, so an account with only a
-Groq key gets an all-Groq plan rather than a plan that fails at the first Gemini call. A primary the
-account cannot pay for is refused when the plan is built, not swapped for something cheaper, and an
-account with no key at all cannot create a session in the first place.
+ordered list of candidates and takes the first one a saved key pays for, rather than a plan that
+fails at the first call to a provider the account never paid for. A primary the account cannot pay
+for is refused when the plan is built, not swapped for something cheaper, and an account with no key
+at all cannot create a session in the first place.
 
 **An image is described once and the description is persisted** on the attachment record along with
 the model that wrote it and the time. Sessions are resumable, and a resume that re-describes every

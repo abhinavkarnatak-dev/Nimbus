@@ -13,7 +13,7 @@ mitigation names the feature that owns it. A mitigation marked "planned" is not 
 | Repository author  | Wrote the code Nimbus reads. Often not the user     | No                                                      |
 | Language model     | Proposes actions. Influenced by repository content  | No                                                      |
 | Nimbus operator    | Runs the deployment                                 | Yes                                                     |
-| External services  | GitHub, Groq, Gemini, SMTP, E2B                     | Trusted to perform their function, not with excess data |
+| External services  | GitHub, Gemini, SMTP, E2B                           | Trusted to perform their function, not with excess data |
 
 The language model is explicitly an untrusted actor. It is influenced by text written by strangers,
 so its output is a proposal, never an authorization.
@@ -32,6 +32,7 @@ Ranked by what an attacker gains from them.
 | SMTP credentials                             | Phishing from a trusted sender                             |
 | User to repository mapping                   | Discloses what a user is working on                        |
 | Private repository content held in a session | Source code disclosure                                     |
+| Stored per file diffs of a session's changes | Source code disclosure, scoped to that account's sessions  |
 | Attachments                                  | May contain sensitive user material                        |
 | Audit log                                    | Discloses activity patterns; tampering hides an attack     |
 
@@ -198,6 +199,9 @@ Every check runs in the backend, on material that came from an untrusted sandbox
 | Oversized change                                       | Changed file, diff line, and binary size limits enforced                                                | 021      |
 | Credential smuggled into the diff                      | Secret scanning on the diff, likely credentials rejected                                                | 021      |
 | Duplicate push or duplicate pull request after a retry | Idempotency checks, unique branch naming, existing pull request recovery                                | 022, 023 |
+| A failed check narrated as success and then delivered  | Delivery gated on the recorded check result, never on the model's final answer                          | 045      |
+| Check generated artefacts smuggled into the patch      | Check output written outside the workspace, recognised untracked artefacts removed before export        | 045      |
+| A credential shown back through the per file diff      | Diff redacted and bounded before it is stored, so it never reaches the browser unredacted               | 045      |
 
 Pushing a branch or opening a pull request can trigger CI, preview deployments, and bots. Protected
 file validation is a security boundary even though Nimbus never merges.
@@ -243,8 +247,13 @@ Stated plainly rather than hidden.
 - **A user can approve something harmful.** Approvals show the exact effect, but a user who
   approves without reading has authorized it. Nimbus reduces this with precise, non-generic
   approval text, not by refusing to ask.
-- **Provider trust.** Repository snippets are sent to Groq and Gemini under their terms, billed to
-  the key the account owner added. This is documented for the user rather than obscured.
+- **Provider trust.** Repository snippets are sent to Google Gemini under its terms, billed to the
+  key the account owner added. This is documented for the user rather than obscured.
+- **A manual pull request label is a note, not a fact.** The open, merged and closed marks a person
+  puts on a pull request are stored on the session and never checked against GitHub. A session can
+  therefore show merged for a pull request that was closed, or open for one that was merged. Nothing
+  depends on the label, and it changes nothing on GitHub, but it must not be read as the pull
+  request's real state.
 - **Stored provider keys survive a database-only compromise, and nothing beyond it.** There is no key
   management service in V1, so the encryption key is derived from `SESSION_SECRET`. Anybody holding
   both the database and that secret can read every stored key. Rotating `SESSION_SECRET` makes every

@@ -22,7 +22,7 @@ The architecture is organized around a single question: where can a credential e
 | Z1   | Nimbus API, orchestrator, gateways   | Trusted                  | Yes, all of them                     |
 | Z2   | MongoDB, Redis, optional Qdrant      | Trusted, private network | Credentials to reach them live in Z1 |
 | Z3   | E2B sandbox                          | Untrusted execution      | No, never                            |
-| Z4   | GitHub, Groq, Gemini, SMTP           | External                 | Reached only from Z1                 |
+| Z4   | GitHub, Gemini, SMTP                 | External                 | Reached only from Z1                 |
 | Z5   | Repository content, user attachments | Untrusted data           | Not applicable                       |
 
 Z3 is the important one. The sandbox runs commands proposed by a language model against source code
@@ -44,7 +44,9 @@ text as untrusted data.
 
 The only component that holds secrets. Internally divided into:
 
-- **HTTP API**: authentication, GitHub connection, session lifecycle, attachments.
+- **HTTP API**: authentication, GitHub connection, session lifecycle, attachments. A session is a
+  durable conversation, so the API also renames one, deletes one, and records the manual pull
+  request label a person has put on it.
 - **Socket gateway**: authenticated handshake, per session rooms, sequenced events, replay on
   reconnect.
 - **Agent orchestrator**: a LangGraph graph that advances one session at a time under a lease, with
@@ -56,14 +58,17 @@ The only component that holds secrets. Internally divided into:
   push, pull request creation.
 - **Sandbox controller**: provisioning, bounded command execution, cancellation, teardown, orphan
   sweeping.
-- **Provider adapters**: Groq for text, Gemini for image understanding, Nodemailer for mail, E2B for
-  sandboxes. Each sits behind an interface with a fake implementation for local use and tests.
+- **Provider adapters**: Gemini for text and for image understanding, Nodemailer for mail, E2B for
+  sandboxes. Each sits behind an interface with a fake implementation for local use and tests. The
+  text and vision adapters are built per run from the key the account saved, never once at startup.
 
 ### Datastores
 
 - **MongoDB** holds durable state: users, installations, sessions, encrypted per account model
   provider keys, repository index metadata, audit events, and the sequenced event log that makes
-  reconnect replay possible.
+  reconnect replay possible. A session document carries the whole conversation, not just the last
+  run: its title, every message, the repository and branch it delivered to, the pull requests it
+  opened with the manual label a person put on each, and the diff of every file it changed.
 - **Redis** holds only ephemeral, expiring state: hashed one time passwords, rate limit counters,
   OAuth and setup nonces, session advance leases, and idempotency keys.
 - **Qdrant** is optional and off by default behind `ENABLE_SEMANTIC_SEARCH`.
@@ -102,18 +107,44 @@ the datastores.
 
 ## 5. Session state machine
 
+A session is a conversation that outlives any one run inside it. That is why three things are
+tracked separately rather than folded into one status.
+
+**Session status** is what the person sees at the top of the screen.
+
 ```text
-queued -> provisioning -> indexing -> working
-                                        |
-                    +-------------------+-------------------+
-                    |                   |                   |
-              awaiting_user        validating           failed
-                    |                   |
-                    +--> working        +--> pushing -> pr_created
+ready -> queued -> provisioning -> indexing -> working
+                                                 |
+                     +---------------------------+--------------+
+                     |               |           |              |
+               awaiting_user    validating    completed       failed
+                     |               |
+                     +--> working    +--> pushing -> pr_created
 
 cancelled is reachable from any non-terminal state.
-Terminal states: pr_created, failed, cancelled.
+Terminal turn states: completed, pr_created, failed, cancelled.
 ```
+
+`ready` is a conversation waiting for its next instruction. `completed` is a turn that finished
+correctly without changing any file, which is a real outcome and not a failure: asking Nimbus a
+question about the code ends there.
+
+These are terminal for the **turn**, not for the conversation. A finished session keeps its
+composer, and a follow-up moves it back to `queued` while keeping its repository, branch, messages,
+pull requests and delivered commit. Only the transient run data resets: checks, the changed file
+snapshot, tool events, retry count and any pending clarification. A conversation ends only when
+somebody deletes it.
+
+**Run status** (`queued`, `working`, `awaiting_user`, `succeeded`, `failed`, `cancelled`) is how the
+last turn ended. **Delivery status** (`no_changes`, `changes_ready`, `pr_created`, `pr_updated`,
+`validation_failed`, `checks_failed`) is what reached the repository. Splitting them is what makes a
+follow-up deterministic: reusing one status for both would have meant reopening a terminal state,
+which overloads "this work is done" with "this conversation is still available".
+
+Delivery is gated on **recorded check results, never on what the model said about them**. A failed
+or errored check cannot be narrated as success by `finish_task`, cannot be prepared into a patch,
+and cannot be pushed. A correctable failure goes back to the graph for a bounded retry; an
+unresolved one ends the turn as `checks_failed` with the conversation still open.
 
 Status is persisted durably before any event is emitted. A crash between the write and the emit
 loses an event, which replay recovers. The reverse order would let the UI show a state the server
@@ -181,9 +212,8 @@ instructions is reported by code, path, and line without being quoted.
 
 ## 8. Model routing
 
-Groq serves text and Gemini serves image understanding, both behind adapters with timeouts,
-cancellation, retry with backoff, response schema validation, usage accounting, and safe error
-mapping. An image is converted to a bounded textual description by the vision provider; the session
+Gemini serves both text and image understanding, behind adapters with timeouts, cancellation, retry
+with backoff, response schema validation, usage accounting, and safe error mapping. An image is converted to a bounded textual description by the vision provider; the session
 then continues on the selected text model. A session is never wholesale rerouted to a different
 provider merely because it contains an image. Token and monetary budgets are tracked per session
 and exhaustion stops the session safely rather than silently degrading it.
@@ -193,9 +223,14 @@ the provider that issued it before it is saved, and is stored encrypted with AES
 derived from `SESSION_SECRET` and bound to the account and provider it was saved for. Text and
 vision providers are therefore built per run from the keys of the account that owns the session,
 never once at startup. Which models an account may choose, and which roles a run can fill, follow
-from which keys that account saved: an account with only a Groq key gets a plan made entirely of
-Groq models and no image understanding at all, and a session refuses to start before it exists if
-the account has saved nothing.
+from which keys that account saved, and a session refuses to start before it exists if the account
+has saved nothing.
+
+The provider list is deliberately a list even though it currently holds one entry. Groq was the
+second and was removed once its free tier was measured against a real run: 8,000 tokens a minute
+against a single request that asks for roughly 5,100, so the second request inside any minute is
+refused and the session dies. The seam that let two providers coexist is what made removing one a
+contained change rather than a rewrite.
 
 ## 9. Shared contracts and versioning
 

@@ -90,10 +90,10 @@ Google, GitHub, SMTP, and E2B may all be left blank in development, which is wha
 fake-adapter mode possible. In production they are required, and startup fails if they are absent.
 
 There is no model provider setting at all, because the server holds no model key of its own. Each
-account adds its own Gemini or Groq key after connecting GitHub, and every model call a session makes
+account adds its own Google Gemini key after connecting GitHub, and every model call a session makes
 is billed to that key. The two live model demos below are the exception: they are run by hand, so
-they read `GEMINI_API_KEY` and `GROQ_API_KEY` straight from the environment rather than through the
-configuration module.
+they read `GEMINI_API_KEY` straight from the environment rather than through the configuration
+module.
 
 Node reads the `.env` file natively, so no extra library is involved:
 
@@ -781,7 +781,7 @@ are, so a credential inside a file that was legitimately readable is replaced be
 
 ## Talking to the models
 
-Groq answers questions about code and Gemini describes images. Both are slow, charged by the word, and
+Gemini answers questions about code and describes images. It is slow, charged by the word, and
 occasionally down, so the adapter is not a wrapper around `fetch`.
 
 ```bash
@@ -801,31 +801,35 @@ it is a trap.
 | ----------------------- | ----------------------- | ---------- | ----------- | ------ |
 | `gemini-3.6-flash`      | The default, and images | schema     | yes         | yes    |
 | `gemini-3.5-flash-lite` | Small fast jobs         | schema     | yes         | no     |
-| `openai/gpt-oss-120b`   | Hard problems, on Groq  | schema     | no          | yes    |
 
 ## Bringing your own key
 
 Nimbus has no model key of its own, so after connecting GitHub you add one. Paste a key from Google
-AI Studio or the Groq console and Nimbus asks that provider to list its models with it. Only a
-success saves anything, and a provider that is merely down is reported as being down rather than as
-your key being wrong.
+AI Studio and Nimbus asks Google to list its models with it. Only a success saves anything, and a
+provider that is merely down is reported as being down rather than as your key being wrong.
+
+Nimbus does not check that your key begins with the characters it expects. Google issues Gemini keys
+in more than one shape, and a rule about how a key ought to start is a rule that eventually refuses a
+real one. Whose key it is is the provider's question, and the provider is asked anyway.
 
 The key is encrypted with AES-256-GCM before it is written down, bound to your account and to the
 provider it belongs to, and after that only its last four characters are ever shown again. Removing
 it takes it away for good.
 
-Which models you can pick when starting a session follows from which keys you added. Add only a Groq
-key and the whole run is Groq, including the roles you never choose, and images are skipped because
-no Groq model can read one. Add only a Gemini key and it is all Gemini. Add both and you pick.
+With no key saved, starting a session is refused up front with a sentence saying what to add, rather
+than being accepted and dying in a worker two seconds later.
 
 This is honest about one limit: there is no key management service in V1, so the encryption key is
 derived from `SESSION_SECRET`. It protects a stolen database, not a stolen server.
 
-**The list stays short on purpose.** It held five until two were removed on the same day: Groq
-announced `llama-3.3-70b-versatile` was being decommissioned, and `openai/gpt-oss-20b` had just been
-shown to answer a repository task by calling a tool from its own training rather than the one it was
-offered, on every wording tried. Every model here is called before it is written down, and taken out
-again the moment it stops earning its place.
+**The list stays short on purpose, and Groq is no longer on it.** It held five, then three. Two went
+on the same day: `llama-3.3-70b-versatile` was being decommissioned, and `openai/gpt-oss-20b` had just
+been shown to answer a repository task by calling a tool from its own training rather than the one it
+was offered, on every wording tried. The last Groq model went once its free tier was measured against
+a real run: Groq allows 8,000 tokens a minute and one Nimbus request asks for roughly 5,100, so the
+second request inside any minute is refused with a 429 and the session dies. Offering a model that
+cannot finish a single run is worse than offering fewer models. Every model here is called before it
+is written down, and taken out again the moment it stops earning its place.
 
 **Thinking cannot be switched off on Gemini**, and thinking tokens compete with the answer for the
 output budget. Asked for 400 output tokens, a structured answer came back as `{"` after the model
@@ -1168,6 +1172,40 @@ anything reached the patch      false
 It got refused, the model was told the refusal was permanent, and the run went on to finish the job it
 was actually given.
 
+## Watching a session, and coming back to it
+
+A session is a conversation, not a job that ends. The screen is three panes: your sessions on the
+left, the conversation in the middle, and on the right the tabs that answer "what is it actually
+doing".
+
+| Tab          | What it shows                                                             |
+| ------------ | ------------------------------------------------------------------------- |
+| Progress     | Every step in order, what it did, whether it worked, how long it took     |
+| Changes      | Each changed file, and its real diff in red and green when you open it    |
+| Checks       | The repository's own tests, lint, typecheck and build, and what they said |
+| Shell        | The commands it ran and what they printed                                 |
+| Pull request | Every pull request this session opened, newest first                      |
+
+**A finished turn does not close the conversation.** The composer stays, and a follow-up carries on
+in the same session with the repository, branch, messages and pull requests it already has. Only the
+run itself resets: the checks, the changed file list, the tool history and any pending question.
+
+**Answering a question is a real outcome.** Asking Nimbus something about the code finishes as
+completed with no branch and no pull request, rather than being treated as a run that failed to
+produce a patch.
+
+**A failed check cannot be talked past.** Whether the work is delivered is decided by the recorded
+result of the checks, never by the model's account of them, so a failing compile cannot be finished
+as a success. A correctable failure gets a bounded retry; anything else ends the turn and leaves the
+conversation open.
+
+You can rename a session, delete it, and mark a pull request as merged or closed. The mark is a note
+to yourself that survives a reload and follows you across devices. It never touches GitHub, and
+Nimbus never reads the real state back, so it is a label and not a fact.
+
+**Deleting a session deletes the conversation, not the work.** A branch that was pushed and a pull
+request that was opened stay on GitHub. Nimbus has never been able to withdraw either.
+
 ## Local fake-adapter mode _(not yet implemented)_
 
 Nimbus is designed to run its entire browser journey, from OTP login through GitHub connection,
@@ -1176,8 +1214,9 @@ credentials.
 
 ## External service setup _(not yet implemented)_
 
-Google OAuth, the GitHub App, E2B, Groq, Gemini, SMTP, and optional Qdrant each require
-configuration before the corresponding real adapter can be used. Exact steps, GitHub App
+Google OAuth, the GitHub App, E2B, SMTP, and optional Qdrant each require configuration before the
+corresponding real adapter can be used. Gemini is not among them, because its key belongs to the
+account rather than to the deployment. Exact steps, GitHub App
 permissions, callback URLs, and webhook events will be documented as those features land.
 
 The GitHub App needs four things set before the GitHub routes will mount at all: the App id, slug and
@@ -1200,7 +1239,7 @@ The design is organized around one question: where can a credential exist?
 | Z1   | Nimbus API, orchestrator, gateways      | Yes, all of them           |
 | Z2   | MongoDB, Redis, optional Qdrant         | Reached only from Z1       |
 | Z3   | Sandbox                                 | No, never                  |
-| Z4   | GitHub, Groq, Gemini, SMTP              | Reached only from Z1       |
+| Z4   | GitHub, Gemini, SMTP                    | Reached only from Z1       |
 | Z5   | Repository content and user attachments | Untrusted data             |
 
 The sandbox runs commands proposed by a language model against source code written by strangers, so
