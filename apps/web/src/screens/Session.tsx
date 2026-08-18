@@ -25,6 +25,7 @@ import {
   ShellPane,
 } from '../sessions/Panels.js';
 import { Rail } from '../sessions/Rail.js';
+import { RailToggle } from '../sessions/RailToggle.js';
 import { isLive, statusWords, toneFor } from '../sessions/status.js';
 import { SESSION_TABS, TAB_WORDS, tabCount, type SessionTab } from '../sessions/tabs.js';
 import type { LiveSessionHandle } from '../sessions/useLiveSession.js';
@@ -286,6 +287,7 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
       .patch(`/sessions/${sessionId}/pull-request-state`, { number, state }, SessionSummarySchema)
       .then((saved) => {
         setPrStates(saved.manualPrStates);
+        sessions.replaceSession(saved);
       })
       .catch(() => {
         void view.refresh();
@@ -314,14 +316,17 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
 
   return (
     <div className="run" data-rail-open={railOpen}>
+      <RailToggle
+        onOpen={(): void => {
+          setRailOpen(true);
+          setInspectorOpen(false);
+        }}
+      />
+
       <Rail
         sessions={sessions}
         openSessionId={sessionId}
         api={api}
-        prStates={{
-          [sessionId]:
-            live.pullRequest === null ? 'open' : (prStates[live.pullRequest.number] ?? 'open'),
-        }}
         onClose={(): void => {
           setRailOpen(false);
         }}
@@ -340,23 +345,6 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
 
       <div className="work">
         <header className="run__head">
-          <button
-            className="run__rail-toggle"
-            type="button"
-            aria-label="Show sessions"
-            onClick={(): void => {
-              setRailOpen((open) => !open);
-              setInspectorOpen(false);
-            }}
-          >
-            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M3 5.5A2.5 2.5 0 0 1 5.5 3h13A2.5 2.5 0 0 1 21 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5v-13ZM9 3v18"
-                stroke="currentColor"
-                strokeWidth="1.7"
-              />
-            </svg>
-          </button>
           <div className="run__what">
             <p className="run__task">{plainText(detail.title, 100)}</p>
 
@@ -677,6 +665,17 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
 
           {inspectorOpen ? (
             <section className="pane" aria-label="What the run did">
+              <button
+                className="pane__close"
+                type="button"
+                aria-label="Hide session details"
+                onClick={(): void => {
+                  setInspectorOpen(false);
+                }}
+              >
+                ×
+              </button>
+
               <div className="pane__tabs" role="tablist" aria-label="What to look at">
                 {SESSION_TABS.map((one) => {
                   const count = tabCount(one, live);

@@ -16,10 +16,6 @@
   min-height: 0;
 }
 
-.dash__rail-toggle {
-  display: none;
-}
-
 .shell[data-chrome='false'] .rail {
   top: 0;
   height: 100dvh;
@@ -922,8 +918,8 @@
     border: 0;
     background: rgb(0 0 0 / 0.45);
   }
-  .dash__rail-toggle {
-    display: inline-flex;
+  .dash > .rail-toggle {
+    display: grid;
   }
   .dash {
     grid-template-columns: minmax(0, 1fr);

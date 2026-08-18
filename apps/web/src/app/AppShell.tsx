@@ -8,12 +8,14 @@ export interface AppShellProps {
   children: ReactNode;
   auth?: ShellAuth;
   chrome?: boolean;
+  footer?: boolean;
 }
 
 export function AppShell({
   children,
   auth = 'checking',
   chrome = true,
+  footer = true,
 }: AppShellProps): React.JSX.Element {
   return (
     <div className="shell" data-chrome={chrome}>
@@ -38,7 +40,7 @@ export function AppShell({
 
       <main className="shell__main">{children}</main>
 
-      {chrome ? (
+      {chrome && footer ? (
         <footer className="shell__foot">
           <span>
             Nimbus reviews nothing on your behalf. Every change arrives as a pull request.

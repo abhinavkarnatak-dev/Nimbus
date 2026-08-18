@@ -16,7 +16,6 @@ export interface RailProps {
   sessions: SessionsHandle;
   openSessionId?: string;
   api: ApiClient;
-  prStates?: Record<string, 'open' | 'merged' | 'closed'>;
   onClose?: () => void;
 }
 
@@ -43,7 +42,6 @@ function RunRow({
   api,
   refresh,
   replaceSession,
-  prState = 'open',
 }: {
   session: SessionSummary;
   now: number;
@@ -51,9 +49,10 @@ function RunRow({
   api: ApiClient;
   refresh: () => Promise<void>;
   replaceSession: (session: SessionSummary) => void;
-  prState?: 'open' | 'merged' | 'closed';
 }): React.JSX.Element {
   const pullRequest = session.pullRequest;
+  const prState =
+    pullRequest === null ? 'open' : (session.manualPrStates[String(pullRequest.number)] ?? 'open');
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -274,13 +273,7 @@ function RunRow({
   );
 }
 
-export function Rail({
-  sessions,
-  openSessionId,
-  api,
-  prStates = {},
-  onClose,
-}: RailProps): React.JSX.Element {
+export function Rail({ sessions, openSessionId, api, onClose }: RailProps): React.JSX.Element {
   const now = Date.now();
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -350,7 +343,7 @@ export function Rail({
             </label>
           ) : (
             <div className="rail__word">
-              <span>Recent</span>
+              <span>Recent ({String(visibleSessions.length)})</span>
               <span className="rail__controls">
                 <button
                   className="rail__control"
@@ -430,9 +423,6 @@ export function Rail({
                   api={api}
                   refresh={sessions.refresh}
                   replaceSession={sessions.replaceSession}
-                  {...(prStates[one.sessionId] === undefined
-                    ? {}
-                    : { prState: prStates[one.sessionId] })}
                 />
               ))}
             </div>

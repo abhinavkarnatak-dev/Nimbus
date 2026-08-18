@@ -72,6 +72,8 @@
   --radius-full: 999px;
 
   --bar-height: 3.25rem;
+  --rail-toggle-size: 2.25rem;
+  --rail-toggle-space: 3.5rem;
 
   --width-prose: 68ch;
   --width-content: 1080px;

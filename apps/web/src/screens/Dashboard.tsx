@@ -22,6 +22,7 @@ import {
   withoutMentions,
 } from '../sessions/mention.js';
 import { Rail } from '../sessions/Rail.js';
+import { RailToggle } from '../sessions/RailToggle.js';
 import type { InstallationHandle } from '../github/useInstallation.js';
 import type { SessionsHandle } from '../sessions/useSessions.js';
 import { Button } from '../ui/Button.js';
@@ -192,6 +193,12 @@ export function Dashboard({
 
   return (
     <div className="dash" data-rail-open={railOpen}>
+      <RailToggle
+        onOpen={(): void => {
+          setRailOpen(true);
+        }}
+      />
+
       <Rail
         sessions={sessions}
         api={api}
@@ -213,22 +220,6 @@ export function Dashboard({
       <div className="dash__main">
         <div className="dash__inner">
           <header className="dash__head">
-            <button
-              className="dash__rail-toggle"
-              type="button"
-              aria-label="Show sessions"
-              onClick={(): void => {
-                setRailOpen(true);
-              }}
-            >
-              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M3 5.5A2.5 2.5 0 0 1 5.5 3h13A2.5 2.5 0 0 1 21 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5v-13ZM9 3v18"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                />
-              </svg>
-            </button>
             <p className="dash__eyebrow">Nimbus</p>
             <h1 className="dash__title">What should change?</h1>
             <p className="dash__sub">

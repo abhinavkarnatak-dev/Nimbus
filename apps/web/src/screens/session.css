@@ -53,6 +53,10 @@
   scrollbar-width: none;
 }
 
+.pane__close {
+  display: none;
+}
+
 .pane__tab {
   display: inline-flex;
   align-items: center;
@@ -627,7 +631,6 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-3);
-  flex-wrap: wrap;
   padding: var(--space-4) var(--gutter);
   border-bottom: 1px solid var(--border-subtle);
   outline: none;
@@ -677,6 +680,10 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
   border: none;
   outline: none;
   box-shadow: none;
@@ -1216,14 +1223,25 @@
     transform: translateX(0);
   }
 
-  .run__rail-toggle {
-    display: inline-flex !important;
+  .run > .rail-toggle {
+    display: grid;
+  }
+
+  .run__head {
+    padding-inline: max(var(--gutter), var(--rail-toggle-space));
+  }
+
+  .run__split-toggle {
+    position: fixed;
+    z-index: 28;
+    top: var(--space-3);
+    inset-inline-end: var(--space-3);
+    width: var(--rail-toggle-size);
+    height: var(--rail-toggle-size);
+    background: var(--surface-raised);
   }
 }
 
-.run__rail-toggle {
-  display: none;
-}
 .run__drawer-scrim {
   display: none;
 }
@@ -1298,6 +1316,27 @@
     box-shadow: -1rem 0 2rem rgb(0 0 0 / 0.3);
   }
 
+  .run__split[data-inspector-open='true'] .pane__close {
+    display: grid;
+    place-items: center;
+    position: absolute;
+    top: var(--space-3);
+    right: var(--space-3);
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    background: #121212;
+    color: var(--text-primary);
+    font-size: var(--text-md);
+    line-height: 1;
+    z-index: 1;
+  }
+
+  .run__split[data-inspector-open='true'] .pane__tabs {
+    padding-top: calc(var(--space-3) + 2rem + var(--space-2));
+  }
+
   .thread {
     min-height: 0;
   }
@@ -1308,7 +1347,37 @@
 
 @media (width < 40rem) {
   .run__head {
-    padding-inline: var(--space-4);
+    grid-template-areas:
+      'task task'
+      'where tools';
+    row-gap: var(--space-1);
+  }
+
+  .run__what {
+    display: contents;
+  }
+
+  .run__task {
+    grid-area: task;
+  }
+
+  .run__where {
+    grid-area: where;
+  }
+
+  .run__tools {
+    grid-area: tools;
+  }
+
+  .run__pr-ready {
+    min-height: 1.5rem;
+    padding-block: 0;
+  }
+
+  .run__tools .button {
+    min-height: 1.5rem;
+    padding-inline: var(--space-2);
+    font-size: var(--text-2xs);
   }
 
   .thread,

@@ -211,6 +211,8 @@
 .placeholder {
   display: grid;
   gap: var(--space-3);
+  justify-items: center;
+  text-align: center;
   padding-block: var(--section);
 }
 

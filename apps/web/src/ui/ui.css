@@ -259,3 +259,28 @@
   height: 1px;
   background: var(--border-subtle);
 }
+
+.rail-toggle {
+  display: none;
+  position: fixed;
+  z-index: 28;
+  top: var(--space-3);
+  inset-inline-start: var(--space-3);
+  width: var(--rail-toggle-size);
+  height: var(--rail-toggle-size);
+  place-items: center;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.rail-toggle:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}

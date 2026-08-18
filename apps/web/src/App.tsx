@@ -213,7 +213,7 @@ export function App(): React.JSX.Element {
   const auth = session.state === 'checking' ? 'checking' : signedIn ? 'signed_in' : 'signed_out';
 
   return (
-    <AppShell auth={auth} chrome={chrome}>
+    <AppShell auth={auth} chrome={chrome} footer={route.name !== 'not_found'}>
       {body}
     </AppShell>
   );
