@@ -194,7 +194,7 @@ export const runCommandTool = defineTool({
   name: 'run_command',
   description:
     'Run one command from the allowed list inside the sandbox, given as a list of words rather than a shell line. There is no shell, so pipes, redirects, wildcards, variables and chained commands are not expanded and must not be used. Use this for one off inspection such as reading a version. To run the tests, linter, type checker or build, use run_checks instead, because only that records a result for the pull request. Returns the output and the exit code.',
-  timeoutMs: REGISTRY_LIMITS.commandTimeoutMs,
+  timeoutMs: REGISTRY_LIMITS.commandTimeoutMs + 250,
   input: z.strictObject({
     argv: argv.describe(
       'the program then each argument as its own item, for example ["git", "log", "-n", "5"]',
@@ -259,13 +259,19 @@ export const runChecksTool = defineTool({
     ),
   }),
   run: async (input, context) => {
-    const result = await context.commands.run({ argv: input.argv, signal: context.signal });
+    const result = await context.commands.run({
+      argv: input.argv,
+      signal: context.signal,
+      check: true,
+    });
     const clipped = clip(`${result.stdout}${result.stderr}`);
     const status = checkStatusFor(result.outcome);
     const detail = result.stderr === '' ? result.stdout : result.stderr;
 
     return {
-      summary: shorten(`${input.name}: ${status}`),
+      summary: shorten(
+        `${input.name}: ${status}${result.generatedPaths.length === 0 ? '' : `, removed generated output: ${result.generatedPaths.join(', ')}`}${result.unexpectedPaths.length === 0 ? '' : `, new workspace files: ${result.unexpectedPaths.join(', ')}`}`,
+      ),
       text: clipped.text,
       stdout: result.stdout,
       stderr: result.stderr,
@@ -285,23 +291,25 @@ export const runChecksTool = defineTool({
 export const gitStatusTool = defineTool({
   name: 'git_status',
   description:
-    'List which files you have added, changed or deleted in the workspace so far. It changes nothing and takes no arguments. Use it to confirm your edits landed where you meant, and to check nothing unintended was touched before calling prepare_commit. Returns one line per changed file.',
+    'List which files you have added, changed or deleted in the workspace so far. Nimbus already tracks files changed by its editing tools, so do not call this during a normal run. Use it only after a tool error when you genuinely need to inspect the workspace state. Returns one line per changed file.',
   timeoutMs: REGISTRY_LIMITS.readTimeoutMs,
   input: z.strictObject({}),
   run: async (_input, context) => {
-    const result = await context.commands.run({
-      argv: ['git', 'status', '--porcelain'],
-      signal: context.signal,
-    });
-
-    const clipped = clip(result.stdout);
-    const changed = result.stdout.split('\n').filter((line) => line.trim() !== '').length;
+    const patch = await context.sandbox.exportPatch();
+    const status = patch.files
+      .map((file) => {
+        const prefix =
+          file.changeKind === 'added' ? '??' : file.changeKind === 'deleted' ? ' D' : ' M';
+        return `${prefix} ${file.path}`;
+      })
+      .join('\n');
+    const clipped = clip(status);
 
     return {
-      summary: shorten(`files changed: ${String(changed)}`),
+      summary: shorten(`files changed: ${String(patch.files.length)}`),
+      paths: patch.files.slice(0, REGISTRY_LIMITS.pathsPerRecordMax).map((file) => file.path),
       text: clipped.text,
-      truncated: clipped.truncated || result.truncated,
-      ...only('outcome', outcomeFromCommand(result.outcome)),
+      truncated: clipped.truncated,
     };
   },
 });
@@ -309,7 +317,7 @@ export const gitStatusTool = defineTool({
 export const prepareCommitTool = defineTool({
   name: 'prepare_commit',
   description:
-    'Package the changes made so far for human review, with a short summary of what they do. This does not push, does not open a pull request and does not merge; Nimbus handles that separately after a person has looked. Call it once, at the end, after git_status shows what you expect and run_checks has been run. Returns the files included and how many lines changed.',
+    'Package the changes made so far for human review, with a short summary of what they do. This does not push, does not open a pull request and does not merge; Nimbus handles that separately after a person has looked. Call it once, at the end, after run_checks has passed. Returns the files included and how many lines changed.',
   timeoutMs: REGISTRY_LIMITS.writeTimeoutMs,
   input: z
     .strictObject({
@@ -337,7 +345,7 @@ export const prepareCommitTool = defineTool({
 export const messageUserTool = defineTool({
   name: 'message_user',
   description:
-    'Send the user a short progress note. The run carries straight on and nothing pauses, so use it to say what you have found or what you are about to do. It is not a way to ask anything; if you need an answer or permission, use wait_for_user instead.',
+    'Send one short progress note while work is still continuing. This never pauses or finishes the run, so do not use it for the final answer and never use it to ask a question. If the task is complete, use finish_task. If an answer is required before work can continue, use wait_for_user.',
   timeoutMs: REGISTRY_LIMITS.instantTimeoutMs,
   input: z.strictObject({
     text: z
@@ -346,7 +354,31 @@ export const messageUserTool = defineTool({
       .max(REGISTRY_LIMITS.messageMaxChars)
       .describe('one or two sentences in plain language, with no internal reasoning'),
   }),
-  run: async (input) => await Promise.resolve({ summary: shorten(input.text), text: input.text }),
+  run: async (input) =>
+    await Promise.resolve({
+      summary: shorten(input.text),
+      text: input.text,
+    }),
+});
+
+export const finishTaskTool = defineTool({
+  name: 'finish_task',
+  description:
+    'Send the one final answer and end this agent run. Use it after directly answering an informational request, when the requested result already exists, or after explaining why no safe change can be made. Do not use it when a code change is ready, because the graph packages passing changes automatically. Do not ask a question here; use wait_for_user for a genuine clarification.',
+  timeoutMs: REGISTRY_LIMITS.instantTimeoutMs,
+  input: z.strictObject({
+    text: z
+      .string()
+      .min(1)
+      .max(REGISTRY_LIMITS.messageMaxChars)
+      .describe('the complete final answer in one or two plain-language sentences'),
+  }),
+  run: async (input) =>
+    await Promise.resolve({
+      summary: shorten(input.text),
+      text: input.text,
+      complete: true,
+    }),
 });
 
 export const waitForUserTool = defineTool({
@@ -385,5 +417,6 @@ export const BUILT_IN_TOOLS: readonly ToolDefinition[] = [
   gitStatusTool,
   prepareCommitTool,
   messageUserTool,
+  finishTaskTool,
   waitForUserTool,
 ];

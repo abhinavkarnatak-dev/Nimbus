@@ -25,6 +25,8 @@ function report(overrides: Partial<Record<keyof PatchValidationReport, unknown>>
         addedLines: 2,
         removedLines: 1,
         protectedPath: false,
+        diff: '@@ -1,2 +1,3 @@\n const a = 1;\n-const b = 2;\n+const b = 3;\n+const c = 4;',
+        diffTruncated: false,
       },
     ],
     findings: [],

@@ -67,5 +67,6 @@ export const VALID_INPUT: Readonly<Record<string, unknown>> = {
   git_status: {},
   prepare_commit: { summary: 'made a change' },
   message_user: { text: 'looking at the login code' },
+  finish_task: { text: 'The requested result is already present.' },
   wait_for_user: { reason: 'clarification', question: 'which login do you mean?' },
 };

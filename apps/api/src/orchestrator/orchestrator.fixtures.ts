@@ -203,6 +203,8 @@ export class RecordingPullRequestGateway implements PullRequestGateway {
 
   #failure: Error | null = null;
 
+  readonly #byBranch = new Map<string, PullRequestResult>();
+
   failWith(error: Error): void {
     this.#failure = error;
   }
@@ -214,13 +216,20 @@ export class RecordingPullRequestGateway implements PullRequestGateway {
       throw this.#failure;
     }
 
-    return Promise.resolve({
+    const existing = this.#byBranch.get(request.branch);
+    if (existing !== undefined) {
+      return Promise.resolve(existing);
+    }
+
+    const opened = {
       number: this.calls.length,
       url: `https://github.com/${request.owner}/${request.name}/pull/${String(this.calls.length)}`,
       branch: request.branch,
       headSha: 'b'.repeat(40),
       createdAt: '2026-08-15T10:05:00.000Z',
-    } as PullRequestResult);
+    } as PullRequestResult;
+    this.#byBranch.set(request.branch, opened);
+    return Promise.resolve(opened);
   }
 }
 

@@ -70,8 +70,8 @@ describe('session creation', () => {
     expect(parsed.task).toBe(valid().task);
   });
 
-  it('rejects a task that is too short to scope', () => {
-    expect(CreateSessionBodySchema.safeParse({ ...valid(), task: 'fix it' }).success).toBe(false);
+  it('accepts any non-empty task and rejects an empty one', () => {
+    expect(CreateSessionBodySchema.safeParse({ ...valid(), task: 'fix it' }).success).toBe(true);
     expect(CreateSessionBodySchema.safeParse({ ...valid(), task: '   ' }).success).toBe(false);
   });
 
@@ -180,6 +180,8 @@ describe('session summary and detail', () => {
       changeKind: 'added' as const,
       addedLines: 1,
       removedLines: 0,
+      diff: '@@ -0,0 +1 @@\n+const one = 1;',
+      diffTruncated: false,
     }));
     expect(SessionDetailSchema.safeParse({ ...sessionDetailFixture(), filesChanged }).success).toBe(
       false,

@@ -80,7 +80,7 @@ export function firstPositional(argv: readonly string[], from: number): string |
   return null;
 }
 
-function offendingFlag(argv: readonly string[]): string | null {
+function offendingFlag(program: string, argv: readonly string[]): string | null {
   for (const value of argv.slice(1)) {
     if (!isFlag(value)) {
       continue;
@@ -92,7 +92,10 @@ function offendingFlag(argv: readonly string[]): string | null {
       return value;
     }
 
-    if (CODE_STRING_FLAGS.includes(name)) {
+    // Python one-liners are commonly used for safe compile/import checks inside
+    // the isolated repository sandbox. Shells and every other interpreter remain
+    // denied from evaluating a string.
+    if (CODE_STRING_FLAGS.includes(name) && !(PYTHON_PROGRAMS.includes(program) && name === '-c')) {
       return value;
     }
   }
@@ -199,7 +202,7 @@ export function classifyCommand(argv: readonly string[]): CommandClassification 
     return denied(program, null, 'that program is not on the allowlist');
   }
 
-  const flag = offendingFlag(argv);
+  const flag = offendingFlag(program, argv);
   if (flag !== null) {
     return denied(program, null, `the ${flag} option is never allowed`);
   }

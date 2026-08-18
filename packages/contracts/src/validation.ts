@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { ApprovalEffectSchema, PolicyDecisionSchema } from './approvals.js';
 import { CommitShaSchema } from './ids.js';
 import { LIMITS } from './limits.js';
-import { FileChangeKindSchema } from './tools.js';
+import { FileChangeKindSchema, FileDiffSchema } from './tools.js';
 
 export const VALIDATION_FINDING_CODES = [
   'BASE_COMMIT_MISMATCH',
@@ -48,6 +48,8 @@ export const ValidatedFileSchema = z.strictObject({
   addedLines: z.int().nonnegative(),
   removedLines: z.int().nonnegative(),
   protectedPath: z.boolean(),
+  diff: FileDiffSchema,
+  diffTruncated: z.boolean(),
 });
 
 export const PatchValidationReportSchema = z.strictObject({

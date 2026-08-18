@@ -31,6 +31,8 @@ export class RunGuard {
 
   private readonly order: string[] = [];
 
+  private readonly blocked = new Map<string, number>();
+
   beforeStep(state: AgentState, nowMs: number, cancelled = false): StopVerdict {
     if (cancelled) {
       return { stop: true, reason: 'cancelled', detail: 'the session was cancelled' };
@@ -45,6 +47,17 @@ export class RunGuard {
   }
 
   afterStep(result: ExecutionResult): StopVerdict {
+    if (
+      result.status === 'executed' &&
+      result.event.outcome === 'ok' &&
+      WRITING_TOOLS.has(result.event.tool)
+    ) {
+      this.failures.clear();
+      this.repeats.clear();
+      this.order.length = 0;
+      this.blocked.clear();
+    }
+
     const seen = (this.repeats.get(result.actionHash) ?? 0) + 1;
     this.remember(result.actionHash);
     this.repeats.set(result.actionHash, seen);
@@ -80,6 +93,12 @@ export class RunGuard {
 
   timesSeen(actionHash: string): number {
     return this.repeats.get(actionHash) ?? 0;
+  }
+
+  blockRepeat(actionHash: string): number {
+    const seen = (this.blocked.get(actionHash) ?? 0) + 1;
+    this.blocked.set(actionHash, seen);
+    return seen;
   }
 
   private remember(actionHash: string): void {
@@ -161,7 +180,7 @@ function phaseAfter(result: ExecutionResult): AgentState['phase'] {
     return 'awaiting_approval';
   }
 
-  if (result.pause === 'clarification') {
+  if (result.pause === 'clarification' || result.pause === 'approval') {
     return 'clarifying';
   }
 

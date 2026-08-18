@@ -76,37 +76,36 @@ export function Landing(): React.JSX.Element {
           <p className="hero__meta">One public repository, one task at a time, no card required.</p>
         </div>
 
-        <div className="run" aria-label="What a finished session looks like">
-          <div className="run__bar">
-            <span className="run__dot" aria-hidden="true" />
-            <span className="run__repo">shopfront / main</span>
+        <div className="hero-run" aria-label="What a finished session looks like">
+          <div className="hero-run__bar">
+            <span className="hero-run__dot" aria-hidden="true" />
+            <span className="hero-run__repo">shopfront / main</span>
           </div>
 
-          <p className="run__task">
+          <p className="hero-run__task">
             &ldquo;The login redirect always sends people to the dashboard.&rdquo;
           </p>
-
-          <ol className="run__steps">
+          <ol className="hero-run__steps">
             {RUN_STEPS.map((step, at) => (
               <li
-                className="run__step"
+                className="hero-run__step"
                 key={step.what}
                 style={{ '--step-index': at } as React.CSSProperties}
               >
-                <span className="run__index">{String(at + 1).padStart(2, '0')}</span>
-                <span className="run__what">
+                <span className="hero-run__index">{String(at + 1).padStart(2, '0')}</span>
+                <span className="hero-run__what">
                   <strong>{step.what}</strong> {step.detail}
                 </span>
-                <span className="run__mark">{step.mark}</span>
+                <span className="hero-run__mark">{step.mark}</span>
               </li>
             ))}
           </ol>
 
-          <div className="run__out">
+          <div className="hero-run__out">
             <span>
               <strong>Pull request opened</strong> for review
             </span>
-            <span className="run__badge">awaiting you</span>
+            <span className="hero-run__badge">awaiting you</span>
           </div>
         </div>
       </section>

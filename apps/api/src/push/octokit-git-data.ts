@@ -146,6 +146,16 @@ export class OctokitGitDataClient implements GitDataClient {
       sha: commitSha,
     });
   }
+
+  async updateRef(branch: string, commitSha: string): Promise<void> {
+    await this.client.git.updateRef({
+      owner: this.owner,
+      repo: this.repo,
+      ref: `heads/${branch}`,
+      sha: commitSha,
+      force: false,
+    });
+  }
 }
 
 export class OctokitGitDataFactory implements GitDataFactory {

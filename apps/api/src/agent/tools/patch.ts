@@ -245,10 +245,18 @@ export function applyPatchToFile(file: PatchFile, original: string | null): stri
   const hunks = [...file.hunks].sort((left, right) => left.beforeStart - right.beforeStart);
 
   for (const hunk of hunks) {
-    const start = Math.max(0, hunk.beforeStart - 1);
+    let start = Math.max(0, hunk.beforeStart - 1);
 
-    if (start < cursor || start > source.lines.length) {
+    if (start < cursor) {
       throw mismatch(path, hunk.beforeStart);
+    }
+
+    if (!hunkMatchesAt(source.lines, hunk, start)) {
+      const located = locateHunk(source.lines, hunk, cursor);
+      if (located === null) {
+        throw mismatch(path, hunk.beforeStart);
+      }
+      start = located;
     }
 
     while (cursor < start) {
@@ -297,4 +305,26 @@ export function applyPatchToFile(file: PatchFile, original: string | null): stri
     return '';
   }
   return endsWithNewline ? `${result.join('\n')}\n` : result.join('\n');
+}
+
+function hunkMatchesAt(source: readonly string[], hunk: PatchHunk, start: number): boolean {
+  let at = start;
+  for (const row of hunk.lines) {
+    const marker = row.charAt(0);
+    if (marker !== ' ' && marker !== '-') continue;
+    if (source[at] !== row.slice(1)) return false;
+    at += 1;
+  }
+  return true;
+}
+
+function locateHunk(source: readonly string[], hunk: PatchHunk, from: number): number | null {
+  let located: number | null = null;
+
+  for (let at = from; at <= source.length; at += 1) {
+    if (!hunkMatchesAt(source, hunk, at)) continue;
+    if (located !== null) return null;
+    located = at;
+  }
+  return located;
 }

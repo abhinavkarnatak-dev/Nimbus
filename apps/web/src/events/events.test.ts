@@ -109,6 +109,8 @@ class FakeSocket implements SocketLike {
 
   closedWith: number | null = null;
 
+  closeCode: number | undefined;
+
   onopen: (() => void) | null = null;
 
   onmessage: ((event: { data: unknown }) => void) | null = null;
@@ -122,6 +124,7 @@ class FakeSocket implements SocketLike {
   }
 
   close(code?: number): void {
+    this.closeCode = code;
     this.closedWith = code ?? 1000;
   }
 
@@ -303,6 +306,14 @@ describe('a socket that drops', () => {
 
     expect(held.opened).toHaveLength(1);
     expect(held.socket.state).toBe('closed');
+  });
+
+  it('uses the browser default close code when navigation stops it', () => {
+    const held = socketWith(0);
+    held.socket.start();
+    held.socket.stop();
+
+    expect(lastOpened(held).closeCode).toBeUndefined();
   });
 });
 

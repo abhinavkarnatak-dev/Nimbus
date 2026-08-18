@@ -45,6 +45,21 @@ describe('judgeCompletion', () => {
     expect(verdict.reason).toContain('run_checks');
   });
 
+  it('requires a new check after a follow-up edit', () => {
+    const verdict = judgeCompletion(
+      stateWith({
+        filesChanged: ['src/a.ts'],
+        checks: [check('unit', 'passed')],
+        toolEvents: [
+          { step: 1, tool: 'run_checks', outcome: 'ok', summary: 'unit: passed', atMs: 1 },
+          { step: 2, tool: 'apply_patch', outcome: 'ok', summary: 'files changed: 1', atMs: 2 },
+        ],
+      }),
+    );
+
+    expect(verdict.refusal).toBe('checks_not_run');
+  });
+
   it('refuses when a check failed, and names it', () => {
     const verdict = judgeCompletion(
       stateWith({

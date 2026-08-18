@@ -222,20 +222,18 @@ describe('applyPatchToFile', () => {
     );
   });
 
-  it('refuses when the file has moved on and the context sits elsewhere', () => {
+  it('locates one unambiguous stale hunk using its full context', () => {
     const file = sectionOf(SIMPLE);
 
-    expect(codeOf(() => applyPatchToFile(file, 'zero\none\ntwo\nthree\n'))).toBe(
-      'PATCH_CONTEXT_MISMATCH',
-    );
+    expect(applyPatchToFile(file, 'zero\none\ntwo\nthree\n')).toBe('zero\none\nTWO\nthree\n');
   });
 
-  it('refuses when the hunk starts past the end of the file', () => {
+  it('locates one unambiguous hunk even when its header starts past the end of the file', () => {
     const file = sectionOf(
       ['--- a/a.txt', '+++ b/a.txt', '@@ -50,1 +50,1 @@', '-a', '+b', ''].join('\n'),
     );
 
-    expect(codeOf(() => applyPatchToFile(file, 'a\n'))).toBe('PATCH_CONTEXT_MISMATCH');
+    expect(applyPatchToFile(file, 'a\n')).toBe('b\n');
   });
 
   it('keeps the untouched parts of a longer file exactly as they were', () => {

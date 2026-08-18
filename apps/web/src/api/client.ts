@@ -104,6 +104,30 @@ export class ApiClient {
       ...(signal === undefined ? {} : { signal }),
     });
   }
+
+  async patch<T>(
+    path: string,
+    body: unknown,
+    schema: z.ZodType<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    return this.send({
+      method: 'PATCH',
+      path,
+      body,
+      schema,
+      ...(signal === undefined ? {} : { signal }),
+    });
+  }
+
+  async delete<T>(path: string, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
+    return this.send({
+      method: 'DELETE',
+      path,
+      schema,
+      ...(signal === undefined ? {} : { signal }),
+    });
+  }
 }
 
 async function readJson(response: Response): Promise<unknown> {

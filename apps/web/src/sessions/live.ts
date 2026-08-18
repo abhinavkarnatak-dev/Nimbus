@@ -9,6 +9,8 @@ import type {
   SessionMessage,
   SessionProgress,
   SessionStatus,
+  RunStatus,
+  DeliveryStatus,
   ToolName,
   ToolOutcome,
 } from '@nimbus/contracts';
@@ -31,6 +33,8 @@ export interface ToolRun {
 
 export interface LiveSession {
   status: SessionStatus;
+  runStatus: RunStatus | null;
+  deliveryStatus: DeliveryStatus | null;
   progress: SessionProgress;
   messages: readonly SessionMessage[];
   question: { question: string; expiresAt: string } | null;
@@ -45,6 +49,8 @@ export interface LiveSession {
 export function liveFrom(detail: SessionDetail): LiveSession {
   return {
     status: detail.status,
+    runStatus: detail.runStatus,
+    deliveryStatus: detail.deliveryStatus,
     progress: detail.progress,
     messages: detail.messages,
     question: null,
@@ -89,18 +95,59 @@ function blankTool(toolCallId: string): ToolRun {
 export function applyEvent(live: LiveSession, event: ServerEvent): LiveSession {
   switch (event.type) {
     case 'session.status':
-      return { ...live, status: event.status, progress: event.progress };
+      return {
+        ...live,
+        status: event.status,
+        progress: event.progress,
+        question: null,
+        approval: null,
+      };
 
     case 'agent.message':
-      return live.messages.some((one) => one.messageId === event.message.messageId)
-        ? live
-        : { ...live, messages: [...live.messages, event.message] };
+      return {
+        ...live,
+        messages: live.messages.some((one) => one.messageId === event.message.messageId)
+          ? live.messages.map((one) =>
+              one.messageId === event.message.messageId ? event.message : one,
+            )
+          : [...live.messages, event.message],
+      };
+
+    case 'agent.message.delta': {
+      const held = live.messages.find((one) => one.messageId === event.messageId);
+      const next = {
+        messageId: event.messageId,
+        role: 'agent' as const,
+        text: `${held?.text ?? ''}${event.text}`,
+        sentAt: event.sentAt,
+      };
+      return {
+        ...live,
+        messages:
+          held === undefined
+            ? [...live.messages, next]
+            : live.messages.map((one) => (one.messageId === event.messageId ? next : one)),
+      };
+    }
 
     case 'agent.question':
-      return { ...live, question: { question: event.question, expiresAt: event.expiresAt } };
+      return {
+        ...live,
+        status: 'awaiting_user',
+        messages: [
+          ...live.messages,
+          {
+            messageId: `msg_question_${event.expiresAt.replace(/[^0-9]/g, '').slice(-14)}` as SessionMessage['messageId'],
+            role: 'agent',
+            text: event.question,
+            sentAt: new Date().toISOString(),
+          },
+        ],
+        question: { question: event.question, expiresAt: event.expiresAt },
+      };
 
     case 'agent.approval_required':
-      return { ...live, approval: event.approval };
+      return { ...live, status: 'awaiting_user', approval: event.approval };
 
     case 'tool.started':
       return {

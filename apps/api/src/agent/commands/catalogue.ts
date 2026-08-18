@@ -161,18 +161,53 @@ export const PROGRAM_RULES: Readonly<Record<string, ProgramRule>> = {
   pnpm: { category: 'script', requiresSubcommand: true },
   yarn: { category: 'script', requiresSubcommand: true },
   npx: { category: 'script', requiresSubcommand: true },
+  bun: { category: 'script', requiresSubcommand: true },
   tsc: { category: 'typecheck' },
   eslint: { category: 'lint' },
   prettier: { category: 'format' },
+  biome: { category: 'lint' },
   vitest: { category: 'test' },
   jest: { category: 'test' },
   mocha: { category: 'test' },
+  ava: { category: 'test' },
   playwright: { category: 'test' },
   pytest: { category: 'test' },
   ruff: { category: 'lint' },
   mypy: { category: 'typecheck' },
+  flake8: { category: 'lint' },
+  black: { category: 'format' },
   python: { category: 'script' },
   python3: { category: 'script' },
+  gcc: { category: 'build' },
+  'g++': { category: 'build' },
+  clang: { category: 'build' },
+  'clang++': { category: 'build' },
+  make: { category: 'build' },
+  cmake: { category: 'build' },
+  ctest: { category: 'test' },
+  ninja: { category: 'build' },
+  meson: { category: 'build' },
+  cppcheck: { category: 'lint' },
+  'clang-tidy': { category: 'lint' },
+  'clang-format': { category: 'format' },
+  javac: { category: 'build' },
+  java: { category: 'test' },
+  mvn: { category: 'build' },
+  gradle: { category: 'build' },
+  dotnet: {
+    category: 'build',
+    requiresSubcommand: true,
+    subcommands: {
+      build: 'build',
+      test: 'test',
+      format: 'format',
+    },
+  },
+  deno: {
+    category: 'script',
+    requiresSubcommand: true,
+    subcommands: { check: 'typecheck', test: 'test', lint: 'lint', fmt: 'format', task: 'script' },
+  },
   go: {
     category: 'read_only',
     requiresSubcommand: true,
@@ -191,7 +226,7 @@ export const PROGRAM_RULES: Readonly<Record<string, ProgramRule>> = {
   },
 };
 
-export const PACKAGE_MANAGERS: readonly string[] = ['npm', 'pnpm', 'yarn', 'npx'];
+export const PACKAGE_MANAGERS: readonly string[] = ['npm', 'pnpm', 'yarn', 'npx', 'bun'];
 
 export const PYTHON_PROGRAMS: readonly string[] = ['python', 'python3'];
 

@@ -17,8 +17,8 @@
   --gray-950: #0c0e0f;
   --gray-1000: #08090a;
 
-  --signal-positive: #6f9c7d;
-  --signal-negative: #b07a76;
+  --signal-positive: #42d782;
+  --signal-negative: #ff7474;
   --signal-caution: #a3936a;
 
   --font-sans: 'Instrument Sans Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -116,9 +116,9 @@
   --accent-text: var(--gray-0);
   --accent-hover: var(--gray-850);
 
-  --danger-text: #8f524d;
-  --danger-border: #d9b6b3;
-  --danger-hover: #f8efee;
+  --danger-text: #c93636;
+  --danger-border: #ed9a9a;
+  --danger-hover: #fff0f0;
 
   --focus-ring: var(--gray-1000);
   --focus-offset: var(--surface-page);
@@ -154,9 +154,9 @@
   --accent-text: var(--gray-1000);
   --accent-hover: var(--gray-0);
 
-  --danger-text: #cf9a94;
-  --danger-border: #5e403d;
-  --danger-hover: #241a19;
+  --danger-text: #ff7474;
+  --danger-border: #943f3f;
+  --danger-hover: #351717;
 
   --focus-ring: var(--gray-100);
   --focus-offset: var(--surface-page);
@@ -192,9 +192,9 @@
     --accent-text: var(--gray-0);
     --accent-hover: var(--gray-850);
 
-    --danger-text: #8f524d;
-    --danger-border: #d9b6b3;
-    --danger-hover: #f8efee;
+    --danger-text: #c93636;
+    --danger-border: #ed9a9a;
+    --danger-hover: #fff0f0;
 
     --focus-ring: var(--gray-1000);
     --focus-offset: var(--surface-page);

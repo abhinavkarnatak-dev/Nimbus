@@ -15,6 +15,7 @@ import {
 
 import { isProtectedPath } from '../agent/tools/policy-paths.js';
 import { DEFAULT_LIMITS, type PatchCaps } from '../config/limits.js';
+import { redactSecrets } from '../logging/redact.js';
 import { SANDBOX_LIMITS } from '../sandbox/limits.js';
 import { APPROVAL_CATEGORY_BY_FINDING, decisionFor, worstDecision } from './findings.js';
 import {
@@ -194,6 +195,18 @@ function checkContent(draft: Draft, file: ParsedFile, path: string): void {
   }
 }
 
+export function boundedDiff(lines: readonly string[]): { diff: string; diffTruncated: boolean } {
+  const kept = lines.slice(0, LIMITS.fileDiffMaxLines);
+  const overLines = kept.length < lines.length;
+  const joined = redactSecrets(kept.join('\n'));
+
+  if (joined.length <= LIMITS.fileDiffMaxChars) {
+    return { diff: joined, diffTruncated: overLines };
+  }
+
+  return { diff: joined.slice(0, LIMITS.fileDiffMaxChars), diffTruncated: true };
+}
+
 function describeFile(file: ParsedFile, path: string): ValidatedFile {
   const previousPath = file.renamed && file.oldPath !== null ? file.oldPath : undefined;
   const guarded =
@@ -206,6 +219,7 @@ function describeFile(file: ParsedFile, path: string): ValidatedFile {
     addedLines: file.addedLines,
     removedLines: file.removedLines,
     protectedPath: guarded,
+    ...boundedDiff(file.hunkLines),
   };
 }
 

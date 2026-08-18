@@ -1,4 +1,4 @@
-import { ApprovalRequestSchema } from '@nimbus/contracts';
+import { ApprovalRequestSchema, SessionMessageSchema } from '@nimbus/contracts';
 import type {
   ApprovalRequest,
   FileChange,
@@ -8,7 +8,7 @@ import type {
   ServerEvent,
 } from '@nimbus/contracts';
 
-import { runAgent } from '../agent/graph/run.js';
+import { describeFailure, runAgent } from '../agent/graph/run.js';
 import type { EventPublisher } from '../events/publisher.js';
 import type { SessionDocument } from '../db/models/session.js';
 import type { Logger } from '../logging/logger.js';
@@ -19,8 +19,9 @@ import type { ApprovalStore } from '../agent/policy/approvals.js';
 import type { RunOutcome, SessionRecords } from '../sessions/repository.js';
 import { WAIT_LIMITS } from './limits.js';
 import { ALWAYS_LIVE, type LivenessVerdict, type RunLiveness } from './liveness.js';
-import { failureOf, failureForStop, isPaused } from './outcome.js';
+import { failureOf, failureForRun, isPaused } from './outcome.js';
 import { WorkshopError, type SessionWorkshop } from './workshop.js';
+import { newPrefixedId } from '../lib/id.js';
 
 export const PAUSE_EXPIRY_MS = WAIT_LIMITS.clarificationMs;
 
@@ -34,6 +35,8 @@ export function changedFiles(report: PatchValidationReport | null): FileChange[]
     changeKind: file.changeKind,
     addedLines: file.addedLines,
     removedLines: file.removedLines,
+    diff: file.diff,
+    diffTruncated: file.diffTruncated,
     ...(file.previousPath === undefined ? {} : { previousPath: file.previousPath }),
   }));
 }
@@ -100,6 +103,11 @@ export class SessionRunner {
     liveness: RunLiveness = ALWAYS_LIVE,
   ): Promise<RunOutcome | null> {
     let prepared;
+    const startedAt = Date.now();
+    const resuming =
+      session.clarificationAnswer !== null ||
+      session.step > 0 ||
+      session.messages.filter((message) => message.role === 'user').length > 1;
 
     const stopped = await this.#verdict(signal, liveness, 'before starting');
 
@@ -107,11 +115,17 @@ export class SessionRunner {
       return stopHere(stopped, {});
     }
 
-    await this.#say(session, {
-      type: 'session.status',
-      status: 'provisioning',
-      progress: { step: 0, maxSteps: session.maxSteps, currentActivity: 'starting a machine' },
-    });
+    if (!resuming) {
+      await this.#say(session, {
+        type: 'session.status',
+        status: 'provisioning',
+        progress: { step: 0, maxSteps: session.maxSteps, currentActivity: 'starting a machine' },
+      });
+      await this.#narrate(
+        session,
+        `I'm checking ${session.repository.owner}/${session.repository.name} and working out the safest way to handle this.`,
+      );
+    }
 
     try {
       prepared = await this.#workshop.prepare(session, { signal });
@@ -128,7 +142,11 @@ export class SessionRunner {
       await this.#say(session, {
         type: 'session.status',
         status: 'working',
-        progress: { step: 0, maxSteps: session.maxSteps, currentActivity: 'reading the code' },
+        progress: {
+          step: session.step,
+          maxSteps: session.maxSteps,
+          currentActivity: resuming ? 'continuing from your answer' : 'reading the code',
+        },
       });
 
       const result = await runAgent(prepared.input);
@@ -153,10 +171,50 @@ export class SessionRunner {
         return { status: 'awaiting_user', currentActivity: null, ...progress };
       }
 
+      if (
+        result.state.stopReason === 'completed' &&
+        result.patch === null &&
+        result.report === null
+      ) {
+        await this.#say(session, {
+          type: 'session.status',
+          status: 'completed',
+          progress: {
+            step: result.state.budgets.steps,
+            maxSteps: result.state.budgets.maxSteps,
+            currentActivity: null,
+          },
+        });
+        return { status: 'completed', currentActivity: null, ...progress };
+      }
+
       if (result.patch === null || result.report === null) {
+        const thrown = result.threw === undefined ? null : describeFailure(result.threw);
+        this.#logger.error(
+          {
+            sessionId: session.sessionId,
+            resumeAttempt: session.retryCount,
+            phase: result.state.phase,
+            proposedTool: result.state.proposedAction?.tool ?? null,
+            currentTool: result.state.toolEvents.at(-1)?.tool ?? null,
+            stopReason: result.state.stopReason,
+            exceptionCode: thrown?.code ?? null,
+            exceptionDetail: thrown?.detail ?? null,
+            baseCommitSha: result.state.baseCommitSha,
+            branch: session.pullRequest?.branch ?? session.branch,
+            changedPaths: result.state.filesChanged,
+            checkGeneratedPaths: result.state.checks
+              .filter((check) => check.summary.includes('removed generated output:'))
+              .map((check) => check.summary),
+          },
+          'an agent run ended without a reviewable patch',
+        );
         const failed = {
           status: 'failed' as const,
-          failure: failureForStop(result.state.stopReason),
+          failure:
+            result.state.checks.some((check) => check.status === 'failed')
+              ? failureOf('CHECKS_FAILED')
+              : failureForRun(result.state.stopReason, result.threw),
           currentActivity: null,
           ...progress,
         };
@@ -166,6 +224,24 @@ export class SessionRunner {
       }
 
       if (result.report.decision !== 'allowed') {
+        this.#logger.warn(
+          {
+            sessionId: session.sessionId,
+            resumeAttempt: session.retryCount,
+            phase: result.state.phase,
+            proposedTool: result.state.proposedAction?.tool ?? null,
+            stopReason: result.state.stopReason,
+            baseCommitSha: result.state.baseCommitSha,
+            branch: session.pullRequest?.branch ?? session.branch,
+            changedPaths: result.report.files.map((file) => file.path),
+            patchFindings: result.report.findings.map((finding) => ({
+              code: finding.code,
+              detail: finding.detail,
+              paths: finding.paths,
+            })),
+          },
+          'a patch was rejected before it could be pushed',
+        );
         const failed = {
           status: 'failed' as const,
           failure: failureOf('PATCH_REJECTED'),
@@ -177,6 +253,20 @@ export class SessionRunner {
         return failed;
       }
 
+      // This is a deterministic delivery gate. A model message and a successful
+      // tool invocation never outweigh a failed check recorded after an edit.
+      if (result.state.checks.some((check) => check.status === 'failed')) {
+        const failed = {
+          status: 'failed' as const,
+          failure: failureOf('CHECKS_FAILED'),
+          currentActivity: null,
+          ...progress,
+          deliveryStatus: 'checks_failed' as const,
+        };
+        await this.#sayFailed(session, failed);
+        return failed;
+      }
+
       return await this.#deliver(
         session,
         prepared.installationId,
@@ -184,6 +274,7 @@ export class SessionRunner {
         progress,
         liveness,
         signal,
+        startedAt,
       );
     } finally {
       await prepared.finish();
@@ -197,6 +288,7 @@ export class SessionRunner {
     progress: Omit<RunOutcome, 'status'>,
     liveness: RunLiveness,
     signal: AbortSignal,
+    startedAt: number,
   ): Promise<RunOutcome | null> {
     const patch = result.patch;
     const report = result.report;
@@ -207,6 +299,8 @@ export class SessionRunner {
 
     const baseCommitSha = result.state.baseCommitSha;
 
+    const latestRequest =
+      session.messages.filter((message) => message.role === 'user').at(-1)?.text ?? session.task;
     const beforePush = await this.#verdict(signal, liveness, 'before pushing a branch');
 
     if (beforePush !== 'live') {
@@ -222,7 +316,8 @@ export class SessionRunner {
         owner: session.repository.owner,
         name: session.repository.name,
         sessionId: session.sessionId,
-        task: session.task,
+        ...(session.pullRequest === null ? {} : { branch: session.pullRequest.branch }),
+        task: latestRequest,
         baseCommitSha,
         patch: patch.patch,
         report,
@@ -260,7 +355,7 @@ export class SessionRunner {
         defaultBranch: session.repository.defaultBranch,
         branch: pushed.branch,
         baseCommitSha,
-        task: session.task,
+        task: latestRequest,
         summary: patch.summary,
         report,
         checks: result.state.checks,
@@ -285,6 +380,15 @@ export class SessionRunner {
     );
 
     await this.#say(session, { type: 'pr.created', pullRequest: opened });
+    const changed = progress.filesChanged?.length ?? 0;
+    const added = progress.filesChanged?.reduce((total, file) => total + file.addedLines, 0) ?? 0;
+    const removed = progress.filesChanged?.reduce((total, file) => total + file.removedLines, 0) ?? 0;
+    const checks = progress.checks?.filter((check) => check.status === 'passed').length ?? 0;
+    const elapsedSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1_000));
+    await this.#narrate(
+      session,
+      `Worked for ${String(elapsedSeconds)}s. PR #${String(opened.number)} was ${session.pullRequest === null ? 'created' : 'updated'} for "${latestRequest}". ${String(changed)} ${changed === 1 ? 'file was' : 'files were'} changed, +${String(added)} −${String(removed)} lines, and ${String(checks)} ${checks === 1 ? 'check passed' : 'checks passed'}. You can continue working in this session.`,
+    );
 
     return {
       status: 'pr_created',
@@ -297,6 +401,8 @@ export class SessionRunner {
         createdAt: new Date(opened.createdAt),
       },
       ...progress,
+      baseCommitSha: pushed.commitSha,
+      deliveryStatus: session.pullRequest === null ? 'pr_created' : 'pr_updated',
     };
   }
 
@@ -331,6 +437,24 @@ export class SessionRunner {
     }
   }
 
+  async #narrate(session: SessionDocument, text: string): Promise<void> {
+    const sentAt = new Date().toISOString();
+    const message = SessionMessageSchema.parse({
+      messageId: newPrefixedId('msg'),
+      role: 'agent',
+      text,
+      sentAt,
+    });
+
+    await this.#records?.addAgentMessage(
+      session.sessionId,
+      text,
+      new Date(sentAt),
+      message.messageId,
+    );
+    await this.#say(session, { type: 'agent.message', message });
+  }
+
   async #sayProgress(
     session: SessionDocument,
     progress: Omit<RunOutcome, 'status'>,
@@ -350,7 +474,10 @@ export class SessionRunner {
   ): Promise<void> {
     const question = result.state.clarificationQuestion;
 
-    if (question !== null && session.clarificationQuestion === null) {
+    if (
+      question !== null &&
+      (question !== session.clarificationQuestion || session.clarificationAnswer !== null)
+    ) {
       await this.#records?.askQuestion(session.sessionId, question, new Date());
 
       await this.#say(session, {
@@ -368,14 +495,30 @@ export class SessionRunner {
       return;
     }
 
+    if (result.state.phase === 'clarifying' && question === null) {
+      await this.#say(session, {
+        type: 'session.status',
+        status: 'awaiting_user',
+        progress: {
+          step: result.state.budgets.steps,
+          maxSteps: result.state.budgets.maxSteps,
+          currentActivity: null,
+        },
+      });
+      return;
+    }
+
+    const last = result.state.toolEvents.at(-1)?.tool ?? 'the requested action';
+    const fallback =
+      result.state.phase === 'awaiting_approval'
+        ? `Nimbus could not prepare a reviewable approval for ${last}. It has not run that action. Please retry the request, or tell Nimbus to take a different approach.`
+        : `Nimbus paused after ${last} without a question. Tell Nimbus what to investigate or change next.`;
+
+    await this.#records?.askQuestion(session.sessionId, fallback, new Date());
     await this.#say(session, {
-      type: 'session.status',
-      status: 'awaiting_user',
-      progress: {
-        step: result.state.budgets.steps,
-        maxSteps: session.maxSteps,
-        currentActivity: 'waiting for a person to approve something',
-      },
+      type: 'agent.question',
+      question: fallback,
+      expiresAt: new Date(Date.now() + PAUSE_EXPIRY_MS).toISOString(),
     });
   }
 
@@ -405,6 +548,20 @@ export class SessionRunner {
     if (outcome.failure === undefined || outcome.failure === null) {
       return;
     }
+
+    this.#logger.error(
+      {
+        sessionId: session.sessionId,
+        resumeAttempt: session.retryCount,
+        failureCode: outcome.failure.code,
+        branch: outcome.branch ?? session.branch,
+        baseCommitSha: outcome.baseCommitSha ?? session.baseCommitSha,
+        sandboxId: outcome.sandboxId ?? session.sandboxId,
+        changedPaths: outcome.filesChanged?.map((file) => file.path) ?? [],
+        checks: outcome.checks?.map((check) => ({ name: check.name, status: check.status })) ?? [],
+      },
+      'a session reached a terminal failure',
+    );
 
     await this.#say(session, { type: 'session.failed', failure: outcome.failure });
     await this.#mailEnded(session, 'failed', outcome.failure.message);
@@ -448,6 +605,9 @@ export class SessionRunner {
 
     if (reason === 'models') {
       return { status: 'failed', failure: failureOf('PROVIDER_UNAVAILABLE') };
+    }
+    if (reason === 'no_commit') {
+      return { status: 'failed', failure: failureOf('REPOSITORY_EMPTY') };
     }
     return { status: 'failed', failure: failureOf('SANDBOX_FAILED') };
   }

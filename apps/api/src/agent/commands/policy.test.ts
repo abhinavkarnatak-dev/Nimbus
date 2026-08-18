@@ -21,6 +21,14 @@ describe('commands that are simply allowed', () => {
     ['the npm test shortcut', ['npm', 'test']],
     ['a go test', ['go', 'test', './...']],
     ['a cargo check', ['cargo', 'check']],
+    ['a C++ compiler check', ['g++', '-std=c++17', '-fsyntax-only', 'main.cpp']],
+    ['a make build', ['make', 'test']],
+    ['a CMake build', ['cmake', '--build', 'build']],
+    ['a CTest run', ['ctest', '--test-dir', 'build']],
+    ['a Java build', ['javac', 'Main.java']],
+    ['a .NET test', ['dotnet', 'test']],
+    ['a Deno check', ['deno', 'check', 'main.ts']],
+    ['a Bun script', ['bun', 'run', 'test']],
   ])('allows %s', (_label, argv) => {
     expect(decisionOf(argv)).toBe('allowed');
   });
@@ -30,6 +38,8 @@ describe('commands that are simply allowed', () => {
     expect(classifyCommand(['tsc', '--noEmit']).category).toBe('typecheck');
     expect(classifyCommand(['git', 'status']).category).toBe('read_only');
     expect(classifyCommand(['cargo', 'clippy']).category).toBe('lint');
+    expect(classifyCommand(['g++', '-fsyntax-only', 'main.cpp']).category).toBe('build');
+    expect(classifyCommand(['dotnet', 'test']).category).toBe('test');
   });
 });
 
@@ -58,9 +68,9 @@ describe('python, because a repository is not always JavaScript', () => {
     expect(outcome.reason).toBe('that module is not on the allowlist');
   });
 
-  it('still refuses code given as a string, the same as everywhere else', () => {
-    expect(classifyCommand(['python', '-c', 'print(1)']).decision).toBe('denied');
-    expect(classifyCommand(['python3', '-c', 'import os']).decision).toBe('denied');
+  it('allows Python one-liners for repository checks inside the sandbox', () => {
+    expect(classifyCommand(['python', '-c', 'print(1)']).decision).toBe('allowed');
+    expect(classifyCommand(['python3', '-c', 'import os']).decision).toBe('allowed');
   });
 
   it('refuses a bare interpreter, which would sit waiting for input', () => {

@@ -27,6 +27,7 @@ export interface GitDataClient {
   createTree(baseTreeSha: string, entries: readonly TreeEntryInput[]): Promise<string>;
   createCommit(input: { message: string; treeSha: string; parentSha: string }): Promise<string>;
   createRef(branch: string, commitSha: string): Promise<void>;
+  updateRef(branch: string, commitSha: string): Promise<void>;
 }
 
 export interface RepositoryAccess {

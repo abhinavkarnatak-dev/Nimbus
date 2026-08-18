@@ -31,6 +31,7 @@ export interface ParsedFile {
   addedLines: number;
   removedLines: number;
   addedText: string[];
+  hunkLines: string[];
 }
 
 export class PatchParseError extends Error {
@@ -98,6 +99,7 @@ function blank(): ParsedFile {
     addedLines: 0,
     removedLines: 0,
     addedText: [],
+    hunkLines: [],
   };
 }
 
@@ -140,6 +142,7 @@ export function parsePatch(patch: string): ParsedFile[] {
 
     if (line.startsWith(HUNK_HEADER)) {
       inHunk = true;
+      current.hunkLines.push(line);
       continue;
     }
 
@@ -213,6 +216,8 @@ export function parsePatch(patch: string): ParsedFile[] {
     if (!isContentLine(line)) {
       throw new PatchParseError('The patch contains a line that is neither header nor content.');
     }
+
+    current.hunkLines.push(line);
 
     if (line.startsWith('+')) {
       current.addedLines += 1;

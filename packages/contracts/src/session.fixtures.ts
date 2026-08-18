@@ -59,6 +59,8 @@ export const fileChangeFixture = () => ({
   changeKind: 'modified' as const,
   addedLines: 12,
   removedLines: 3,
+  diff: '@@ -1,3 +1,3 @@\n export function formatDate(at: Date): string {\n-  return at.toString();\n+  return at.toISOString();\n }',
+  diffTruncated: false,
 });
 
 export const checkResultFixture = () => ({
@@ -80,6 +82,9 @@ export const pullRequestFixture = () => ({
 export const sessionSummaryFixture = () => ({
   sessionId: VALID_SESSION_ID,
   status: 'working' as const,
+  runStatus: 'working' as const,
+  deliveryStatus: null,
+  title: 'Format invoice dates',
   task: 'Format the invoice dates using the existing date helper',
   repository: repositoryFixture(),
   branch: 'nimbus/0123456789-format-dates',

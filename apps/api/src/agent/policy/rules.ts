@@ -41,6 +41,7 @@ export const READ_ONLY_TOOLS: readonly ToolName[] = [
   'read_file',
   'git_status',
   'message_user',
+  'finish_task',
   'wait_for_user',
   'prepare_commit',
 ];

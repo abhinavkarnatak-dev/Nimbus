@@ -15,6 +15,7 @@ import type { EventStore } from './store.js';
 import { Subscription } from './subscription.js';
 
 export const SOCKET_PATH = '/events';
+const SOCKET_OPEN = 1;
 
 export interface EventHubOptions {
   server: Server;
@@ -230,7 +231,7 @@ export class EventHub {
   }
 
   #write(connection: Connection, envelope: SessionEventEnvelope): void {
-    if (connection.socket.readyState !== connection.socket.OPEN) {
+    if (connection.socket.readyState !== SOCKET_OPEN) {
       return;
     }
     connection.socket.send(JSON.stringify(envelope));

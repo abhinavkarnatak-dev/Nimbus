@@ -1,4 +1,4 @@
-import { SessionMessageSchema, type ServerEvent, type ToolInvocation } from '@nimbus/contracts';
+import { MessageIdSchema, SessionMessageSchema, type ServerEvent, type ToolInvocation } from '@nimbus/contracts';
 
 import type {
   ActionReporter,
@@ -50,6 +50,15 @@ export class LiveActionReporter implements ActionReporter {
   }
 
   async said(message: SaidMessage): Promise<void> {
+    for (const text of messageChunks(message.text)) {
+      await this.#say({
+        type: 'agent.message.delta',
+        messageId: MessageIdSchema.parse(message.messageId),
+        text,
+        sentAt: message.sentAt,
+      });
+      await pause(24);
+    }
     await this.#say({
       type: 'agent.message',
       message: SessionMessageSchema.parse({
@@ -71,6 +80,20 @@ export class LiveActionReporter implements ActionReporter {
       );
     }
   }
+}
+
+/** Small phrase chunks feel natural without flooding Redis with one event per character. */
+export function messageChunks(text: string): readonly string[] {
+  const words = text.match(/\S+\s*/g) ?? [];
+  const chunks: string[] = [];
+  for (let index = 0; index < words.length; index += 3) {
+    chunks.push(words.slice(index, index + 3).join(''));
+  }
+  return chunks.length === 0 ? [text] : chunks;
+}
+
+function pause(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 export interface DurableProgressOptions {

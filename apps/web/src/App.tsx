@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 
 import { AppShell } from './app/AppShell.js';
-import { ROUTE_PATHS } from './app/routes.js';
+import { ROUTE_PATHS, needsSignIn } from './app/routes.js';
 import { navigate, useRoute } from './app/useRoute.js';
 import { readSignInResult, signInResultProblem } from './auth/signin.js';
 import { gateIsOpen, readSetupResult } from './github/installation.js';
@@ -72,20 +72,42 @@ export function App(): React.JSX.Element {
     }
   }, [signedIn, route.name]);
 
+  useEffect(() => {
+    if (session.state === 'signed_out' && needsSignIn(route)) {
+      navigate(ROUTE_PATHS.sign_in);
+    }
+  }, [route, session.state]);
+
   const body = ((): React.JSX.Element => {
     if (route.name === 'not_found') {
       return <NotFound path={route.path} />;
     }
 
     if (route.name === 'landing') {
-      return session.state === 'checking' ? <HeroSkeleton /> : <Landing />;
+      if (session.state === 'checking') {
+        return <HeroSkeleton />;
+      }
+
+      if (signedIn) {
+        return <DashboardSkeleton />;
+      }
+
+      return <Landing />;
     }
 
     if (session.state === 'checking') {
+      if (route.name !== 'sign_in') {
+        return <DashboardSkeleton />;
+      }
+
       return <SignInSkeleton />;
     }
 
     if (!signedIn) {
+      if (needsSignIn(route)) {
+        return <SignInSkeleton />;
+      }
+
       const carried = onAuthCallback ? readSignInResult(globalThis.location.search) : null;
 
       return (
@@ -115,6 +137,10 @@ export function App(): React.JSX.Element {
     }
 
     if (installation.gate === 'checking') {
+      if (route.name === 'dashboard' || route.name === 'session') {
+        return <DashboardSkeleton />;
+      }
+
       return <ConnectSkeleton />;
     }
 
@@ -129,12 +155,18 @@ export function App(): React.JSX.Element {
           context={session.context}
           installation={installation}
           keys={keys}
-          onSignedOut={(): void => void session.refresh()}
+          onSignedOut={async (): Promise<void> => {
+            await session.refresh();
+          }}
         />
       );
     }
 
     if (keys.state === 'loading') {
+      if (route.name === 'dashboard' || route.name === 'session') {
+        return <DashboardSkeleton />;
+      }
+
       return <ConnectSkeleton what="Checking which model keys this account has." />;
     }
 
@@ -143,6 +175,11 @@ export function App(): React.JSX.Element {
     }
 
     if (route.name === 'session') {
+      // Keep the two-pane shell stable until the session detail is ready. This
+      // prevents the route from flashing a second, centered loading layout.
+      if (liveView.load === 'loading') {
+        return <DashboardSkeleton />;
+      }
       return (
         <Session
           api={session.api}
@@ -168,7 +205,10 @@ export function App(): React.JSX.Element {
   })();
 
   const bareRoutes: readonly string[] = ['dashboard', 'settings', 'session'];
-  const chrome = !bareRoutes.includes(route.name) && session.state !== 'checking';
+  const chrome =
+    !bareRoutes.includes(route.name) &&
+    session.state !== 'checking' &&
+    !(signedIn && AWAY_ONCE_SIGNED_IN.includes(route.name));
 
   const auth = session.state === 'checking' ? 'checking' : signedIn ? 'signed_in' : 'signed_out';
 

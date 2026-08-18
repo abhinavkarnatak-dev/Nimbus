@@ -2,6 +2,7 @@ import { LIMITS } from '@nimbus/contracts';
 
 import type { CommandOutcome, Sandbox } from '../../sandbox/index.js';
 import { SANDBOX_LIMITS } from '../../sandbox/index.js';
+import { isIgnoredPath } from '../tools/policy-paths.js';
 import type { CommandCategory } from './catalogue.js';
 import { cleanCommandOutput } from './output.js';
 import { classifyCommand, type CommandClassification, type CommandDecision } from './policy.js';
@@ -37,6 +38,7 @@ export interface RunCommandInput {
   argv: readonly string[];
   timeoutMs?: number;
   signal?: AbortSignal;
+  check?: boolean;
 }
 
 export interface RunCommandResult {
@@ -50,6 +52,53 @@ export interface RunCommandResult {
   truncated: boolean;
   redacted: boolean;
   timedOut: boolean;
+  generatedPaths: string[];
+  unexpectedPaths: string[];
+}
+
+const CHECK_CATEGORIES: ReadonlySet<CommandCategory> = new Set([
+  'typecheck',
+  'lint',
+  'test',
+  'build',
+]);
+
+export function isolatedCheckArgv(argv: readonly string[]): string[] {
+  const [program, ...rest] = argv;
+
+  if (program === 'javac' && !rest.includes('-d')) {
+    return ['javac', '-d', '/tmp/nimbus-javac-output', ...rest];
+  }
+
+  if (
+    (program === 'python' || program === 'python3') &&
+    rest[0] === '-m' &&
+    rest[1] === 'py_compile' &&
+    !rest.includes('-B')
+  ) {
+    return [program, '-B', ...rest];
+  }
+
+  if (
+    ['gcc', 'g++', 'clang', 'clang++'].includes(program ?? '') &&
+    rest.some((value) => /\.(?:c|cc|cpp|cxx)$/i.test(value)) &&
+    !rest.some((value) => ['-c', '-E', '-S', '-fsyntax-only', '-o'].includes(value))
+  ) {
+    return [program ?? '', '-fsyntax-only', ...rest];
+  }
+
+  if (program === 'tsc' && !rest.includes('--noEmit')) {
+    return ['tsc', '--noEmit', ...rest];
+  }
+
+  return [...argv];
+}
+
+export function isCheckGeneratedPath(path: string): boolean {
+  return (
+    isIgnoredPath(path) ||
+    /(?:^|\/)(?:a\.out|[^/]+\.(?:class|pyc|o|obj|a|so|dylib|dll|exe))$/i.test(path)
+  );
 }
 
 export class CommandRunner {
@@ -99,10 +148,16 @@ export class CommandRunner {
       );
     }
 
+    const isCheck =
+      input.check === true ||
+      (classification.category !== null && CHECK_CATEGORIES.has(classification.category));
+    const before = isCheck ? await this.sandbox.listEntries() : [];
+    const argv = input.check === true ? isolatedCheckArgv(input.argv) : [...input.argv];
+
     this.used += 1;
 
     const result = await this.sandbox.execute({
-      argv: input.argv,
+      argv,
       timeoutMs: input.timeoutMs ?? COMMAND_LIMITS.defaultTimeoutMs,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
@@ -112,6 +167,27 @@ export class CommandRunner {
       result.stderr,
       Math.max(0, COMMAND_LIMITS.outputMaxChars - stdout.text.length),
     );
+
+    const after =
+      isCheck &&
+      result.outcome !== 'cancelled' &&
+      this.sandbox.status().state === 'ready' &&
+      this.sandbox.status().remainingMs > 0
+        ? await this.sandbox.listEntries()
+        : [];
+    const known = new Set(before.map((entry) => entry.path));
+    const created = after.filter((entry) => entry.kind === 'file' && !known.has(entry.path));
+    const generatedPaths = created
+      .filter((entry) => isCheckGeneratedPath(entry.path))
+      .map((entry) => entry.path);
+
+    for (const path of generatedPaths) {
+      await this.sandbox.removeFile(path);
+    }
+
+    const unexpectedPaths = created
+      .filter((entry) => !generatedPaths.includes(entry.path))
+      .map((entry) => entry.path);
 
     return {
       outcome: result.outcome,
@@ -124,6 +200,8 @@ export class CommandRunner {
       truncated: result.truncated || stdout.truncated || stderr.truncated,
       redacted: stdout.redacted || stderr.redacted,
       timedOut: result.timedOut,
+      generatedPaths,
+      unexpectedPaths,
     };
   }
 }
@@ -141,5 +219,7 @@ export function describeRunForLog(
     durationMs: result.durationMs,
     truncated: result.truncated,
     redacted: result.redacted,
+    generatedPaths: result.generatedPaths,
+    unexpectedPaths: result.unexpectedPaths,
   };
 }

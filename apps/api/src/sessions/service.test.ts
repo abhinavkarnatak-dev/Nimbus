@@ -101,24 +101,23 @@ describe('a repository the user cannot reach', () => {
   });
 });
 
-describe('a task nobody could act on', () => {
-  it('is refused without a model call or a session row', async () => {
+describe('brief tasks', () => {
+  it('is queued so the repository can provide the missing context', async () => {
     const harness = sessionHarness();
 
-    expect(await codeOf(harness.service.create(OWNER_ID, newBody({ task: 'fix it please' })))).toBe(
-      'TASK_TOO_BROAD',
+    expect((await harness.service.create(OWNER_ID, newBody({ task: 'fix it please' }))).created).toBe(
+      true,
     );
-    expect(harness.records.documents).toHaveLength(0);
+    expect(harness.records.documents).toHaveLength(1);
   });
 
-  it('is refused when it is only filler words', async () => {
+  it('leaves scoping to the graph even when a request is mostly filler words', async () => {
     const harness = sessionHarness();
 
     expect(
-      await codeOf(
-        harness.service.create(OWNER_ID, newBody({ task: 'please make the code a bit nicer' })),
-      ),
-    ).toBe('TASK_TOO_BROAD');
+      (await harness.service.create(OWNER_ID, newBody({ task: 'please make the code a bit nicer' })))
+        .created,
+    ).toBe(true);
   });
 
   it('accepts one that names something specific', async () => {
@@ -358,6 +357,19 @@ describe('answering a question', () => {
     expect(harness.records.documents[0]?.clarificationAnswer).toBe('the dashboard');
   });
 
+  it('accepts an answer to a new question after an earlier question was answered', async () => {
+    const { harness, id } = await asked();
+    await harness.service.answer(OWNER_ID, id, 'the dashboard');
+    await harness.records.askQuestion(id, 'Should the link open in a new tab?', new Date());
+
+    await harness.service.answer(OWNER_ID, id, 'no');
+
+    expect(harness.records.documents[0]?.clarificationQuestion).toBe(
+      'Should the link open in a new tab?',
+    );
+    expect(harness.records.documents[0]?.clarificationAnswer).toBe('no');
+  });
+
   it('is refused when nothing was ever asked', async () => {
     const harness = sessionHarness();
     const created = await harness.service.create(OWNER_ID, newBody());
@@ -389,8 +401,30 @@ describe('sending a message', () => {
 
     await harness.service.say(OWNER_ID, created.session.sessionId, 'try the other file');
 
-    expect(harness.records.documents[0]?.messages).toHaveLength(1);
-    expect(harness.records.documents[0]?.messages[0]?.text).toBe('try the other file');
+    expect(harness.records.documents[0]?.messages).toHaveLength(2);
+    expect(harness.records.documents[0]?.messages.at(-1)?.text).toBe('try the other file');
+  });
+
+  it('starts a fresh turn after a successful no-change answer without losing the conversation', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+    const held = harness.records.documents[0];
+
+    if (held === undefined) throw new Error('expected a session');
+    await harness.records.recordOutcome(
+      held.sessionId,
+      { status: 'completed', currentActivity: null },
+      new Date(),
+    );
+
+    await harness.service.say(OWNER_ID, held.sessionId, 'add HelloWorld.java');
+
+    const refreshed = harness.records.documents[0];
+    expect(refreshed?.status).toBe('queued');
+    expect(refreshed?.runStatus).toBe('queued');
+    expect(refreshed?.filesChanged).toStrictEqual([]);
+    expect(refreshed?.checks).toStrictEqual([]);
+    expect(refreshed?.messages.map((message) => message.text)).toContain('add HelloWorld.java');
   });
 
   it('is refused once the session has ended', async () => {
@@ -401,6 +435,35 @@ describe('sending a message', () => {
     expect(await codeOf(harness.service.say(OWNER_ID, created.session.sessionId, 'hello'))).toBe(
       'SESSION_NOT_ACTIVE',
     );
+  });
+
+  it('reopens a completed pull request session on its pull request head', async () => {
+    const harness = sessionHarness();
+    const created = await harness.service.create(OWNER_ID, newBody());
+    const held = harness.records.documents[0];
+    const headSha = 'b'.repeat(40);
+
+    if (held === undefined) {
+      throw new Error('the session was not created');
+    }
+
+    Object.assign(held, {
+      status: 'pr_created',
+      completedAt: new Date(),
+      pullRequest: {
+        number: 12,
+        url: 'https://github.com/shopfront/web/pull/12',
+        branch: 'nimbus/follow-up',
+        headSha,
+        createdAt: new Date(),
+      },
+    });
+
+    await harness.service.say(OWNER_ID, created.session.sessionId, 'Also add an example.');
+
+    expect(held.status).toBe('queued');
+    expect(held.baseCommitSha).toBe(headSha);
+    expect(held.messages.at(-1)?.text).toBe('Also add an example.');
   });
 
   it('is refused for somebody else', async () => {

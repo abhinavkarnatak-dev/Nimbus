@@ -23,6 +23,7 @@ import { CONTRACTS_WIRE_VERSION } from './version.js';
 export const SERVER_EVENT_TYPES = [
   'session.status',
   'agent.message',
+  'agent.message.delta',
   'agent.question',
   'agent.approval_required',
   'tool.started',
@@ -46,6 +47,13 @@ const SessionStatusEventSchema = z.strictObject({
 const AgentMessageEventSchema = z.strictObject({
   type: z.literal('agent.message'),
   message: SessionMessageSchema,
+});
+
+const AgentMessageDeltaEventSchema = z.strictObject({
+  type: z.literal('agent.message.delta'),
+  messageId: SessionMessageSchema.shape.messageId,
+  text: z.string().min(1).max(LIMITS.messageMaxChars),
+  sentAt: IsoTimestampSchema,
 });
 
 const AgentQuestionEventSchema = z.strictObject({
@@ -109,6 +117,7 @@ const SessionCancelledEventSchema = z.strictObject({
 export const ServerEventSchema = z.discriminatedUnion('type', [
   SessionStatusEventSchema,
   AgentMessageEventSchema,
+  AgentMessageDeltaEventSchema,
   AgentQuestionEventSchema,
   AgentApprovalRequiredEventSchema,
   ToolStartedEventSchema,

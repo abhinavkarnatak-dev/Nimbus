@@ -3,7 +3,7 @@ export const LIMITS = {
   displayNameMaxChars: 120,
   otpDigits: 8,
 
-  taskMinChars: 10,
+  taskMinChars: 1,
   taskMaxChars: 2000,
   messageMaxChars: 2000,
   clarificationAnswerMaxChars: 1000,
@@ -21,6 +21,8 @@ export const LIMITS = {
 
   maxChangedFiles: 30,
   maxDiffLines: 2000,
+  fileDiffMaxLines: 600,
+  fileDiffMaxChars: 60_000,
   maxAttachmentBytes: 5_242_880,
   maxAttachmentsPerSession: 5,
   maxChecksPerSession: 20,

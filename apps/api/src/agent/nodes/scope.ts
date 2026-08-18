@@ -50,6 +50,14 @@ export interface ScopeOptions {
   router: SessionRouter;
 }
 
+function isRepositoryQuestion(task: string): boolean {
+  const request = task.trim().replace(/^@[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\s+/, '');
+
+  return /^(what|which|who|where|when|why|how|tell|explain|describe|show|read)\b/i.test(
+    request,
+  );
+}
+
 export async function validateScope(
   state: AgentState,
   options: ScopeOptions,
@@ -59,6 +67,15 @@ export async function validateScope(
       outcome: 'already_asked',
       question: null,
       reason: 'a question has already been asked, so the work goes ahead with what is known',
+      askedModel: false,
+    });
+  }
+
+  if (isRepositoryQuestion(state.task)) {
+    return ScopeResultSchema.parse({
+      outcome: 'clear',
+      question: null,
+      reason: 'the person asked a repository question that can be answered by reading the code',
       askedModel: false,
     });
   }

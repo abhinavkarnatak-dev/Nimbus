@@ -2,10 +2,13 @@ import {
   ApprovalDecisionBodySchema,
   AnswerSessionBodySchema,
   CancelSessionResponseSchema,
+  DeleteSessionResponseSchema,
   CreateSessionBodySchema,
   CreateSessionResponseSchema,
   PostMessageBodySchema,
   PostMessageResponseSchema,
+  RenameSessionBodySchema,
+  SetPullRequestStateBodySchema,
   SessionIdSchema,
 } from '@nimbus/contracts';
 import { Router } from 'express';
@@ -35,8 +38,10 @@ export function createSessionsRouter(options: SessionsRouterOptions): Router {
   const requireAuth = createRequireAuth();
   const requireCsrf = createRequireCsrf(options.auth);
 
-  router.get('/models', requireAuth, (_request, response) => {
-    response.status(200).json(options.sessions.modelCatalogue());
+  router.get('/models', requireAuth, async (request, response) => {
+    const account = requireSession(request);
+
+    response.status(200).json(await options.sessions.modelCatalogue(account.user.userId));
   });
 
   router.post(
@@ -66,6 +71,35 @@ export function createSessionsRouter(options: SessionsRouterOptions): Router {
     const sessionId = readSessionId(request.params['sessionId']);
 
     response.status(200).json(await options.sessions.detail(account.user.userId, sessionId));
+  });
+
+  router.patch(
+    '/sessions/:sessionId/title',
+    requireAuth,
+    requireCsrf,
+    validateBody(RenameSessionBodySchema),
+    async (request, response) => {
+      const account = requireSession(request);
+      const sessionId = readSessionId(request.params['sessionId']);
+      const body = validatedBody(request, RenameSessionBodySchema);
+      response
+        .status(200)
+        .json(await options.sessions.rename(account.user.userId, sessionId, body.title));
+    },
+  );
+
+  router.patch('/sessions/:sessionId/pull-request-state', requireAuth, requireCsrf, validateBody(SetPullRequestStateBodySchema), async (request, response) => {
+    const account = requireSession(request);
+    const sessionId = readSessionId(request.params['sessionId']);
+    const body = validatedBody(request, SetPullRequestStateBodySchema);
+    response.status(200).json(await options.sessions.setPullRequestState(account.user.userId, sessionId, body.number, body.state));
+  });
+
+  router.delete('/sessions/:sessionId', requireAuth, requireCsrf, async (request, response) => {
+    const account = requireSession(request);
+    const sessionId = readSessionId(request.params['sessionId']);
+    await options.sessions.remove(account.user.userId, sessionId);
+    response.status(200).json(DeleteSessionResponseSchema.parse({ sessionId }));
   });
 
   router.post(

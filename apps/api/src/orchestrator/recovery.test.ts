@@ -291,6 +291,8 @@ describe('what a recovered run is told about the one before it', () => {
             changeKind: 'modified',
             addedLines: 1,
             removedLines: 1,
+            diff: '@@ -1,1 +1,1 @@\n-const to = "/old";\n+const to = "/new";',
+            diffTruncated: false,
           },
         ],
         checks: [

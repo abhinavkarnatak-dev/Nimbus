@@ -50,6 +50,7 @@ import { TrustedPushGateway } from './push/gateway.js';
 import { MongoApprovals } from './sessions/approvals.js';
 import { MongoSessionRecords } from './sessions/repository.js';
 import { AgentSessionService } from './sessions/service.js';
+import { LlmSessionTitleGenerator } from './sessions/title.js';
 import type { SessionDocument } from './db/models/session.js';
 import { usersCollection } from './db/models/user.js';
 import { createSandboxProvider } from './sandbox/factory.js';
@@ -344,6 +345,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
           events,
           notifyCancelled: tellCancelled,
           providerKeys,
+          titles: new LlmSessionTitleGenerator({ text: userProviders, logger }),
         }),
       }),
     );

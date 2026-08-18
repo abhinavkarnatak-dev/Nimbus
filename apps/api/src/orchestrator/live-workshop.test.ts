@@ -13,8 +13,9 @@ import { FakeTextProvider } from '../llm/fake-text.js';
 import { FakeVisionProvider } from '../llm/fake-vision.js';
 import { capturingLogger } from '../llm/llm.fixtures.js';
 import { DEFAULT_TEXT_MODEL, findModel } from '../llm/models.js';
+import { everyProviderKey, fixedText } from '../llm/sources.js';
 import { SessionAttachments } from '../routing/attached.js';
-import { ImageDescriber } from '../routing/describe.js';
+import { ImageDescriber, fixedDescriber } from '../routing/describe.js';
 import { FakeImageBytes, attachment, textAttachment } from '../routing/routing.fixtures.js';
 import { SELECTABLE_TEXT_MODELS } from '../routing/selection.js';
 import { FakeSandboxProvider } from '../sandbox/fake-provider.js';
@@ -64,7 +65,9 @@ async function workshopFor(
   const attachments = new SessionAttachments({
     records,
     bytes,
-    describer: new ImageDescriber({ vision, records, bytes, logger: captured.logger }),
+    describers: fixedDescriber(
+      new ImageDescriber({ vision, records, bytes, logger: captured.logger }),
+    ),
     logger: captured.logger,
   });
 
@@ -76,7 +79,8 @@ async function workshopFor(
       installations: { activeInstallation: async () => Promise.resolve({ installationId: 4_242 }) },
       tokens: new FakeGitHubTokenProvider(),
       sandboxes: new FakeSandboxProvider({ files: {} }),
-      text: new FakeTextProvider({ answers: [] }),
+      text: fixedText(new FakeTextProvider({ answers: [] })),
+      providerKeys: everyProviderKey(),
       config: loadConfig({ ...minimalEnv(), ...options.env }),
       logger: captured.logger,
       ...(options.wired === false ? {} : { attachments }),
@@ -186,7 +190,8 @@ describe('the immutable repository base', () => {
         },
         tokens: new FakeGitHubTokenProvider(),
         sandboxes: provider,
-        text: new FakeTextProvider({ answers: [] }),
+        text: fixedText(new FakeTextProvider({ answers: [] })),
+        providerKeys: everyProviderKey(),
         config: loadConfig(minimalEnv()),
         logger: capturingLogger().logger,
         records,
@@ -322,20 +327,15 @@ describe('the model a run is prepared with', () => {
     });
   }
 
-  it('does not leave the primary role on Gemini when Groq was chosen', async () => {
-    const plan = await planOf({ textModel: 'openai/gpt-oss-120b' });
-
-    expect(findModel(plan.primary)?.provider).toBe('groq');
-  });
-
-  it('does not leave the primary role on Groq when Gemini was chosen', async () => {
+  it('puts the chosen model in the primary role rather than the default', async () => {
     const plan = await planOf({ textModel: 'gemini-3.5-flash-lite' });
 
+    expect(plan.primary).toBe('gemini-3.5-flash-lite');
     expect(findModel(plan.primary)?.provider).toBe('gemini');
   });
 
   it('leaves the server owned roles alone whatever was chosen', async () => {
-    const chosen = await planOf({ textModel: 'openai/gpt-oss-120b' });
+    const chosen = await planOf({ textModel: 'gemini-3.5-flash-lite' });
     const untouched = await planOf(null);
 
     expect(chosen.light).toBe(untouched.light);
@@ -410,7 +410,8 @@ describe('the limits a run is prepared with', () => {
       installations: { activeInstallation: async () => Promise.resolve({ installationId: 4_242 }) },
       tokens: new FakeGitHubTokenProvider(),
       sandboxes,
-      text: new FakeTextProvider({ answers: [] }),
+      text: fixedText(new FakeTextProvider({ answers: [] })),
+      providerKeys: everyProviderKey(),
       config: loadConfig({ ...minimalEnv(), MAX_CHANGED_FILES: '3', MAX_DIFF_LINES: '40' }),
       logger: capturingLogger().logger,
     }).prepare(held.session, { signal: new AbortController().signal });

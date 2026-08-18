@@ -1,5 +1,7 @@
 import type {
   CheckResult,
+  DeliveryStatus,
+  RunStatus,
   FileChange,
   MessageRole,
   SessionFailure,
@@ -60,6 +62,8 @@ export interface RunOutcome {
   currentActivity?: string | null;
   filesChanged?: FileChange[];
   checks?: CheckResult[];
+  /** Delivery is independent from the conversation being open. */
+  deliveryStatus?: DeliveryStatus | null;
 }
 
 export interface UserMessageInput {
@@ -79,6 +83,14 @@ export interface SessionRecords {
   findByIdempotencyKey(userId: string, idempotencyKey: string): Promise<SessionDocument | null>;
   findActive(userId: string): Promise<SessionDocument | null>;
   listRecent(userId: string, limit: number): Promise<SessionDocument[]>;
+  remove(userId: string, sessionId: string): Promise<boolean>;
+  rename(
+    userId: string,
+    sessionId: string,
+    title: string,
+    at: Date,
+  ): Promise<SessionDocument | null>;
+  setPullRequestState(userId: string, sessionId: string, number: number, state: 'open' | 'merged' | 'closed', at: Date): Promise<SessionDocument | null>;
   finish(
     userId: string,
     sessionId: string,
@@ -99,6 +111,13 @@ export interface SessionRecords {
     userId: string,
     sessionId: string,
     input: UserMessageInput,
+  ): Promise<UserMessageWrite>;
+  resumeAfterMessage(userId: string, sessionId: string, at: Date): Promise<SessionDocument | null>;
+  reopenWithMessage(
+    userId: string,
+    sessionId: string,
+    input: UserMessageInput,
+    baseCommitSha: string | null,
   ): Promise<UserMessageWrite>;
   addMessage(userId: string, sessionId: string, text: string, at: Date): Promise<boolean>;
   addAgentMessage(sessionId: string, text: string, at: Date, messageId?: string): Promise<boolean>;
@@ -158,6 +177,31 @@ export class MongoSessionRecords implements SessionRecords {
       .toArray();
   }
 
+  async remove(userId: string, sessionId: string): Promise<boolean> {
+    return (await sessionsCollection(this.db).deleteOne({ userId, sessionId })).deletedCount === 1;
+  }
+
+  async rename(
+    userId: string,
+    sessionId: string,
+    title: string,
+    at: Date,
+  ): Promise<SessionDocument | null> {
+    return await sessionsCollection(this.db).findOneAndUpdate(
+      { userId, sessionId },
+      { $set: { title, updatedAt: at, lastActivityAt: at } },
+      { returnDocument: 'after' },
+    );
+  }
+
+  async setPullRequestState(userId: string, sessionId: string, number: number, state: 'open' | 'merged' | 'closed', at: Date): Promise<SessionDocument | null> {
+    return await sessionsCollection(this.db).findOneAndUpdate(
+      { userId, sessionId },
+      { $set: { [`manualPrStates.${String(number)}`]: state, updatedAt: at, lastActivityAt: at } },
+      { returnDocument: 'after' },
+    );
+  }
+
   async finish(
     userId: string,
     sessionId: string,
@@ -165,7 +209,7 @@ export class MongoSessionRecords implements SessionRecords {
     at: Date,
   ): Promise<SessionDocument | null> {
     const result = await sessionsCollection(this.db).findOneAndUpdate(
-      { sessionId, userId, status: { $in: activeStatuses() } },
+      { sessionId, userId, status: { $in: [...activeStatuses(), 'ready'] } },
       {
         $set: {
           status,
@@ -184,7 +228,7 @@ export class MongoSessionRecords implements SessionRecords {
   async findClaimable(limit: number): Promise<SessionDocument[]> {
     return sessionsCollection(this.db)
       .find({
-        status: { $in: activeStatuses() },
+        status: { $in: [...activeStatuses(), 'ready'] },
         $or: [{ status: { $ne: WAITING_STATUS } }, { waitingSince: null }],
       })
       .sort({ createdAt: 1 })
@@ -347,9 +391,82 @@ export class MongoSessionRecords implements SessionRecords {
           }
         : { outcome: 'conflict', message: null };
     }
-    return held !== null && isActiveSessionStatus(held.status)
+    return held !== null && (isActiveSessionStatus(held.status) || held.status === 'ready')
       ? { outcome: 'full', message: null }
       : { outcome: 'inactive', message: null };
+  }
+
+  async resumeAfterMessage(
+    userId: string,
+    sessionId: string,
+    at: Date,
+  ): Promise<SessionDocument | null> {
+    return await sessionsCollection(this.db).findOneAndUpdate(
+      { sessionId, userId, status: WAITING_STATUS, clarificationQuestion: null },
+      {
+        $set: {
+          status: 'queued',
+          currentActivity: 'queued for your follow-up',
+          waitingSince: null,
+          updatedAt: at,
+          lastActivityAt: at,
+        },
+      },
+      { returnDocument: 'after' },
+    );
+  }
+
+  async reopenWithMessage(
+    userId: string,
+    sessionId: string,
+    input: UserMessageInput,
+    baseCommitSha: string | null,
+  ): Promise<UserMessageWrite> {
+    const message = saidBy('user', input.text, input.sentAt, input.messageId, input.idempotencyKey);
+    const receipt = receiptFor(input);
+    const changed = await sessionsCollection(this.db).updateOne(
+      {
+        sessionId,
+        userId,
+        status: { $in: ['ready', 'completed', 'pr_created', 'failed'] },
+        'messageReceipts.idempotencyKey': { $ne: input.idempotencyKey },
+        [`messageReceipts.${String(MAX_SESSION_MESSAGES - 1)}`]: { $exists: false },
+      },
+      {
+        $push: {
+          messages: { $each: [message], $slice: -MAX_SESSION_MESSAGES },
+          messageReceipts: receipt,
+        },
+        $set: {
+          status: 'queued',
+          ...(baseCommitSha === null ? {} : { baseCommitSha }),
+          currentActivity: 'queued for your follow-up',
+          clarificationQuestion: null,
+          clarificationAnswer: null,
+          waitingSince: null,
+          failure: null,
+          completedAt: null,
+          runStatus: 'queued',
+          deliveryStatus: null,
+          step: 0,
+          retryCount: 0,
+          filesRead: [],
+          filesChanged: [],
+          checks: [],
+          toolEvents: [],
+          updatedAt: input.sentAt,
+          lastActivityAt: input.sentAt,
+        },
+      },
+    );
+
+    if (changed.modifiedCount === 1) {
+      return {
+        outcome: 'created',
+        message: toSessionMessage(sessionId, message, MAX_SESSION_MESSAGES - 1),
+      };
+    }
+    return this.writeUserMessage(userId, sessionId, input);
   }
 
   async addAgentMessage(
@@ -359,7 +476,7 @@ export class MongoSessionRecords implements SessionRecords {
     messageId = newPrefixedId(MESSAGE_ID_PREFIX),
   ): Promise<boolean> {
     const changed = await sessionsCollection(this.db).updateOne(
-      { sessionId, status: { $in: activeStatuses() } },
+      { sessionId, status: { $in: [...activeStatuses(), 'ready'] } },
       {
         $push: {
           messages: {
@@ -388,7 +505,20 @@ export class MongoSessionRecords implements SessionRecords {
   async askQuestion(sessionId: string, question: string, at: Date): Promise<void> {
     await sessionsCollection(this.db).updateOne(
       { sessionId },
-      { $set: { clarificationQuestion: question, updatedAt: at, lastActivityAt: at } },
+      {
+        $set: {
+          clarificationQuestion: question,
+          clarificationAnswer: null,
+          updatedAt: at,
+          lastActivityAt: at,
+        },
+        $push: {
+          messages: {
+            $each: [saidBy('agent', question, at)],
+            $slice: -MAX_SESSION_MESSAGES,
+          },
+        },
+      },
     );
   }
 }
@@ -450,6 +580,38 @@ export class InMemorySessionRecords implements SessionRecords {
     );
   }
 
+  async remove(userId: string, sessionId: string): Promise<boolean> {
+    const index = this.documents.findIndex(
+      (one) => one.userId === userId && one.sessionId === sessionId,
+    );
+    if (index < 0) return Promise.resolve(false);
+    this.documents.splice(index, 1);
+    return Promise.resolve(true);
+  }
+
+  async rename(
+    userId: string,
+    sessionId: string,
+    title: string,
+    at: Date,
+  ): Promise<SessionDocument | null> {
+    const held = this.documents.find((one) => one.userId === userId && one.sessionId === sessionId);
+    if (held === undefined) return Promise.resolve(null);
+    held.title = title;
+    held.updatedAt = at;
+    held.lastActivityAt = at;
+    return Promise.resolve({ ...held });
+  }
+
+  async setPullRequestState(userId: string, sessionId: string, number: number, state: 'open' | 'merged' | 'closed', at: Date): Promise<SessionDocument | null> {
+    const held = this.documents.find((one) => one.userId === userId && one.sessionId === sessionId);
+    if (held === undefined) return Promise.resolve(null);
+    held.manualPrStates = { ...(held.manualPrStates ?? {}), [String(number)]: state };
+    held.updatedAt = at;
+    held.lastActivityAt = at;
+    return Promise.resolve({ ...held });
+  }
+
   async finish(
     userId: string,
     sessionId: string,
@@ -458,7 +620,7 @@ export class InMemorySessionRecords implements SessionRecords {
   ): Promise<SessionDocument | null> {
     const held = this.documents.find(
       (one) =>
-        one.sessionId === sessionId && one.userId === userId && isActiveSessionStatus(one.status),
+        one.sessionId === sessionId && one.userId === userId && (isActiveSessionStatus(one.status) || one.status === 'ready'),
     );
 
     if (held === undefined) {
@@ -685,13 +847,88 @@ export class InMemorySessionRecords implements SessionRecords {
     });
   }
 
+  async resumeAfterMessage(
+    userId: string,
+    sessionId: string,
+    at: Date,
+  ): Promise<SessionDocument | null> {
+    const held = this.documents.find(
+      (one) =>
+        one.sessionId === sessionId &&
+        one.userId === userId &&
+        one.status === WAITING_STATUS &&
+        one.clarificationQuestion === null,
+    );
+    if (held === undefined) return Promise.resolve(null);
+    Object.assign(held, {
+      status: 'queued',
+      currentActivity: 'queued for your follow-up',
+      waitingSince: null,
+      updatedAt: at,
+      lastActivityAt: at,
+    });
+    return Promise.resolve({ ...held });
+  }
+
+  async reopenWithMessage(
+    userId: string,
+    sessionId: string,
+    input: UserMessageInput,
+    baseCommitSha: string | null,
+  ): Promise<UserMessageWrite> {
+    const held = this.documents.find(
+      (one) =>
+        one.sessionId === sessionId &&
+        one.userId === userId &&
+        ['ready', 'completed', 'pr_created', 'failed'].includes(one.status),
+    );
+
+    if (held === undefined) {
+      return this.writeUserMessage(userId, sessionId, input);
+    }
+    if (held.messages.length >= MAX_SESSION_MESSAGES) {
+      return { outcome: 'full', message: null };
+    }
+
+    const message = saidBy('user', input.text, input.sentAt, input.messageId, input.idempotencyKey);
+    held.messages.push(message);
+    held.messageReceipts = [...(held.messageReceipts ?? []), receiptFor(input)];
+    Object.assign(held, {
+      status: 'queued',
+      ...(baseCommitSha === null ? {} : { baseCommitSha }),
+      currentActivity: 'queued for your follow-up',
+      clarificationQuestion: null,
+      clarificationAnswer: null,
+      waitingSince: null,
+      failure: null,
+      completedAt: null,
+      runStatus: 'queued',
+      deliveryStatus: null,
+      step: 0,
+      retryCount: 0,
+      filesRead: [],
+      filesChanged: [],
+      checks: [],
+      toolEvents: [],
+      updatedAt: input.sentAt,
+      lastActivityAt: input.sentAt,
+    });
+
+    return {
+      outcome: 'created',
+      message: toSessionMessage(sessionId, message, held.messages.length - 1),
+    };
+  }
+
   async addAgentMessage(
     sessionId: string,
     text: string,
     at: Date,
     messageId = newPrefixedId(MESSAGE_ID_PREFIX),
   ): Promise<boolean> {
-    const held = this.#activeOne(sessionId);
+    const held = this.documents.find(
+      (one) => one.sessionId === sessionId && (isActiveSessionStatus(one.status) || one.status === 'ready'),
+    );
 
     if (held === undefined) {
       return Promise.resolve(false);
@@ -719,8 +956,8 @@ export class InMemorySessionRecords implements SessionRecords {
 
     if (held !== undefined) {
       held.clarificationQuestion = question;
-      held.updatedAt = at;
-      held.lastActivityAt = at;
+      held.clarificationAnswer = null;
+      this.#appendMessage(held, saidBy('agent', question, at));
     }
     return Promise.resolve();
   }
@@ -775,6 +1012,8 @@ function messageFromReceipt(
 export function startedFields(at: Date): Partial<SessionDocument> {
   return {
     status: RUNNING_STATUS,
+    runStatus: 'working',
+    deliveryStatus: null,
     currentActivity: 'starting a machine',
     updatedAt: at,
     lastActivityAt: at,
@@ -783,14 +1022,39 @@ export function startedFields(at: Date): Partial<SessionDocument> {
 }
 
 export function outcomeFields(outcome: RunOutcome, at: Date): Partial<SessionDocument> {
-  const terminal = !isActiveSessionStatus(outcome.status);
+  const awaiting = outcome.status === WAITING_STATUS;
+  const runStatus: RunStatus =
+    outcome.status === 'completed' || outcome.status === 'pr_created'
+      ? 'succeeded'
+      : outcome.status === 'failed'
+        ? 'failed'
+        : outcome.status === 'cancelled'
+          ? 'cancelled'
+          : awaiting
+            ? 'awaiting_user'
+        : 'working';
+  const deliveryStatus =
+    outcome.deliveryStatus ??
+    (outcome.status === 'completed'
+      ? 'no_changes'
+      : outcome.status === 'pr_created'
+        ? 'pr_created'
+        : outcome.failure?.code === 'CHECKS_FAILED'
+          ? 'checks_failed'
+          : outcome.failure?.code === 'PATCH_REJECTED'
+            ? 'validation_failed'
+            : null);
 
   return {
+    // This is the latest turn's transport status. The record remains a usable
+    // conversation; `reopenWithMessage` atomically starts its next turn.
     status: outcome.status,
+    runStatus,
+    deliveryStatus,
     updatedAt: at,
     lastActivityAt: at,
-    completedAt: terminal ? at : null,
-    waitingSince: outcome.status === WAITING_STATUS ? at : null,
+    completedAt: !isActiveSessionStatus(outcome.status) ? at : null,
+    waitingSince: awaiting ? at : null,
     ...(outcome.failure === undefined ? {} : { failure: outcome.failure }),
     ...(outcome.branch === undefined ? {} : { branch: outcome.branch }),
     ...(outcome.baseCommitSha === undefined ? {} : { baseCommitSha: outcome.baseCommitSha }),

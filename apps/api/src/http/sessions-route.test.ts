@@ -16,6 +16,7 @@ import {
   testId,
 } from '../sessions/sessions.fixtures.js';
 import { InMemoryAttachmentRecords } from '../attachments/repository.js';
+import { everyProviderKey } from '../llm/sources.js';
 import { createTestLogger, testConfig } from './http.fixtures.js';
 import { SESSION_COOKIE_NAME } from './cookies.js';
 import { createAttachSession } from './middleware/session.js';
@@ -66,6 +67,7 @@ beforeEach(() => {
     attachments: new InMemoryAttachmentRecords(),
     repositories: new FakeRepositoryDirectory([SHOPFRONT]),
     logger,
+    providerKeys: everyProviderKey(),
   });
 });
 
@@ -323,7 +325,7 @@ describe('POST /sessions/:sessionId/messages', () => {
     expect(response.body).toMatchObject({
       message: { messageId: expect.stringMatching(/^msg_/) as string, role: 'user' },
     });
-    expect(records.documents[0]?.messages[0]?.text).toBe('try the other file');
+    expect(records.documents[0]?.messages.at(-1)?.text).toBe('try the other file');
   });
 
   it('turns concurrent retries into one durable message with one stable identity', async () => {
@@ -346,7 +348,7 @@ describe('POST /sessions/:sessionId/messages', () => {
     expect(responses.filter((one) => one.status === 201)).toHaveLength(1);
     expect(responses.filter((one) => one.status === 200)).toHaveLength(7);
     expect(new Set(responses.map((one) => one.messageId)).size).toBe(1);
-    expect(records.documents[0]?.messages).toHaveLength(1);
+    expect(records.documents[0]?.messages).toHaveLength(2);
   });
 
   it('returns conflict when a key is reused for different text', async () => {
@@ -367,7 +369,7 @@ describe('POST /sessions/:sessionId/messages', () => {
 
     expect(conflict.status).toBe(409);
     expect(conflict.body).toMatchObject({ error: { code: 'CONFLICT' } });
-    expect(records.documents[0]?.messages).toHaveLength(1);
+    expect(records.documents[0]?.messages).toHaveLength(2);
   });
 
   it('requires the client retry key', async () => {

@@ -29,6 +29,12 @@ const eventByType = {
     type: 'agent.message',
     message: { ...sessionMessageFixture(), role: 'agent', text: 'Reading the date helper' },
   },
+  'agent.message.delta': {
+    type: 'agent.message.delta',
+    messageId: sessionMessageFixture().messageId,
+    text: 'Reading the ',
+    sentAt: VALID_TIMESTAMP,
+  },
   'agent.question': {
     type: 'agent.question',
     question: 'Which date format should invoices use?',

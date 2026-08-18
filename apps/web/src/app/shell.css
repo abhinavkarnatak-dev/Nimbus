@@ -5,7 +5,7 @@
 }
 
 .shell[data-chrome='false'] {
-  grid-template-rows: var(--bar-height) 1fr;
+  grid-template-rows: 1fr;
   height: 100dvh;
   overflow: hidden;
 }

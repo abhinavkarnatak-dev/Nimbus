@@ -288,6 +288,19 @@ export class E2bSandbox implements Sandbox {
     await this.handle.write(this.absolute(path), contents);
   }
 
+  async removeFile(path: string): Promise<void> {
+    assertUsable(this.status());
+    const normalized = normalizeWorkspacePath(path);
+    const removed = await this.runInternally(['rm', '-f', '--', this.absolute(normalized)]);
+
+    if (removed.exitCode !== 0) {
+      throw new SandboxError(
+        'SANDBOX_PATCH_FAILED',
+        'A generated check artifact could not be removed.',
+      );
+    }
+  }
+
   async markBaseline(): Promise<void> {
     assertUsable(this.status());
 

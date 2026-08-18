@@ -10,7 +10,6 @@ import { SessionEventStream, type StreamCounts } from './stream.js';
 export const BACKOFF_MS = [500, 1_000, 2_000, 5_000, 10_000, 20_000] as const;
 
 export const CLOSE_CODES = {
-  goingAway: 1001,
   policy: 1008,
   unauthorized: 4401,
   forbidden: 4403,
@@ -104,7 +103,7 @@ export class SessionSocket {
     this.#stopped = true;
     this.#cancelWait?.();
     this.#cancelWait = null;
-    this.#socket?.close(CLOSE_CODES.goingAway);
+    this.#socket?.close();
     this.#socket = null;
     this.#moveTo('closed');
   }

@@ -1,8 +1,9 @@
 import type { SessionStatus } from '@nimbus/contracts';
 
-export type StatusTone = 'running' | 'waiting' | 'done' | 'failed' | 'quiet';
+export type StatusTone = 'running' | 'waiting' | 'done' | 'failed' | 'quiet' | 'merged';
 
 const TONES: Readonly<Record<SessionStatus, StatusTone>> = {
+  ready: 'quiet',
   queued: 'quiet',
   provisioning: 'running',
   indexing: 'running',
@@ -10,12 +11,14 @@ const TONES: Readonly<Record<SessionStatus, StatusTone>> = {
   awaiting_user: 'waiting',
   validating: 'running',
   pushing: 'running',
+  completed: 'done',
   pr_created: 'done',
   failed: 'failed',
   cancelled: 'quiet',
 };
 
 const WORDS: Readonly<Record<SessionStatus, string>> = {
+  ready: 'Ready',
   queued: 'Queued',
   provisioning: 'Starting a machine',
   indexing: 'Reading the code',
@@ -23,9 +26,10 @@ const WORDS: Readonly<Record<SessionStatus, string>> = {
   awaiting_user: 'Waiting for you',
   validating: 'Checking the patch',
   pushing: 'Pushing a branch',
+  completed: 'Ready',
   pr_created: 'Pull request opened',
   failed: 'Failed',
-  cancelled: 'Cancelled',
+  cancelled: 'Ended',
 };
 
 export const LIVE_STATUSES: readonly SessionStatus[] = [

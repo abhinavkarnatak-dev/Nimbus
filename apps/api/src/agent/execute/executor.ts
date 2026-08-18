@@ -14,6 +14,7 @@ import {
 import type { Logger } from '../../logging/logger.js';
 import { redactSecrets } from '../../logging/redact.js';
 import { newPrefixedId } from '../../lib/id.js';
+import { actionHash } from '../policy/hash.js';
 import type { PolicyGate } from '../policy/policy.js';
 import type { ToolOutput } from '../registry/definition.js';
 import type { ToolRegistry } from '../registry/registry.js';
@@ -66,7 +67,15 @@ export interface ExecutorOptions {
   now?: () => number;
 }
 
-export const USER_FACING_TOOLS: ReadonlySet<string> = new Set(['message_user', 'wait_for_user']);
+export const USER_FACING_TOOLS: ReadonlySet<string> = new Set([
+  'message_user',
+  'finish_task',
+  'wait_for_user',
+]);
+
+export function actionFingerprint(tool: string, toolArguments: Record<string, unknown>): string {
+  return actionHash(tool, toolArguments);
+}
 
 export class ActionExecutor {
   readonly #registry: ToolRegistry;

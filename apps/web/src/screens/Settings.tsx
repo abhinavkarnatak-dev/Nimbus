@@ -25,7 +25,7 @@ export interface SettingsProps {
   context: SessionContext | null;
   installation: InstallationHandle;
   keys: ProviderKeysHandle;
-  onSignedOut: () => void;
+  onSignedOut: () => Promise<void>;
 }
 
 export function Settings({
@@ -88,7 +88,7 @@ export function Settings({
       return;
     }
 
-    onSignedOut();
+    await onSignedOut();
     navigate(ROUTE_PATHS.landing);
   };
 
@@ -96,6 +96,16 @@ export function Settings({
     <div className="container">
       <div className="page">
         <header className="page__head">
+          <Button
+            tone="quiet"
+            className="page__back"
+            onClick={(): void => {
+              navigate(ROUTE_PATHS.dashboard);
+            }}
+          >
+            &larr; Back to dashboard
+          </Button>
+
           <p className="page__eyebrow">Settings</p>
           <h1 className="page__title">Your account</h1>
           <p className="page__sub">

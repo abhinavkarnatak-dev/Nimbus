@@ -14,6 +14,7 @@ export const TOOL_NAMES = [
   'git_status',
   'prepare_commit',
   'message_user',
+  'finish_task',
   'wait_for_user',
 ] as const;
 
@@ -45,12 +46,16 @@ export const WorkspacePathSchema = z
 
 export const FileChangeKindSchema = z.enum(['added', 'modified', 'deleted', 'renamed']);
 
+export const FileDiffSchema = z.string().max(LIMITS.fileDiffMaxChars);
+
 export const FileChangeSchema = z.strictObject({
   path: WorkspacePathSchema,
   changeKind: FileChangeKindSchema,
   previousPath: WorkspacePathSchema.optional(),
   addedLines: z.int().nonnegative(),
   removedLines: z.int().nonnegative(),
+  diff: FileDiffSchema,
+  diffTruncated: z.boolean(),
 });
 
 export const CheckKindSchema = z.enum(['test', 'lint', 'typecheck', 'build']);

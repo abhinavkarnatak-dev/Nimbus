@@ -37,8 +37,8 @@ function spentBudget(tokens: number): SessionBudget {
   const budget = new SessionBudget();
   budget.charge(
     buildReport({
-      provider: 'groq',
-      model: 'openai/gpt-oss-120b',
+      provider: 'gemini',
+      model: 'gemini-3.6-flash',
       usage: { promptTokens: tokens, completionTokens: 0, reasoningTokens: 0, totalTokens: tokens },
       attempts: 1,
       durationMs: 1,

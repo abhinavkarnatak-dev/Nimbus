@@ -83,9 +83,47 @@ describe('a run that reaches a pull request', () => {
 
     expect(held.workshop.finished).toHaveLength(1);
   });
+
+  it('extends the existing pull request branch for a follow-up', async () => {
+    const held = runnerFor();
+    const first = await ran(held.runner.run(sessionDocument(), new AbortController().signal));
+    const pullRequest = first.pullRequest;
+
+    expect(pullRequest).toBeDefined();
+
+    const followUp = sessionDocument({
+      status: 'queued',
+      pullRequest: pullRequest ?? null,
+      branch: pullRequest?.branch ?? null,
+      baseCommitSha: pullRequest?.headSha ?? 'a'.repeat(40),
+      messages: [{ role: 'user', text: 'add java hello world too', sentAt: new Date() }],
+    });
+    const second = await ran(held.runner.run(followUp, new AbortController().signal));
+
+    expect(second.status).toBe('pr_created');
+    expect(held.push.calls[1]?.branch).toBe(pullRequest?.branch);
+    expect(second.pullRequest?.number).toBe(pullRequest?.number);
+    expect(held.pullRequests.calls).toHaveLength(2);
+  });
 });
 
 describe('nothing reaches GitHub unless the change is real', () => {
+  it('completes a successful no-change answer without inventing a failure', async () => {
+    const held = runnerFor({
+      answers: [
+        CLEAR_SCOPE,
+        answer('read_file', { path: 'README.md' }),
+        answer('finish_task', { text: 'The requested file already exists.' }),
+      ],
+    });
+    const outcome = await ran(held.runner.run(sessionDocument(), new AbortController().signal));
+
+    expect(outcome.status).toBe('completed');
+    expect(outcome.failure).toBeUndefined();
+    expect(held.push.calls).toHaveLength(0);
+    expect(held.pullRequests.calls).toHaveLength(0);
+  });
+
   it('pushes nothing when the model never finished', async () => {
     const held = runnerFor({ answers: [CLEAR_SCOPE, answer('read_file', { path: 'README.md' })] });
     const outcome = await ran(held.runner.run(sessionDocument(), new AbortController().signal));
@@ -107,6 +145,16 @@ describe('nothing reaches GitHub unless the change is real', () => {
     const outcome = await ran(held.runner.run(sessionDocument(), new AbortController().signal));
 
     expect(outcome.failure?.code).toBe('PROVIDER_UNAVAILABLE');
+  });
+
+  it('explains that an empty repository needs its first commit', async () => {
+    const held = runnerFor({
+      failWith: new WorkshopError('no_commit', 'the default branch is empty'),
+    });
+    const outcome = await ran(held.runner.run(sessionDocument(), new AbortController().signal));
+
+    expect(outcome.failure?.code).toBe('REPOSITORY_EMPTY');
+    expect(outcome.failure?.message).toContain('initial commit');
   });
 
   it('tidies up even when the run fails', async () => {
@@ -227,6 +275,28 @@ describe('what a run says while it happens', () => {
     expect(held.events.typesFor(session.sessionId)[0]).toBe('session.status');
   });
 
+  it('continues an answered clarification without replaying the startup narration', async () => {
+    const held = talking();
+    const session = {
+      ...sessionDocument(),
+      clarificationQuestion: 'Should this use a new Python directory?',
+      clarificationAnswer: 'Yes, add it under examples/python.',
+      step: 1,
+    };
+
+    await held.runner.run(session, new AbortController().signal);
+
+    const narration = held.events.published
+      .filter((published) => published.sessionId === session.sessionId)
+      .flatMap((published) =>
+        published.event.type === 'agent.message' ? [published.event.message.text] : [],
+      );
+
+    expect(narration).not.toContain(
+      `I'm checking ${session.repository.owner}/${session.repository.name} and working out the safest way to handle this.`,
+    );
+  });
+
   it('reports every tool it ran and what changed', async () => {
     const held = talking();
     const session = sessionDocument();
@@ -297,14 +367,15 @@ describe('what a run says while it happens', () => {
     expect(completions).toBe(starts);
   });
 
-  it('announces the pull request last', async () => {
+  it('follows the pull request with a concise handoff in the chat', async () => {
     const held = talking();
     const session = sessionDocument();
 
     await held.runner.run(session, new AbortController().signal);
     const types = held.events.typesFor(session.sessionId);
 
-    expect(types[types.length - 1]).toBe('pr.created');
+    expect(types.indexOf('pr.created')).toBeGreaterThan(-1);
+    expect(types[types.length - 1]).toBe('agent.message');
   });
 
   it('says why when it fails', async () => {

@@ -9,6 +9,8 @@ import {
   CommandRefused,
   CommandRunner,
   describeRunForLog,
+  isolatedCheckArgv,
+  isCheckGeneratedPath,
   type RunCommandInput,
 } from './runner.js';
 
@@ -62,6 +64,64 @@ describe('running an allowed command', () => {
     expect(result.stdout).toContain(REDACTED);
     expect(result.stdout).not.toContain('ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
     expect(result.redacted).toBe(true);
+  });
+});
+
+describe('check workspace isolation', () => {
+  it('sends Java compiler output outside the repository and removes a defensive generated artifact', async () => {
+    const sandbox = await sandboxWith({
+      commands: {
+        'javac -d /tmp/nimbus-javac-output Main.java': {
+          writes: { 'Main.class': 'compiled bytecode' },
+        },
+      },
+    });
+    await sandbox.writeFile('Main.java', 'class Main {}\n');
+
+    const result = await new CommandRunner(sandbox).run({
+      argv: ['javac', 'Main.java'],
+      check: true,
+    });
+    const patch = await sandbox.exportPatch();
+
+    expect(result.generatedPaths).toEqual(['Main.class']);
+    expect(patch.files.map((file) => file.path)).toEqual(['Main.java']);
+  });
+
+  it('reports a new non-generated file rather than silently deleting it', async () => {
+    const sandbox = await sandboxWith({
+      commands: { 'pnpm test': { writes: { 'changed-by-test.txt': 'unexpected\n' } } },
+    });
+
+    const result = await new CommandRunner(sandbox).run({ argv: ['pnpm', 'test'], check: true });
+
+    expect(result.generatedPaths).toEqual([]);
+    expect(result.unexpectedPaths).toEqual(['changed-by-test.txt']);
+    expect(await sandbox.readFile('changed-by-test.txt')).toBe('unexpected\n');
+  });
+
+  it('normalizes common compiler checks so they do not create repository output', () => {
+    expect(isolatedCheckArgv(['javac', 'Main.java'])).toEqual([
+      'javac',
+      '-d',
+      '/tmp/nimbus-javac-output',
+      'Main.java',
+    ]);
+    expect(isolatedCheckArgv(['python', '-m', 'py_compile', 'hello.py'])).toEqual([
+      'python',
+      '-B',
+      '-m',
+      'py_compile',
+      'hello.py',
+    ]);
+    expect(isolatedCheckArgv(['g++', 'hello.cpp'])).toEqual(['g++', '-fsyntax-only', 'hello.cpp']);
+  });
+
+  it('recognizes only known check products as generated artifacts', () => {
+    expect(isCheckGeneratedPath('Main.class')).toBe(true);
+    expect(isCheckGeneratedPath('__pycache__/hello.cpython-312.pyc')).toBe(true);
+    expect(isCheckGeneratedPath('src/hello.py')).toBe(false);
+    expect(isCheckGeneratedPath('assets/logo.png')).toBe(true);
   });
 });
 

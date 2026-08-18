@@ -71,6 +71,16 @@ describe('preflight', () => {
     expect(response.headers['access-control-max-age']).toBe('600');
   });
 
+  it('allows PATCH requests used to rename a session', async () => {
+    const response = await request(appWithCors())
+      .options('/sessions/ses_aaaaaaaaaaaaaaaaaaaaa/title')
+      .set('Origin', ALLOWED)
+      .set('Access-Control-Request-Method', 'PATCH');
+
+    expect(response.status).toBe(204);
+    expect(response.headers['access-control-allow-methods']).toContain('PATCH');
+  });
+
   it('refuses a preflight from a wrong origin without leaking an allow header', async () => {
     const response = await request(appWithCors())
       .options('/thing')

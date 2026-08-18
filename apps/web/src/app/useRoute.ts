@@ -8,7 +8,7 @@ export function currentRoute(): Route {
 
 export function navigate(path: string): void {
   globalThis.history.pushState({}, '', path);
-  globalThis.dispatchEvent(new PopStateEvent('popstate'));
+  globalThis.dispatchEvent(new Event('popstate'));
 }
 
 export function useRoute(): Route {

@@ -1,4 +1,5 @@
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
+import { Octokit } from '@octokit/rest';
 import type { ModelPlan, SessionMessage } from '@nimbus/contracts';
 
 import type { ConversationSource } from '../agent/graph/graph.js';
@@ -27,7 +28,10 @@ import {
 } from '../routing/attached.js';
 import { SessionRouter } from '../routing/router.js';
 import { planFor } from '../routing/selection.js';
+import type { LlmProviderName } from '@nimbus/contracts';
 import type { TextProvider } from '../llm/provider.js';
+import type { ProviderKeyDirectory, TextProviderSource } from '../llm/sources.js';
+import { NO_KEYS_FOR_RUN } from '../llm/user-providers.js';
 import { buildSandboxSpec, type Sandbox, type SandboxProvider } from '../sandbox/index.js';
 import { ORCHESTRATOR_LIMITS } from './limits.js';
 import { WorkshopError, type PreparedRun, type SessionWorkshop } from './workshop.js';
@@ -45,7 +49,8 @@ export interface LiveWorkshopOptions {
   installations: InstallationDirectory;
   tokens: GitHubTokenProvider;
   sandboxes: SandboxProvider;
-  text: TextProvider;
+  text: TextProviderSource;
+  providerKeys: ProviderKeyDirectory;
   config: AppConfig;
   logger: Logger;
   attachments?: SessionAttachments;
@@ -87,7 +92,24 @@ export class LiveSessionWorkshop implements SessionWorkshop {
       await this.#revoke(session, readToken);
       throw error;
     }
-    const plan = this.#plan(session);
+
+    let plan: ModelPlan;
+    let text: TextProvider;
+
+    try {
+      const held = await this.#options.providerKeys.providersFor(session.userId);
+
+      if (held.length === 0) {
+        throw new WorkshopError('models', NO_KEYS_FOR_RUN);
+      }
+      plan = this.#plan(session, held);
+      text = await this.#options.text.for(session.userId);
+    } catch (error) {
+      await this.#revoke(session, readToken);
+      throw error instanceof WorkshopError
+        ? error
+        : new WorkshopError('models', NO_KEYS_FOR_RUN, { cause: error });
+    }
 
     const limits = this.#options.config.limits;
 
@@ -117,12 +139,13 @@ export class LiveSessionWorkshop implements SessionWorkshop {
     );
 
     const router = new SessionRouter({
-      text: this.#options.text,
+      text,
       logger: this.#options.logger,
       plan,
     });
 
     const attached = await this.#attached(session, router);
+    const reviewComments = await this.#reviewComments(session, readToken);
 
     return {
       installationId,
@@ -155,6 +178,7 @@ export class LiveSessionWorkshop implements SessionWorkshop {
         logger: this.#options.logger,
         limits,
         signal: options.signal,
+        ...(reviewComments === null ? {} : { reviewComments }),
         ...this.#conversation(session),
         ...(this.#options.checkpointer === undefined
           ? {}
@@ -179,6 +203,41 @@ export class LiveSessionWorkshop implements SessionWorkshop {
           records.conversationOf(session.sessionId),
       },
     };
+  }
+
+  async #reviewComments(session: SessionDocument, token: InstallationToken): Promise<string | null> {
+    if (session.pullRequest === null) return null;
+
+    try {
+      const client = new Octokit({ auth: token.token });
+      const [review, discussion] = await Promise.all([
+        client.pulls.listReviewComments({
+          owner: session.repository.owner,
+          repo: session.repository.name,
+          pull_number: session.pullRequest.number,
+          per_page: 100,
+        }),
+        client.issues.listComments({
+          owner: session.repository.owner,
+          repo: session.repository.name,
+          issue_number: session.pullRequest.number,
+          per_page: 100,
+        }),
+      ]);
+      const comments = [
+        ...review.data.map((one) =>
+          `${one.path ?? 'pull request'}${one.line === null ? '' : `:${String(one.line)}`}: ${one.body}`,
+        ),
+        ...discussion.data.map((one) => `pull request: ${one.body}`),
+      ].filter((one) => one.trim() !== '');
+      return comments.length === 0 ? null : comments.join('\n\n').slice(0, 12_000);
+    } catch (error) {
+      this.#options.logger.warn(
+        { sessionId: session.sessionId, pullRequest: session.pullRequest.number, error: String(error) },
+        'pull request comments could not be read for a follow-up',
+      );
+      return null;
+    }
   }
 
   #reporting(session: SessionDocument): { reporter?: ActionReporter } {
@@ -315,19 +374,15 @@ export class LiveSessionWorkshop implements SessionWorkshop {
     }
   }
 
-  #plan(session: SessionDocument): ModelPlan {
+  #plan(session: SessionDocument, providers: readonly LlmProviderName[]): ModelPlan {
     const chosen = session.model ?? null;
 
-    if (chosen === null) {
-      return planFor();
-    }
-
     try {
-      return planFor({ textModel: chosen.textModel });
+      return planFor(chosen === null ? { providers } : { textModel: chosen.textModel, providers });
     } catch (error) {
       throw new WorkshopError(
         'models',
-        'The model this session was started with is no longer available, and Nimbus does not swap in another one.',
+        'The model this session was started with is not covered by the API keys on this account, and Nimbus does not swap in another one.',
         { cause: error },
       );
     }
@@ -354,8 +409,23 @@ export function resumedState(
   input: Parameters<typeof createState>[0],
   session: SessionDocument,
 ): ReturnType<typeof createState> {
-  const fresh = createState(input);
+  const userTurns = session.messages.filter((message) => message.role === 'user');
+  const followUp = userTurns.length > 1 ? userTurns.at(-1)?.text ?? null : null;
+  const fresh = createState({
+    ...input,
+    // A normal follow-up is the new instruction. Earlier turns are still supplied to the
+    // reasoning node as conversation, so the agent does not lose the original context.
+    task: session.clarificationAnswer === null && followUp !== null ? followUp : input.task,
+  });
   const spent = Math.min(Math.max(session.step, 0), fresh.budgets.maxSteps);
+
+  if (session.clarificationAnswer !== null) {
+    return parseState({
+      ...fresh,
+      budgets: { ...fresh.budgets, steps: spent },
+      clarificationAnswer: session.clarificationAnswer,
+    });
+  }
 
   if (session.clarificationQuestion === null && spent === 0) {
     return fresh;

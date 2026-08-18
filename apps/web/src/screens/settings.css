@@ -11,6 +11,12 @@
   gap: var(--space-2);
 }
 
+.page__back {
+  justify-self: start;
+  margin-bottom: var(--space-2);
+  text-decoration: none;
+}
+
 .page__eyebrow {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);

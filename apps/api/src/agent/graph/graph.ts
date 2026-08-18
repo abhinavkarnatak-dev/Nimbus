@@ -12,7 +12,7 @@ import type { AttachedText } from '../../routing/context.js';
 import type { SessionRouter } from '../../routing/router.js';
 import type { Sandbox } from '../../sandbox/index.js';
 import type { RepositoryReference, RepositorySource } from '../clone/index.js';
-import type { ActionExecutor } from '../execute/executor.js';
+import { actionFingerprint, type ActionExecutor } from '../execute/executor.js';
 import {
   RunGuard,
   applyExecution,
@@ -46,6 +46,7 @@ export interface RunInput {
   images?: readonly DescribedImage[];
   attachments?: readonly AttachedText[];
   conversation?: ConversationSource;
+  reviewComments?: string;
   checkpointer?: BaseCheckpointSaver;
   limits?: PatchCaps;
   signal?: AbortSignal;
@@ -58,6 +59,7 @@ export interface RunResult {
   stopVerdict: StopVerdict | null;
   cloned: number;
   steps: number;
+  threw?: unknown;
 }
 
 interface Carried {
@@ -80,6 +82,53 @@ const RunAnnotation = Annotation.Root({
   done: Annotation<boolean>({ reducer: (_held, next) => next, default: () => false }),
 });
 
+function checkedSinceLastEdit(state: AgentState): boolean {
+  let lastEdit = -1;
+  let lastCheck = -1;
+
+  state.toolEvents.forEach((event, index) => {
+    if (event.tool === 'create_file' || event.tool === 'apply_patch') {
+      lastEdit = index;
+    }
+    if (event.tool === 'run_checks') {
+      lastCheck = index;
+    }
+  });
+
+  return lastCheck > lastEdit;
+}
+
+function automaticExampleCheck(
+  state: AgentState,
+): { argv: string[]; name: string; kind: 'test' | 'typecheck' } | null {
+  const last = state.toolEvents.at(-1);
+  const path = state.filesChanged.at(-1);
+  if (
+    last === undefined ||
+    !['create_file', 'apply_patch'].includes(last.tool) ||
+    path === undefined ||
+    checkedSinceLastEdit(state) ||
+    !/\b(simple|basic|example)\b/i.test(state.task)
+  )
+    return null;
+
+  if (/\.(?:c|cc|cpp|cxx)$/i.test(path)) {
+    return {
+      name: 'C++ syntax check',
+      kind: 'test',
+      argv: ['g++', '-std=c++17', '-fsyntax-only', path],
+    };
+  }
+  if (/\.py$/i.test(path)) {
+    return {
+      name: 'Python syntax check',
+      kind: 'typecheck',
+      argv: ['python', '-B', '-m', 'py_compile', path],
+    };
+  }
+  return null;
+}
+
 export function buildAgentGraph(input: RunInput) {
   const guard = new RunGuard();
 
@@ -90,7 +139,7 @@ export function buildAgentGraph(input: RunInput) {
     });
 
   const clone = async (current: Carried): Promise<Partial<Carried>> => {
-    if (current.state.filesRead.length > 0 || current.cloned > 0) {
+    if (current.cloned > 0) {
       return {};
     }
 
@@ -107,6 +156,18 @@ export function buildAgentGraph(input: RunInput) {
   };
 
   const scope = async (current: Carried): Promise<Partial<Carried>> => {
+    if (current.state.clarificationAnswer !== null) {
+      return {
+        state: spent(
+          parseState({
+            ...current.state,
+            clarificationQuestion: null,
+            phase: 'retrieving',
+          }),
+        ),
+      };
+    }
+
     const verdict = await validateScope(current.state, { router: input.router });
 
     if (verdict.outcome !== 'needs_clarification') {
@@ -149,6 +210,41 @@ export function buildAgentGraph(input: RunInput) {
       return { done: true, verdict: before, state: stopWith(current.state, before) };
     }
 
+    const completion = judgeCompletion(current.state);
+
+    if (completion.finished) {
+      return {
+        state: spent(
+          parseState({
+            ...current.state,
+            proposedAction: {
+              tool: 'prepare_commit',
+              reason:
+                'The requested files are changed and the recorded checks passed, so I am packaging the patch for review.',
+              argumentsJson: JSON.stringify({ summary: current.state.task.slice(0, 400) }),
+              actionHash: '0'.repeat(64),
+            },
+          }),
+        ),
+      };
+    }
+
+    const check = automaticExampleCheck(current.state);
+    if (check !== null) {
+      return {
+        state: parseState({
+          ...current.state,
+          proposedAction: {
+            tool: 'run_checks',
+            reason:
+              'The requested example was created. Running its syntax check before packaging the change.',
+            argumentsJson: JSON.stringify(check),
+            actionHash: '0'.repeat(64),
+          },
+        }),
+      };
+    }
+
     const chosen = await chooseNextAction({
       state: current.state,
       context: current.context,
@@ -156,6 +252,7 @@ export function buildAgentGraph(input: RunInput) {
       router: input.router,
       history: current.history.slice(-GRAPH_LIMITS.historyShown),
       conversation: await latestConversation(input),
+      ...(input.reviewComments === undefined ? {} : { reviewComments: input.reviewComments }),
     });
 
     if (!chosen.accepted) {
@@ -198,27 +295,102 @@ export function buildAgentGraph(input: RunInput) {
       return {};
     }
 
+    const toolArguments = JSON.parse(proposed.argumentsJson) as Record<string, unknown>;
+    const actionHash = actionFingerprint(proposed.tool, toolArguments);
+
+    if (proposed.tool === 'run_checks' && checkedSinceLastEdit(current.state)) {
+      return {
+        history: [
+          ...current.history,
+          'Blocked before running: a check has already run since the last edit. Read and fix a failed check, or package the patch when the recorded check passed. Do not run another check without a new edit.',
+        ],
+        state: parseState({ ...current.state, proposedAction: null, phase: 'reasoning' }),
+      };
+    }
+
+    if (proposed.tool === 'prepare_commit') {
+      const completion = judgeCompletion(current.state);
+
+      if (!completion.finished) {
+        return {
+          history: [
+            ...current.history,
+            `Blocked before running: prepare_commit is only allowed after the requested files are changed and every recorded check has passed. ${completion.reason}`,
+          ],
+          state: parseState({ ...current.state, proposedAction: null, phase: 'reasoning' }),
+        };
+      }
+    }
+
+    if (proposed.tool === 'finish_task' && current.state.filesChanged.length > 0) {
+      const completion = judgeCompletion(current.state);
+      if (!completion.finished) {
+        return {
+          history: [
+            ...current.history,
+            `Blocked before finishing: a changed repository cannot be reported as successful yet. ${completion.reason}`,
+          ],
+          state: parseState({ ...current.state, proposedAction: null, phase: 'reasoning' }),
+        };
+      }
+    }
+
+    if (guard.timesSeen(actionHash) > 0) {
+      const blocked = guard.blockRepeat(actionHash);
+      const history = [
+        ...current.history,
+        `Blocked before running: ${proposed.tool} with these exact arguments already completed. Do not repeat it unless you first make a new edit that makes another check necessary. Choose the next useful action.`,
+      ];
+
+      if (blocked >= 2) {
+        return {
+          done: true,
+          history,
+          state: stopped(parseState({ ...current.state, proposedAction: null }), 'repeated_action'),
+        };
+      }
+
+      return {
+        history,
+        state: parseState({ ...current.state, proposedAction: null, phase: 'reasoning' }),
+      };
+    }
+
     const result = await input.executor.execute({
       step: current.state.budgets.steps,
       toolCallId: `call_${String(current.state.budgets.steps)}`,
       tool: proposed.tool,
-      toolArguments: JSON.parse(proposed.argumentsJson) as Record<string, unknown>,
+      toolArguments,
       intent: proposed.reason,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
 
-    const next = applyExecution(current.state, result);
+    let next = applyExecution(current.state, result);
+
+    if (result.pause === 'clarification' && result.userMessage !== null) {
+      next = parseState({ ...next, clarificationQuestion: result.userMessage });
+    }
     const after = guard.afterStep(result);
+    const repeated = guard.timesSeen(result.actionHash);
     const history = [
       ...current.history,
-      repeatNotice(proposed.tool, result.observation.summary, guard.timesSeen(result.actionHash)),
+      [
+        result.observation.text,
+        repeated > 1 ? repeatNotice(proposed.tool, result.observation.summary, repeated) : '',
+      ]
+        .filter((entry) => entry !== '')
+        .join('\n\n'),
     ];
+
+    if (result.status === 'executed' && proposed.tool === 'finish_task') {
+      return { done: true, history, state: stopped(next, 'completed') };
+    }
 
     if (after.stop) {
       return { done: true, verdict: after, history, state: stopWith(next, after) };
     }
 
-    if (result.status === 'approval_required') {
+    if (result.status === 'approval_required' || result.pause !== null) {
       return { done: true, history, state: next };
     }
 

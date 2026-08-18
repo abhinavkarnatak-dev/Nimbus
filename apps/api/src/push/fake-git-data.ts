@@ -19,6 +19,7 @@ export const FAKE_STEPS = [
   'createTree',
   'createCommit',
   'createRef',
+  'updateRef',
 ] as const;
 
 export type FakeStep = (typeof FAKE_STEPS)[number];
@@ -141,6 +142,16 @@ export class FakeGitDataClient implements GitDataClient {
       throw new Error('that branch already exists');
     }
 
+    this.state.refs.set(branch, commitSha);
+    return Promise.resolve();
+  }
+
+  async updateRef(branch: string, commitSha: string): Promise<void> {
+    this.record('updateRef');
+
+    if (!this.state.refs.has(branch)) {
+      throw new Error('that branch does not exist');
+    }
     this.state.refs.set(branch, commitSha);
     return Promise.resolve();
   }

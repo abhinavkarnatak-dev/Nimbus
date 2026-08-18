@@ -13,6 +13,11 @@ export const OtpCodeSchema = z
 
 export const AuthProviderSchema = z.enum(['email_otp', 'google']);
 
+export const AUTH_PROVIDER_LABELS: Readonly<Record<AuthProvider, string>> = {
+  email_otp: 'Email',
+  google: 'Google',
+};
+
 export const OtpRequestBodySchema = z.strictObject({
   email: EmailSchema,
 });

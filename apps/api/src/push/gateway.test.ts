@@ -171,6 +171,24 @@ describe('a retry that would change what is already there', () => {
   });
 });
 
+describe('a follow-up on an existing pull request branch', () => {
+  it('fast-forwards the existing Nimbus branch from its current head', async () => {
+    const first = await gatewayWith().gateway.push(pushRequest());
+    const patch = addPatch('src/example.ts');
+    const result = await gatewayWith().gateway.push(
+      pushRequest({
+        baseCommitSha: first.commitSha,
+        patch,
+        report: reportFor(patch, first.commitSha),
+      }),
+    );
+
+    expect(result.outcome).toBe('created');
+    expect(result.commitSha).not.toBe(first.commitSha);
+    expect(state.refs.get(result.branch)).toBe(result.commitSha);
+  });
+});
+
 describe('things that are never allowed', () => {
   it('refuses a patch that was not cleared', async () => {
     const denied = reportFor(editPatch());

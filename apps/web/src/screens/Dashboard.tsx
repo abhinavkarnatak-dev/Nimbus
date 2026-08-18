@@ -46,7 +46,7 @@ function startProblem(error: unknown): string {
     REPOSITORY_NOT_AVAILABLE: 'Nimbus can no longer see that repository. Check it on GitHub.',
     REPOSITORY_NOT_PUBLIC: 'Nimbus only works on public repositories.',
     GITHUB_NOT_CONNECTED: 'Connect GitHub before starting a session.',
-    VALIDATION_FAILED: `Describe the change in at least ${String(LIMITS.taskMinChars)} characters.`,
+    VALIDATION_FAILED: 'Enter a question or task for Nimbus.',
     AGENT_SESSIONS_DISABLED: 'Starting sessions is switched off on this deployment.',
   };
 
@@ -73,6 +73,7 @@ export function Dashboard({
   const [problem, setProblem] = useState<string | null>(null);
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
   const [highlighted, setHighlighted] = useState(0);
+  const [railOpen, setRailOpen] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const chooser = useRef<HTMLInputElement>(null);
   const activeOption = useRef<HTMLButtonElement>(null);
@@ -194,12 +195,14 @@ export function Dashboard({
   };
 
   return (
-    <div className="dash">
-      <Rail sessions={sessions} />
+    <div className="dash" data-rail-open={railOpen}>
+      <Rail sessions={sessions} api={api} onClose={(): void => setRailOpen(false)} />
+      {railOpen ? <button className="dash__drawer-scrim" type="button" aria-label="Close sessions" onClick={(): void => setRailOpen(false)} /> : null}
 
       <div className="dash__main">
         <div className="dash__inner">
           <header className="dash__head">
+            <button className="dash__rail-toggle" type="button" aria-label="Show sessions" onClick={(): void => setRailOpen(true)}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h13A2.5 2.5 0 0 1 21 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5v-13ZM9 3v18" stroke="currentColor" strokeWidth="1.7" /></svg></button>
             <p className="dash__eyebrow">Nimbus</p>
             <h1 className="dash__title">What should change?</h1>
             <p className="dash__sub">
@@ -399,17 +402,6 @@ export function Dashboard({
             )}
 
             <p className="compose__foot-row">
-              <span className="compose__guide" data-thin={thin !== null}>
-                {thin === null
-                  ? 'Nimbus can act on this.'
-                  : thin === 'too_short'
-                    ? 'Say a little more about what should change.'
-                    : `Name the file, function or behaviour. ${
-                        shortBy === 1
-                          ? 'One more specific word'
-                          : `${String(shortBy)} more specific words`
-                      } and this is actionable.`}
-              </span>
 
               <span className="compose__count" data-over={tooLong}>
                 {String(task.length)} / {String(LIMITS.taskMaxChars)}

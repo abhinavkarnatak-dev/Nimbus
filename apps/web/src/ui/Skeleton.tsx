@@ -130,16 +130,24 @@ export function DashboardSkeleton(): React.JSX.Element {
       </aside>
 
       <div className="dash__main">
-        <div className="dash__inner">
+        <div className="dash-skeleton">
           <Loading what="Loading your sessions.">
-            <div className="skeleton-stack">
+            <div className="dash-skeleton__head">
               <Skeleton shape="pill" width="5rem" />
               <Skeleton shape="title" width="20rem" />
               <Skeleton shape="text" width="80%" />
             </div>
           </Loading>
 
-          <Skeleton shape="block" height="19rem" />
+          <div className="dash-skeleton__composer">
+            <Skeleton shape="line" width="42%" />
+            <Skeleton shape="text" width="78%" />
+            <Skeleton shape="text" width="64%" />
+            <div className="dash-skeleton__foot">
+              <Skeleton shape="pill" width="8rem" />
+              <Skeleton shape="button" width="5rem" />
+            </div>
+          </div>
         </div>
       </div>
     </div>

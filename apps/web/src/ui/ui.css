@@ -50,6 +50,7 @@
 }
 
 .button--danger {
+  --button-bg: var(--danger-hover);
   --button-fg: var(--danger-text);
   --button-border: var(--danger-border);
 }

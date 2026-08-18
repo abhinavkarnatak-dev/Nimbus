@@ -36,6 +36,7 @@ export interface ToolOutput {
   stdout?: string;
   stderr?: string;
   truncated?: boolean;
+  complete?: boolean;
   pause?: 'clarification' | 'approval';
   check?: CheckResult;
   outcome?: ToolOutcome;

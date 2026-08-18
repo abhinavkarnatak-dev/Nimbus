@@ -257,6 +257,23 @@ describe('chooseNextAction', () => {
     expect(sent).toContain('read_file src/auth/login.ts');
   });
 
+  it('forces a new plan after a repeated action', async () => {
+    const harness = await nodeHarness({ answers: { answers: [answer(READ_ACTION)] } });
+
+    await chooseNextAction({
+      state: harness.state,
+      context: 'the task',
+      registry: harness.registry,
+      router: harness.router,
+      history: ['read_file: same result (asking again tells you nothing. Do something else.)'],
+    });
+
+    const last = harness.text.calls[0]?.messages.at(-1);
+
+    expect(last?.role).toBe('user');
+    expect(last?.content).toContain('materially different next action');
+  });
+
   it('reads the arguments back out of the string the model wrote', async () => {
     const harness = await nodeHarness({ answers: { answers: [answer(READ_ACTION)] } });
 

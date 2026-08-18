@@ -273,3 +273,48 @@ describe('several problems at once', () => {
     expect(report.removedLines).toBe(2);
   });
 });
+
+describe('the diff each file carries', () => {
+  it('keeps the hunk header and every content line', () => {
+    const file = judge(editDiff()).files[0];
+
+    expect(file?.diff).toBe('@@ -1,2 +1,2 @@\n const a = 1;\n-const b = 2;\n+const b = 3;\n');
+    expect(file?.diffTruncated).toBe(false);
+  });
+
+  it('leaves out the file header, which the path already says', () => {
+    expect(judge(editDiff()).files[0]?.diff).not.toContain('diff --git');
+    expect(judge(editDiff()).files[0]?.diff).not.toContain('index 83db48f');
+  });
+
+  it('gives each file only its own diff', () => {
+    const report = judge(`${editDiff('src/a.ts')}${addDiff('src/b.ts', 'const b = 9;')}`);
+
+    expect(report.files[0]?.diff).toContain('const b = 3;');
+    expect(report.files[0]?.diff).not.toContain('const b = 9;');
+    expect(report.files[1]?.diff).toContain('const b = 9;');
+    expect(report.files[1]?.diff).not.toContain('const a = 1;');
+  });
+
+  it('redacts a credential rather than repeating it in the diff', () => {
+    const file = judge(
+      addDiff('src/config.ts', 'const t = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";'),
+    ).files[0];
+
+    expect(file?.diff).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123456789');
+    expect(file?.diff).toContain('[redacted]');
+  });
+
+  it('cuts a diff longer than the limit and says it did', () => {
+    const file = judge(manyLines(LIMITS.fileDiffMaxLines + 50)).files[0];
+
+    expect(file?.diffTruncated).toBe(true);
+    expect(file?.diff.split('\n')).toHaveLength(LIMITS.fileDiffMaxLines);
+  });
+
+  it('never sends a diff past the character limit', () => {
+    for (const file of judge(manyLines(LIMITS.fileDiffMaxLines + 50)).files) {
+      expect(file.diff.length).toBeLessThanOrEqual(LIMITS.fileDiffMaxChars);
+    }
+  });
+});

@@ -14,6 +14,26 @@ export function failingChecks(checks: readonly CheckResult[]): CheckResult[] {
   return checks.filter((check) => check.status === 'failed' || check.status === 'errored');
 }
 
+function hasCheckSinceLastEdit(state: AgentState): boolean {
+  if (state.toolEvents.length === 0) {
+    return state.checks.length > 0;
+  }
+
+  let lastEdit = -1;
+  let lastCheck = -1;
+
+  state.toolEvents.forEach((event, index) => {
+    if (event.tool === 'create_file' || event.tool === 'apply_patch') {
+      lastEdit = index;
+    }
+    if (event.tool === 'run_checks') {
+      lastCheck = index;
+    }
+  });
+
+  return lastCheck > lastEdit;
+}
+
 export function judgeCompletion(state: AgentState): CompletionVerdict {
   if (state.filesChanged.length === 0) {
     return {
@@ -24,7 +44,7 @@ export function judgeCompletion(state: AgentState): CompletionVerdict {
     };
   }
 
-  if (state.checks.length === 0) {
+  if (!hasCheckSinceLastEdit(state)) {
     return {
       finished: false,
       refusal: 'checks_not_run',

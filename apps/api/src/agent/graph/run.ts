@@ -55,6 +55,7 @@ export async function runAgent(input: RunInput): Promise<RunResult> {
       stopVerdict: { stop: true, reason: 'failed', detail: 'the run did not finish' },
       cloned: 0,
       steps: input.state.budgets.steps,
+      threw: error,
     };
   } finally {
     await tearDown(input, result);

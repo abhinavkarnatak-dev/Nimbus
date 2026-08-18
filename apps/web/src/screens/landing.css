@@ -57,7 +57,7 @@
   color: var(--text-faint);
 }
 
-.run {
+.hero-run {
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
   background: var(--surface-raised);
@@ -65,7 +65,7 @@
   overflow: hidden;
 }
 
-.run__bar {
+.hero-run__bar {
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -74,7 +74,7 @@
   background: var(--surface-sunken);
 }
 
-.run__dot {
+.hero-run__dot {
   width: 0.4375rem;
   height: 0.4375rem;
   border-radius: var(--radius-full);
@@ -82,7 +82,7 @@
   flex: none;
 }
 
-.run__repo {
+.hero-run__repo {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--text-secondary);
@@ -91,7 +91,7 @@
   white-space: nowrap;
 }
 
-.run__task {
+.hero-run__task {
   padding: var(--space-4);
   border-bottom: 1px solid var(--border-subtle);
   font-size: var(--text-sm);
@@ -99,11 +99,11 @@
   line-height: var(--leading-snug);
 }
 
-.run__steps {
+.hero-run__steps {
   display: grid;
 }
 
-.run__step {
+.hero-run__step {
   display: grid;
   grid-template-columns: 1.75rem 1fr auto;
   align-items: baseline;
@@ -115,34 +115,34 @@
   animation-delay: calc(var(--step-index) * 110ms);
 }
 
-.run__step:first-child {
+.hero-run__step:first-child {
   border-top: none;
 }
 
-.run__index {
+.hero-run__index {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   color: var(--text-faint);
 }
 
-.run__what {
+.hero-run__what {
   color: var(--text-secondary);
   min-width: 0;
 }
 
-.run__what strong {
+.hero-run__what strong {
   font-weight: var(--weight-medium);
   color: var(--text-primary);
 }
 
-.run__mark {
+.hero-run__mark {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   color: var(--text-faint);
   white-space: nowrap;
 }
 
-.run__out {
+.hero-run__out {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -153,11 +153,11 @@
   font-size: var(--text-sm);
 }
 
-.run__out strong {
+.hero-run__out strong {
   font-weight: var(--weight-medium);
 }
 
-.run__badge {
+.hero-run__badge {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   letter-spacing: var(--tracking-wide);
@@ -242,11 +242,11 @@
     width: 100%;
   }
 
-  .run__step {
+  .hero-run__step {
     grid-template-columns: 1.5rem 1fr;
   }
 
-  .run__mark {
+  .hero-run__mark {
     grid-column: 2;
   }
 }

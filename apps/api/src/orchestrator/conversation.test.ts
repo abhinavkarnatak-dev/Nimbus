@@ -1,4 +1,4 @@
-import { MessageIdSchema, type SessionMessage } from '@nimbus/contracts';
+import { MessageIdSchema, type ServerEvent, type SessionMessage } from '@nimbus/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { conversationShown } from '../agent/nodes/reason.js';
@@ -89,17 +89,27 @@ describe('a note the agent sends', () => {
 
     const sent = held.events.published.filter((one) => one.event.type === 'agent.message');
 
-    expect(sent).toHaveLength(1);
-    expect(sent[0]?.event).toMatchObject({
+    const note = sent
+      .map((one) => one.event)
+      .find(
+        (event): event is Extract<ServerEvent, { type: 'agent.message' }> =>
+          event.type === 'agent.message' && event.message.text === NOTE,
+      );
+
+    if (note === undefined) {
+      throw new Error('The agent note was not published.');
+    }
+
+    expect(note).toMatchObject({
       type: 'agent.message',
       message: { role: 'agent', text: NOTE },
     });
-    if (sent[0]?.event.type === 'agent.message') {
-      expect(sent[0].event.message.messageId).toMatch(/^msg_/);
-      expect(sent[0].event.message.messageId).toBe(
-        held.records.documents[0]?.messages[0]?.messageId,
-      );
-    }
+    expect(note.message.messageId).toMatch(/^msg_/);
+    expect(
+      held.records.documents[0]?.messages.some(
+        (message) => message.messageId === note.message.messageId,
+      ),
+    ).toBe(true);
   });
 
   it('is still there after a reload, as a turn from the agent', async () => {
@@ -111,22 +121,26 @@ describe('a note the agent sends', () => {
 
     const kept = held.records.documents[0]?.messages ?? [];
 
-    expect(kept).toHaveLength(1);
-    expect(kept[0]?.role).toBe('agent');
-    expect(kept[0]?.text).toBe(NOTE);
+    expect(kept.some((message) => message.role === 'agent' && message.text === NOTE)).toBe(true);
   });
 
-  it('is nothing at all when the agent never speaks', async () => {
+  it('still narrates the session when the agent does not send a progress note', async () => {
     const held = harness();
     await held.records.insert(sessionDocument());
 
     await held.orchestrator.tick();
     await settle();
 
-    expect(held.records.documents[0]?.messages).toHaveLength(0);
-    expect(held.events.published.filter((one) => one.event.type === 'agent.message')).toHaveLength(
-      0,
-    );
+    const messages = held.events.published
+      .map((one) => one.event)
+      .filter(
+        (event): event is Extract<ServerEvent, { type: 'agent.message' }> =>
+          event.type === 'agent.message',
+      )
+      .map((event) => event.message.text);
+
+    expect(messages.some((message) => message.startsWith("I'm checking"))).toBe(true);
+    expect(messages.some((message) => message.startsWith('Worked for '))).toBe(true);
   });
 
   it('does not stop the run when it cannot be kept', async () => {

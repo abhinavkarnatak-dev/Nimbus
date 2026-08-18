@@ -16,11 +16,12 @@ import {
   PullRequestResultSchema,
   RepositorySummarySchema,
   RiskLevelSchema,
+  RunStatusSchema,
+  DeliveryStatusSchema,
   SESSION_STATUSES,
   SessionDetailSchema,
   SessionMessageSchema,
   SessionSummarySchema,
-  TERMINAL_SESSION_STATUSES,
   ToolNameSchema,
   ToolOutcomeSchema,
   type ApprovalEffect,
@@ -36,6 +37,8 @@ import {
   type PullRequestResult,
   type RepositorySummary,
   type SessionDetail,
+  type RunStatus,
+  type DeliveryStatus,
   type SessionMessage,
   type SessionFailure,
   type SessionStatus,
@@ -61,10 +64,8 @@ export const MESSAGE_ID_PREFIX = 'msg';
 
 export const MAX_SESSION_MESSAGES = LIMITS.maxMessagesPerSession;
 
-const terminalStatuses = new Set<string>(TERMINAL_SESSION_STATUSES);
-
 export const ACTIVE_SESSION_STATUSES: readonly SessionStatus[] = SESSION_STATUSES.filter(
-  (status) => !terminalStatuses.has(status),
+  (status) => ['queued', 'provisioning', 'indexing', 'working', 'awaiting_user', 'validating', 'pushing'].includes(status),
 );
 
 export interface SessionRepositoryDocument {
@@ -167,9 +168,15 @@ export interface SessionDocument {
   sessionId: string;
   userId: string;
   status: SessionStatus;
+  /** Status of the most recently executed turn. Conversation records remain available. */
+  runStatus?: RunStatus | null;
+  deliveryStatus?: DeliveryStatus | null;
+  manualPrStates?: Record<string, 'open' | 'merged' | 'closed'>;
   repository: SessionRepositoryDocument;
   branch: string | null;
   baseCommitSha: string | null;
+  /** Optional only while documents created before session titles are still in Mongo. */
+  title?: string;
   task: string;
   model: ModelSelection | null;
   clarificationQuestion: string | null;
@@ -204,7 +211,7 @@ export function sessionsCollection(db: Db): Collection<SessionDocument> {
 }
 
 export function isActiveSessionStatus(status: SessionStatus): boolean {
-  return !terminalStatuses.has(status);
+  return ACTIVE_SESSION_STATUSES.includes(status);
 }
 
 export function toRepositorySummary(document: SessionRepositoryDocument): RepositorySummary {
@@ -256,6 +263,10 @@ export function toSessionSummary(document: SessionDocument): SessionSummary {
   return SessionSummarySchema.parse({
     sessionId: document.sessionId,
     status: document.status,
+    runStatus: document.runStatus ?? null,
+    deliveryStatus: document.deliveryStatus ?? null,
+    manualPrStates: document.manualPrStates ?? {},
+    title: document.title ?? document.task,
     task: document.task,
     repository: toRepositorySummary(document.repository),
     branch: document.branch,
@@ -348,6 +359,16 @@ export const sessionModel: ModelDefinition = {
         sessionId: { bsonType: 'string', pattern: publicIdPattern(SESSION_ID_PREFIX) },
         userId: { bsonType: 'string', pattern: publicIdPattern('usr') },
         status: { enum: [...SESSION_STATUSES] },
+        runStatus: { bsonType: ['string', 'null'], enum: [...RunStatusSchema.options, null] },
+        deliveryStatus: {
+          bsonType: ['string', 'null'],
+          enum: [...DeliveryStatusSchema.options, null],
+        },
+        manualPrStates: {
+          bsonType: 'object',
+          additionalProperties: { enum: ['open', 'merged', 'closed'] },
+        },
+        title: { bsonType: 'string', minLength: 1, maxLength: 120 },
         repository: {
           bsonType: 'object',
           additionalProperties: false,
@@ -467,13 +488,15 @@ export const sessionModel: ModelDefinition = {
           items: {
             bsonType: 'object',
             additionalProperties: false,
-            required: ['path', 'changeKind', 'addedLines', 'removedLines'],
+            required: ['path', 'changeKind', 'addedLines', 'removedLines', 'diff', 'diffTruncated'],
             properties: {
               path: { bsonType: 'string', minLength: 1, maxLength: LIMITS.pathMaxChars },
               changeKind: { enum: [...FileChangeKindSchema.options] },
               previousPath: { bsonType: 'string', minLength: 1, maxLength: LIMITS.pathMaxChars },
               addedLines: { bsonType: 'number', minimum: 0 },
               removedLines: { bsonType: 'number', minimum: 0 },
+              diff: { bsonType: 'string', maxLength: LIMITS.fileDiffMaxChars },
+              diffTruncated: { bsonType: 'bool' },
             },
           },
         },

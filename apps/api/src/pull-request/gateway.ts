@@ -17,6 +17,8 @@ import {
 
 export const PULL_REQUEST_SCOPE = 'pullRequest';
 export const TITLE_MAX_CHARS = 72;
+export const PR_CREATE_ATTEMPTS = 3;
+export const PR_CREATE_RETRY_MS = 1_000;
 
 export const PULL_REQUEST_ERROR_CODES = ['PULL_REQUEST_FAILED', 'PULL_REQUEST_LOST'] as const;
 
@@ -58,6 +60,7 @@ export interface TrustedPullRequestGatewayOptions {
   mail: MailService;
   logger?: Logger;
   now?: () => Date;
+  wait?: (ms: number) => Promise<void>;
 }
 
 export function titleFor(task: string): string {
@@ -74,9 +77,12 @@ export class TrustedPullRequestGateway implements PullRequestGateway {
 
   private readonly now: () => Date;
 
+  private readonly wait: (ms: number) => Promise<void>;
+
   constructor(options: TrustedPullRequestGatewayOptions) {
     this.options = options;
     this.now = options.now ?? ((): Date => new Date());
+    this.wait = options.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   private describe(pullRequest: OpenPullRequest, branch: string): PullRequestResult {
@@ -126,38 +132,50 @@ export class TrustedPullRequestGateway implements PullRequestGateway {
         return this.describe(existing, request.branch);
       }
 
-      let opened: OpenPullRequest;
-
-      try {
-        opened = await client.create({
+      const input = {
+        branch: request.branch,
+        baseBranch: request.defaultBranch,
+        title: titleFor(request.task),
+        body: buildPullRequestBody({
+          task: request.task,
+          summary: request.summary,
           branch: request.branch,
-          baseBranch: request.defaultBranch,
-          title: titleFor(request.task),
-          body: buildPullRequestBody({
-            task: request.task,
-            summary: request.summary,
-            branch: request.branch,
-            baseCommitSha: request.baseCommitSha,
-            report: request.report,
-            checks: request.checks,
-          }),
-        });
-      } catch (error) {
-        if (!(error instanceof PullRequestExistsError)) {
-          throw error;
+          baseCommitSha: request.baseCommitSha,
+          report: request.report,
+          checks: request.checks,
+        }),
+      };
+      let opened: OpenPullRequest | null = null;
+
+      for (let attempt = 1; attempt <= PR_CREATE_ATTEMPTS; attempt += 1) {
+        try {
+          opened = await client.create(input);
+          break;
+        } catch (error) {
+          const winner = await client.findByBranch(request.branch).catch(() => null);
+
+          if (winner !== null) {
+            return this.describe(winner, request.branch);
+          }
+
+          if (error instanceof PullRequestExistsError) {
+            throw new PullRequestError(
+              'PULL_REQUEST_LOST',
+              'A pull request already exists but could not be found.',
+              { cause: error },
+            );
+          }
+
+          if (attempt === PR_CREATE_ATTEMPTS) {
+            throw error;
+          }
+
+          await this.wait(PR_CREATE_RETRY_MS);
         }
+      }
 
-        const winner = await client.findByBranch(request.branch);
-
-        if (winner === null) {
-          throw new PullRequestError(
-            'PULL_REQUEST_LOST',
-            'A pull request already exists but could not be found.',
-            { cause: error },
-          );
-        }
-
-        return this.describe(winner, request.branch);
+      if (opened === null) {
+        throw new PullRequestError('PULL_REQUEST_FAILED', 'The pull request could not be opened.');
       }
 
       await this.notify(request, opened);

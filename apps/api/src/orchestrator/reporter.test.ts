@@ -143,14 +143,14 @@ describe('a note from the agent', () => {
 
     await reporter.said(said('I found the redirect.'));
 
-    expect(events.published[0]?.event).toStrictEqual({
+    expect(events.published.map((one) => one.event.type)).toStrictEqual([
+      'agent.message.delta',
+      'agent.message.delta',
+      'agent.message',
+    ]);
+    expect(events.published.at(-1)?.event).toStrictEqual({
       type: 'agent.message',
-      message: {
-        messageId: MESSAGE_ID,
-        role: 'agent',
-        text: 'I found the redirect.',
-        sentAt: AT.toISOString(),
-      },
+      message: { messageId: MESSAGE_ID, role: 'agent', text: 'I found the redirect.', sentAt: AT.toISOString() },
     });
   });
 
@@ -220,9 +220,13 @@ describe('reporting to more than one place', () => {
 
     await both.said(said('I found the redirect.', 2));
 
-    expect(events.typesFor(held.sessionId)).toStrictEqual(['agent.message']);
+    expect(events.typesFor(held.sessionId)).toStrictEqual([
+      'agent.message.delta',
+      'agent.message.delta',
+      'agent.message',
+    ]);
     expect(held.records.documents[0]?.messages).toHaveLength(1);
-    const event = events.published[0]?.event;
+    const event = events.published.at(-1)?.event;
     expect(event?.type).toBe('agent.message');
     if (event?.type === 'agent.message') {
       expect(event.message.messageId).toBe(held.records.documents[0]?.messages[0]?.messageId);

@@ -16,10 +16,10 @@ describe('the tools that are offered', () => {
     }
   });
 
-  it('offers eleven tools, because semantic search is not built', async () => {
+  it('offers twelve tools, because semantic search is not built', async () => {
     const { registry } = await harness();
 
-    expect(registry.names()).toHaveLength(11);
+    expect(registry.names()).toHaveLength(12);
     expect(registry.has('semantic_search')).toBe(false);
   });
 
@@ -97,6 +97,7 @@ describe('what every tool must have', () => {
     ['run_command', 'run_checks'],
     ['run_checks', 'run_command'],
     ['message_user', 'wait_for_user'],
+    ['finish_task', 'wait_for_user'],
   ])('%s names %s, so a model can tell them apart', (name, sibling) => {
     const tool = BUILT_IN_TOOLS.find((one) => one.name === name);
     expect(tool?.description).toContain(sibling);
@@ -504,5 +505,18 @@ describe('what reaches the logs', () => {
 
     await registry.invoke({ toolCallId: 'call_19', tool: 'git_status', input: {} });
     expect(logs()).toContain(SESSION_ID);
+  });
+});
+
+describe('the workspace status', () => {
+  it('reports the patch held by the sandbox rather than relying on a shell implementation', async () => {
+    const { registry, sandbox } = await harness();
+
+    await sandbox.writeFile('src/new.ts', 'export const answer = 42;\n');
+    const result = await registry.invoke({ toolCallId: 'call_20', tool: 'git_status', input: {} });
+
+    expect(result.output?.summary).toBe('files changed: 1');
+    expect(result.output?.text).toContain('?? src/new.ts');
+    expect(result.output?.paths).toEqual(['src/new.ts']);
   });
 });

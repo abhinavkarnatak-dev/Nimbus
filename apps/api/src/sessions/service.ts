@@ -17,7 +17,6 @@ import {
   type PostMessageResponse,
 } from '@nimbus/contracts';
 
-import { tooThinToJudge } from '../agent/nodes/scope.js';
 import { ApprovalError, InMemoryApprovals, type ApprovalStore } from '../agent/policy/approvals.js';
 import type { AttachmentRecords } from '../attachments/repository.js';
 import { DEFAULT_LIMITS } from '../config/limits.js';
@@ -26,6 +25,7 @@ import type { CancelAnnouncer } from '../orchestrator/cancellation.js';
 import {
   SESSION_ID_PREFIX,
   isActiveSessionStatus,
+  toSessionMessage,
   toSessionDetail,
   toSessionSummary,
   type SessionDocument,
@@ -38,6 +38,7 @@ import type { ProviderKeyDirectory } from '../llm/sources.js';
 import type { Logger } from '../logging/logger.js';
 import { SelectableModelCatalogue, catalogueFor } from '../routing/selection.js';
 import type { SessionRecords } from './repository.js';
+import type { SessionTitleGenerator } from './title.js';
 
 export const DEFAULT_MAX_STEPS = DEFAULT_LIMITS.maxAgentSteps;
 
@@ -59,6 +60,7 @@ export interface AgentSessionServiceOptions {
   maxSteps?: number;
   now?: () => Date;
   providerKeys: ProviderKeyDirectory;
+  titles?: SessionTitleGenerator;
 }
 
 export const APPROVAL_ERROR_TO_API: Readonly<Record<string, ErrorCode>> = {
@@ -130,6 +132,7 @@ export class AgentSessionService {
   readonly #now: () => Date;
 
   readonly #providerKeys: ProviderKeyDirectory;
+  readonly #titles: SessionTitleGenerator | null;
 
   constructor(options: AgentSessionServiceOptions) {
     this.#records = options.records;
@@ -143,19 +146,11 @@ export class AgentSessionService {
     this.#notifyCancelled = options.notifyCancelled ?? null;
     this.#now = options.now ?? ((): Date => new Date());
     this.#providerKeys = options.providerKeys;
+    this.#titles = options.titles ?? null;
   }
 
   async create(userId: string, body: CreateSessionBody): Promise<CreatedSession> {
     const repository = await this.#repositoryFor(userId, body.repositoryId);
-
-    const thin = tooThinToJudge(body.task);
-
-    if (thin !== null) {
-      throw new ApiError(
-        'TASK_TOO_BROAD',
-        'Describe what you would like changed, and roughly where in the repository it lives.',
-      );
-    }
 
     const catalogue = await this.#catalogue(userId);
 
@@ -166,7 +161,11 @@ export class AgentSessionService {
     const model = chosenModel(body.model, catalogue);
     const attachments = await this.#attachmentsFor(userId, body.attachmentIds);
     const at = this.#now();
-    const document = this.#newDocument({ userId, body, repository, attachments, model, at });
+    const title =
+      this.#titles === null
+        ? body.task
+        : await this.#titles.generate({ userId, task: body.task, model });
+    const document = this.#newDocument({ userId, body, repository, attachments, model, title, at });
 
     const outcome = await this.#records.insert(document);
 
@@ -231,6 +230,26 @@ export class AgentSessionService {
     return toSessionSummary(stopped);
   }
 
+  async rename(userId: string, sessionId: string, title: string): Promise<SessionSummary> {
+    const renamed = await this.#records.rename(userId, sessionId, title, this.#now());
+    if (renamed === null) {
+      throw new ApiError('NOT_FOUND', 'We could not find that session.');
+    }
+    return toSessionSummary(renamed);
+  }
+
+  async setPullRequestState(userId: string, sessionId: string, number: number, state: 'open' | 'merged' | 'closed'): Promise<SessionSummary> {
+    const written = await this.#records.setPullRequestState(userId, sessionId, number, state, this.#now());
+    if (written === null) throw new ApiError('NOT_FOUND', 'We could not find that session.');
+    return toSessionSummary(written);
+  }
+
+  async remove(userId: string, sessionId: string): Promise<void> {
+    if (!(await this.#records.remove(userId, sessionId))) {
+      throw new ApiError('NOT_FOUND', 'We could not find that session.');
+    }
+  }
+
   async #announceCancelled(session: SessionDocument, at: Date): Promise<void> {
     await this.#safely(session, 'tell the worker', async () => {
       await this.#cancellations?.announce(session.sessionId, at);
@@ -277,6 +296,10 @@ export class AgentSessionService {
       );
     }
 
+    // Clarifications are normal conversation turns, so an answer must survive
+    // reloads just like a regular follow-up message.
+    await this.#records.addMessage(userId, sessionId, text, this.#now());
+
     this.#logger.info({ sessionId }, 'a question was answered');
     return toSessionSummary(await this.#owned(userId, sessionId));
   }
@@ -287,16 +310,32 @@ export class AgentSessionService {
     text: string,
     idempotencyKey = newPrefixedId('idk'),
   ): Promise<SaidMessageResult> {
-    await this.#owned(userId, sessionId);
-    const written = await this.#records.writeUserMessage(userId, sessionId, {
+    const document = await this.#owned(userId, sessionId);
+    const previous = document.messages.at(-1);
+    if (previous?.role === 'user' && previous.text === text) {
+      return {
+        message: toSessionMessage(sessionId, previous, document.messages.length - 1),
+        created: false,
+      };
+    }
+    const input = {
       messageId: newPrefixedId('msg'),
       text,
       sentAt: this.#now(),
       idempotencyKey,
-    });
+    };
+    const written =
+      !isActiveSessionStatus(document.status)
+        ? await this.#records.reopenWithMessage(
+            userId,
+            sessionId,
+            input,
+            document.pullRequest?.headSha ?? document.baseCommitSha,
+          )
+        : await this.#records.writeUserMessage(userId, sessionId, input);
 
     if (written.outcome === 'inactive') {
-      throw new ApiError('SESSION_NOT_ACTIVE', 'That session has already finished.');
+      throw new ApiError('SESSION_NOT_ACTIVE', 'Nimbus is working on this conversation right now.');
     }
 
     if (written.outcome === 'conflict') {
@@ -311,6 +350,14 @@ export class AgentSessionService {
         'CONFLICT',
         'That session has reached the maximum number of user messages.',
       );
+    }
+
+    if (
+      written.outcome === 'created' &&
+      document.status === 'awaiting_user' &&
+      document.clarificationQuestion === null
+    ) {
+      await this.#records.resumeAfterMessage(userId, sessionId, this.#now());
     }
 
     return {
@@ -447,12 +494,15 @@ export class AgentSessionService {
     repository: RepositorySummary;
     attachments: SessionDocument['attachments'];
     model: ModelSelection | null;
+    title: string;
     at: Date;
   }): SessionDocument {
     return {
       sessionId: newPrefixedId(SESSION_ID_PREFIX),
       userId: input.userId,
       status: 'queued',
+      runStatus: 'queued',
+      deliveryStatus: null,
       repository: {
         repositoryId: input.repository.repositoryId,
         owner: input.repository.owner,
@@ -464,12 +514,20 @@ export class AgentSessionService {
       },
       branch: null,
       baseCommitSha: null,
+      title: input.title,
       task: input.body.task,
       model: input.model,
       clarificationQuestion: null,
       clarificationAnswer: null,
       waitingSince: null,
-      messages: [],
+      messages: [
+        {
+          messageId: newPrefixedId('msg'),
+          role: 'user',
+          text: input.body.task,
+          sentAt: input.at,
+        },
+      ],
       messageReceipts: [],
       attachments: input.attachments,
       idempotencyKey: input.body.idempotencyKey,

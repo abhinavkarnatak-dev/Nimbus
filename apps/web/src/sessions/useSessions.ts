@@ -17,6 +17,7 @@ export interface SessionsHandle {
   activeSessionId: SessionId | null;
   models: readonly SelectableModel[];
   refresh: () => Promise<void>;
+  replaceSession: (session: SessionSummary) => void;
 }
 
 export function useSessions(api: ApiClient, enabled: boolean): SessionsHandle {
@@ -44,6 +45,12 @@ export function useSessions(api: ApiClient, enabled: boolean): SessionsHandle {
     }
   }, [api]);
 
+  const replaceSession = useCallback((session: SessionSummary): void => {
+    setSessions((current) =>
+      current.map((held) => (held.sessionId === session.sessionId ? session : held)),
+    );
+  }, []);
+
   useEffect(() => {
     if (!enabled) {
       return;
@@ -51,5 +58,5 @@ export function useSessions(api: ApiClient, enabled: boolean): SessionsHandle {
     void refresh();
   }, [enabled, refresh]);
 
-  return { state, sessions, activeSessionId, models, refresh };
+  return { state, sessions, activeSessionId, models, refresh, replaceSession };
 }

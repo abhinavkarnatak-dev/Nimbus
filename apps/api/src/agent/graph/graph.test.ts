@@ -105,6 +105,23 @@ describe('a whole run, with nobody calling a node by hand', () => {
 
     expect(harness.sandbox.status().state).toBe('terminated');
   });
+
+  it('shows the next model call the full result of the preceding tool', async () => {
+    const harness = await graphHarness({
+      budgets: { maxSteps: 2 },
+      answers: [CLEAR_SCOPE, action('list_tree', {}), action('read_file', { path: 'README.md' })],
+    });
+
+    await runAgent(harness);
+
+    const secondAction = harness.text.calls[2];
+    const history = secondAction?.messages.find(
+      (message) =>
+        message.role === 'system' && message.content.startsWith('What has happened so far'),
+    );
+
+    expect(history?.content).toContain('README.md (file)');
+  });
 });
 
 describe('a task nobody could act on', () => {
@@ -142,6 +159,68 @@ describe('a task nobody could act on', () => {
     await runAgent(harness);
 
     expect(harness.sandbox.status().state).toBe('terminated');
+  });
+
+  it('stops at a tool clarification instead of reasoning again', async () => {
+    const question = 'Which file should I change?';
+    const harness = await graphHarness({
+      answers: [CLEAR_SCOPE, action('wait_for_user', { reason: 'clarification', question })],
+    });
+
+    const result = await runAgent(harness);
+
+    expect(result.state.phase).toBe('clarifying');
+    expect(result.state.clarificationQuestion).toBe(question);
+    expect(harness.text.calls).toHaveLength(2);
+  });
+});
+
+describe('a requested change that is already present', () => {
+  it('finishes after reporting the existing file instead of repeatedly answering', async () => {
+    const harness = await graphHarness({
+      task: 'create a simple hello world py file',
+      files: { 'hello.py': 'print("Hello, World!")\n' },
+      answers: [
+        CLEAR_SCOPE,
+        action('read_file', { path: 'hello.py' }),
+        action('finish_task', {
+          text: 'The file hello.py already exists and contains the hello world print statement.',
+        }),
+      ],
+    });
+
+    const result = await runAgent(harness);
+
+    expect(result.state.stopReason).toBe('completed');
+    expect(result.state.phase).toBe('finished');
+    expect(harness.text.calls).toHaveLength(3);
+  });
+});
+
+describe('a failed check is a delivery gate', () => {
+  it('does not let finish_task turn a failed verification into a success', async () => {
+    const harness = await graphHarness({
+      answers: [
+        CLEAR_SCOPE,
+        action('finish_task', { text: 'The source file was created successfully.' }),
+      ],
+    });
+    harness.state = parseState({
+      ...harness.state,
+      filesChanged: ['src/routing/redirect.ts'],
+      checks: [{ name: 'Java compile', kind: 'build', status: 'failed', summary: 'javac: missing symbol' }],
+      toolEvents: [
+        { step: 1, tool: 'apply_patch', outcome: 'ok', summary: 'changed source', atMs: 1 },
+        { step: 2, tool: 'run_checks', outcome: 'failed', summary: 'javac: missing symbol', atMs: 2 },
+      ],
+    });
+
+    const result = await runAgent(harness);
+
+    expect(result.state.stopReason).not.toBe('completed');
+    expect(result.patch).toBeNull();
+    expect(result.state.toolEvents.some((event) => event.tool === 'finish_task')).toBe(false);
+    expect(result.state.checks.some((check) => check.status === 'failed')).toBe(true);
   });
 });
 
@@ -235,16 +314,17 @@ describe('a model that will not converge', () => {
     expect(result.patch).toBeNull();
   });
 
-  it('is stopped when it proposes the same failing thing twice', async () => {
+  it('stops instead of asking the person to recover from a repeated failing action', async () => {
     const missing = action('read_file', { path: 'src/auth/nowhere.ts' });
     const harness = await graphHarness({ answers: [CLEAR_SCOPE, missing, missing, missing] });
 
     const result = await runAgent(harness);
 
     expect(result.state.stopReason).toBe('repeated_action');
+    expect(result.state.toolEvents.filter((event) => event.tool === 'read_file')).toHaveLength(1);
   });
 
-  it('is stopped when it keeps asking for the same file it already has', async () => {
+  it('stops instead of asking the person to recover from a repeated successful action', async () => {
     const harness = await graphHarness({
       budgets: { maxSteps: 20 },
       answers: [CLEAR_SCOPE, READ, READ, READ, READ, READ, READ],
@@ -254,6 +334,56 @@ describe('a model that will not converge', () => {
 
     expect(result.state.stopReason).toBe('repeated_action');
     expect(result.steps).toBeLessThan(20);
+  });
+
+  it('blocks an unchanged repeat before it becomes another visible tool run', async () => {
+    const harness = await graphHarness({
+      answers: [CLEAR_SCOPE, READ, READ, PATCH, CHECKS, COMMIT],
+    });
+
+    const result = await runAgent(harness);
+
+    expect(result.state.stopReason).toBe('completed');
+    expect(result.state.toolEvents.filter((event) => event.tool === 'read_file')).toHaveLength(1);
+    expect(result.state.toolEvents.map((event) => event.tool)).toEqual([
+      'read_file',
+      'apply_patch',
+      'run_checks',
+      'prepare_commit',
+    ]);
+  });
+
+  it('does not package a patch until every required check has passed', async () => {
+    const earlyCommit = action('prepare_commit', { summary: 'too early' });
+    const harness = await graphHarness({
+      answers: [CLEAR_SCOPE, READ, PATCH, earlyCommit, CHECKS, COMMIT],
+    });
+
+    const result = await runAgent(harness);
+
+    expect(result.state.stopReason).toBe('completed');
+    expect(result.state.toolEvents.map((event) => event.tool)).toEqual([
+      'read_file',
+      'apply_patch',
+      'run_checks',
+      'prepare_commit',
+    ]);
+  });
+
+  it('packages a passing patch without asking the model to choose another check', async () => {
+    const harness = await graphHarness({
+      answers: [CLEAR_SCOPE, READ, PATCH, CHECKS],
+    });
+
+    const result = await runAgent(harness);
+
+    expect(result.state.stopReason).toBe('completed');
+    expect(result.state.toolEvents.map((event) => event.tool)).toEqual([
+      'read_file',
+      'apply_patch',
+      'run_checks',
+      'prepare_commit',
+    ]);
   });
 
   it('tears the sandbox down when a budget runs out', async () => {

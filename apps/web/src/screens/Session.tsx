@@ -4,6 +4,7 @@ import {
   CancelSessionResponseSchema,
   CreateSessionResponseSchema,
   PostMessageResponseSchema,
+  SessionSummarySchema,
   type ApprovalDecision,
   type SessionId,
 } from '@nimbus/contracts';
@@ -12,13 +13,24 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 
 import type { ApiClient } from '../api/client.js';
 import { ApiError, NetworkError } from '../api/errors.js';
-import { ROUTE_PATHS } from '../app/routes.js';
-import { plainText, safeHref } from '../render/safe.js';
-import { answered, decided } from '../sessions/live.js';
+import { newPrefixedId } from '../lib/id.js';
+import { plainText } from '../render/safe.js';
+import { answered, decided, type LiveSession } from '../sessions/live.js';
+import type { ManualPrState } from '../sessions/Panels.js';
+import {
+  ChangesPane,
+  ChecksPane,
+  ProgressPane,
+  PullRequestPane,
+  ShellPane,
+} from '../sessions/Panels.js';
+import { Rail } from '../sessions/Rail.js';
 import { isLive, statusWords, toneFor } from '../sessions/status.js';
+import { SESSION_TABS, TAB_WORDS, tabCount, type SessionTab } from '../sessions/tabs.js';
 import type { LiveSessionHandle } from '../sessions/useLiveSession.js';
+import type { SessionsHandle } from '../sessions/useSessions.js';
 import { Button } from '../ui/Button.js';
-import { Loading, Skeleton } from '../ui/Skeleton.js';
+import { Skeleton } from '../ui/Skeleton.js';
 
 const WIRE_WORDS: Readonly<Record<string, string>> = {
   idle: 'offline',
@@ -50,25 +62,84 @@ function actProblem(error: unknown): string {
   return known[error.code] ?? 'That did not work. Try again.';
 }
 
+function paneFor(tab: SessionTab, live: LiveSession, prStates: Record<number, ManualPrState>, onPrState: (number: number, state: ManualPrState) => void): React.JSX.Element {
+  if (tab === 'progress') {
+    return <ProgressPane live={live} />;
+  }
+  if (tab === 'changes') {
+    return <ChangesPane live={live} />;
+  }
+  if (tab === 'checks') {
+    return <ChecksPane live={live} />;
+  }
+  if (tab === 'shell') {
+    return <ShellPane live={live} />;
+  }
+  return <PullRequestPane live={live} states={prStates} onState={onPrState} />;
+}
+
 export interface SessionScreenProps {
   api: ApiClient;
   sessionId: SessionId;
   view: LiveSessionHandle;
+  sessions: SessionsHandle;
 }
 
-export function Session({ api, sessionId, view }: SessionScreenProps): React.JSX.Element {
+export function Session({ api, sessionId, view, sessions }: SessionScreenProps): React.JSX.Element {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [tab, setTab] = useState<SessionTab>('progress');
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [railOpen, setRailOpen] = useState(false);
+  const [clock, setClock] = useState(() => Date.now());
+  const [prStates, setPrStates] = useState<Record<number, ManualPrState>>({});
   const bottom = useRef<HTMLDivElement>(null);
 
   const detail = view.detail;
   const live = view.live;
   const running = live !== null && isLive(live.status);
+    // A session is a durable conversation. Only an actively executing turn is
+    // blocked; completed and failed turns immediately accept another request.
+    const canMessage = true;
+    const composerDisabled = busy || (running && live?.question === null);
+  const refreshSessions = sessions.refresh;
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: 'end' });
   }, [live?.messages.length, live?.approval, live?.question]);
+
+  useEffect(() => {
+    void refreshSessions();
+  }, [live?.status, refreshSessions]);
+
+  useEffect(() => {
+    if (detail === null || live === null) return;
+    const held = sessions.sessions.find((session) => session.sessionId === detail.sessionId);
+    if (held === undefined) return;
+    if (
+      held.status === live.status &&
+      held.runStatus === live.runStatus &&
+      held.deliveryStatus === live.deliveryStatus &&
+      held.pullRequest?.number === live.pullRequest?.number &&
+      held.pullRequest?.headSha === live.pullRequest?.headSha &&
+      held.lastActivityAt === (live.messages.at(-1)?.sentAt ?? held.lastActivityAt)
+    ) return;
+    sessions.replaceSession({
+      ...held,
+      status: live.status,
+      runStatus: live.runStatus,
+      deliveryStatus: live.deliveryStatus,
+      pullRequest: live.pullRequest,
+      lastActivityAt: live.messages.at(-1)?.sentAt ?? held.lastActivityAt,
+    });
+  }, [detail, live, sessions.replaceSession, sessions.sessions]);
+
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
+    return (): void => window.clearInterval(timer);
+  }, [running]);
 
   if (view.load === 'missing') {
     return (
@@ -84,17 +155,12 @@ export function Session({ api, sessionId, view }: SessionScreenProps): React.JSX
 
   if (detail === null || live === null) {
     return (
-      <div className="container">
-        <section className="placeholder">
-          <Loading what="Loading this session.">
-            <div className="skeleton-stack">
-              <Skeleton shape="pill" width="6rem" />
-              <Skeleton shape="title" width="60%" />
-              <Skeleton shape="block" height="12rem" />
-              <Skeleton shape="block" height="4rem" />
-            </div>
-          </Loading>
-        </section>
+      <div className="run run--loading" aria-label="Loading session">
+        <Rail sessions={sessions} openSessionId={sessionId} api={api} />
+        <div className="work">
+          <header className="run__head"><div className="run__what"><Skeleton shape="line" width="42%" /><Skeleton shape="line" width="28%" /></div></header>
+          <section className="chat"><div className="thread"><div className="thread__inner session-skeleton"><Skeleton shape="line" width="58%" /><Skeleton shape="block" height="7rem" /><Skeleton shape="line" width="42%" /></div></div></section>
+        </div>
       </div>
     );
   }
@@ -113,11 +179,20 @@ export function Session({ api, sessionId, view }: SessionScreenProps): React.JSX
       if (live.question === null) {
         const posted = await api.post(
           `/sessions/${sessionId}/messages`,
-          { message: said },
+          { message: said, idempotencyKey: newPrefixedId('idk') },
           PostMessageResponseSchema,
         );
 
-        view.change((held) => ({ ...held, messages: [...held.messages, posted.message] }));
+        view.change((held) => ({
+          ...held,
+          messages: [...held.messages, posted.message],
+          ...(held.status === 'awaiting_user' && held.question === null
+            ? {
+                status: 'queued',
+                progress: { ...held.progress, currentActivity: 'queued for your follow-up' },
+              }
+            : {}),
+        }));
       } else {
         AnswerSessionBodySchema.parse({ message: said });
 
@@ -186,200 +261,392 @@ export function Session({ api, sessionId, view }: SessionScreenProps): React.JSX
     }
   };
 
-  const prUrl = live.pullRequest === null ? null : safeHref(live.pullRequest.url);
+  const openPullRequest = (): void => {
+    setTab('pull_request');
+    setInspectorOpen(true);
+  };
+
+  const setPrState = (number: number, state: ManualPrState): void => {
+    setPrStates((held) => {
+      const next = { ...held, [number]: state };
+      return next;
+    });
+    void api.patch(`/sessions/${sessionId}/pull-request-state`, { number, state }, SessionSummarySchema)
+      .then((saved) => setPrStates(saved.manualPrStates as Record<number, ManualPrState>))
+      .catch(() => {
+        void view.refresh();
+      });
+  };
+
+  useEffect(() => {
+    setPrStates(detail?.manualPrStates as Record<number, ManualPrState> ?? {});
+  }, [detail?.manualPrStates]);
+
+  const elapsedSinceLastUser = (at: number): number => {
+    const last = [...live.messages.slice(0, at)]
+      .reverse()
+      .find((message) => message.role === 'user');
+    return Math.max(
+      1,
+      Math.round(
+        (Date.parse(live.messages[at]?.sentAt ?? '') - Date.parse(last?.sentAt ?? '')) / 1_000,
+      ),
+    );
+  };
+  const prLines = (message: string): { added: string; removed: string } | null => {
+    const matched = /\+(\d+)\s+−(\d+)\s+lines/.exec(message);
+    return matched === null ? null : { added: matched[1] ?? '0', removed: matched[2] ?? '0' };
+  };
 
   return (
-    <div className="run">
-      <header className="run__head">
-        <a className="run__back button button--quiet" href={ROUTE_PATHS.dashboard}>
-          &larr; Sessions
-        </a>
+      <div className="run" data-rail-open={railOpen}>
+      <Rail sessions={sessions} openSessionId={sessionId} api={api} prStates={{ [sessionId]: live?.pullRequest === null ? 'open' : prStates[live.pullRequest.number] ?? 'open' }} onClose={(): void => setRailOpen(false)} />
+      {railOpen || inspectorOpen ? <button className="run__drawer-scrim" type="button" aria-label="Close open panel" onClick={(): void => { setRailOpen(false); setInspectorOpen(false); }} /> : null}
 
-        <div className="run__what">
-          <p className="run__task">{plainText(detail.task, 200)}</p>
-          <p className="run__where">
-            {detail.repository.owner}/{detail.repository.name}
-            {live.progress.maxSteps > 0
-              ? ` · step ${String(live.progress.step)} of ${String(live.progress.maxSteps)}`
-              : ''}
-          </p>
-        </div>
+      <div className="work">
+        <header className="run__head">
+          <button className="run__rail-toggle" type="button" aria-label="Show sessions" onClick={(): void => { setRailOpen((open) => !open); setInspectorOpen(false); }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h13A2.5 2.5 0 0 1 21 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5v-13ZM9 3v18" stroke="currentColor" strokeWidth="1.7" /></svg></button>
+          <div className="run__what">
+            <p className="run__task">{plainText(detail.title, 100)}</p>
 
-        <div className="run__tools">
-          <span className="status" data-tone={toneFor(live.status)}>
-            <span className="status__dot" aria-hidden="true" />
-            {statusWords(live.status)}
-          </span>
+            <p className="run__where">
+              <svg className="run__github" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38l-.01-1.49c-2.23.49-2.7-.95-2.7-.95-.36-.93-.89-1.18-.89-1.18-.73-.5.06-.49.06-.49.81.06 1.23.83 1.23.83.72 1.24 1.89.88 2.35.67.07-.52.28-.88.51-1.08-1.78-.2-3.65-.89-3.65-3.96 0-.88.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.12 0 0 .68-.22 2.2.82A7.67 7.67 0 0 1 8 4.8c.68 0 1.37.09 2.01.27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.52.56.83 1.27.83 2.15 0 3.08-1.87 3.75-3.66 3.95.29.25.54.73.54 1.48l-.01 2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z" />
+              </svg>
+              {detail.repository.owner}/{detail.repository.name}
+            </p>
+          </div>
 
-          {running ? (
-            <span className="wire" data-state={view.connection} aria-live="polite">
-              <span className="wire__dot" aria-hidden="true" />
-              {WIRE_WORDS[view.connection] ?? view.connection}
-            </span>
-          ) : null}
-
-          {prUrl === null ? null : (
-            <a className="link" href={prUrl} target="_blank" rel="noreferrer">
-              Pull request #{String(live.pullRequest?.number ?? 0)}
-            </a>
-          )}
-
-          {running ? (
-            <Button tone="quiet" disabled={busy} onClick={(): void => void stop()}>
-              Cancel
-            </Button>
-          ) : null}
-        </div>
-      </header>
-
-      <div className="thread">
-        <div className="thread__inner">
-          <AnimatePresence initial={false}>
-            {live.messages.map((one) => (
-              <motion.div
-                key={one.messageId}
-                className="turn"
-                data-role={one.role}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+          <div className="run__tools">
+            {live.pullRequest === null ? (
+              live.status !== 'queued' &&
+              (live.status !== 'awaiting_user' ||
+                live.question !== null ||
+                live.approval !== null) ? (
+                <span className="status" data-tone={toneFor(live.status)}>
+                  <span className="status__dot" aria-hidden="true" />
+                  {statusWords(live.status)}
+                </span>
+              ) : null
+            ) : (
+              <button
+                className="run__pr-ready"
+                data-state={prStates[live.pullRequest.number] ?? 'open'}
+                type="button"
+                onClick={openPullRequest}
+                aria-label={`Show pull request #${String(live.pullRequest.number)}`}
+                title={`Show pull request #${String(live.pullRequest.number)}`}
               >
-                <span className="turn__who">{one.role === 'agent' ? 'Nimbus' : 'You'}</span>
-                <p className="turn__body">{one.text}</p>
-              </motion.div>
-            ))}
-
-            {live.question === null ? null : (
-              <motion.div
-                key="question"
-                className="card card--ask"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
-              >
-                <p className="card__word">Nimbus is asking</p>
-                <p className="card__what">{live.question.question}</p>
-                <p className="card__why">
-                  Answer below and the run carries on from where it paused.
-                </p>
-              </motion.div>
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5Zm0 9.5a.75.75 0 1 0 0 1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z" />
+                </svg>
+                <span>{prStates[live.pullRequest.number] === 'merged' ? 'PR merged' : prStates[live.pullRequest.number] === 'closed' ? 'PR closed' : `#${String(live.pullRequest.number)}`}</span>
+              </button>
             )}
 
-            {live.approval === null ? null : (
-              <motion.div
-                key={live.approval.approvalId}
-                className="card"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
-              >
-                <p className="card__word">Needs your approval</p>
-                <p className="card__what">{live.approval.effect.summary}</p>
-                <p className="card__why">{live.approval.effect.reason}</p>
+            {running ? (
+              <Button tone="danger" disabled={busy} onClick={(): void => void stop()}>
+                End
+              </Button>
+            ) : null}
 
-                {live.approval.effect.paths.length === 0 ? null : (
-                  <div className="card__paths">
-                    {live.approval.effect.paths.map((path) => (
-                      <span className="card__path" key={path}>
-                        {path}
+            <button
+              className="run__split-toggle"
+              type="button"
+              aria-label={inspectorOpen ? 'Hide session details' : 'Show session details'}
+              aria-pressed={inspectorOpen}
+              title={inspectorOpen ? 'Hide session details' : 'Show session details'}
+              onClick={(): void => {
+                setInspectorOpen((open) => !open);
+                setRailOpen(false);
+              }}
+            >
+              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M4.27 4.041c-.568.097-1.116.401-1.542.857-.288.308-.487.652-.615 1.062l-.093.3V17.74l.093.3c.143.458.342.782.703 1.144.362.361.686.56 1.144.703l.3.093h15.48l.3-.093c.458-.143.782-.342 1.144-.703.361-.362.56-.686.703-1.144l.093-.3V6.26l-.093-.3c-.262-.842-.948-1.547-1.778-1.829l-.329-.111-7.66-.006c-4.213-.003-7.745.009-7.85.027M15 12.021v6.501l-5.25-.011c-4.97-.011-5.26-.015-5.438-.084a1.505 1.505 0 0 1-.678-.645l-.114-.242V6.46l.102-.22c.135-.292.306-.465.597-.605l.24-.115h10.54v6.501m4.78-6.386c.291.14.462.313.597.605l.102.22.001 5.54v5.54l-.114.242c-.135.284-.404.54-.678.643-.164.061-.376.072-1.678.086l-1.49.015v-13.006h3.02l.24.115"
+                  stroke="none"
+                  fill="currentColor"
+                />
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <div className="run__split" data-inspector-open={inspectorOpen}>
+          <section className="chat" aria-label="Conversation">
+            <div className="thread">
+              <div className="thread__inner">
+                <AnimatePresence initial={false}>
+                  {live.messages.map((one, index) => (
+                    <motion.div
+                      key={one.messageId}
+                      className="turn"
+                      data-role={one.role}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                    >
+                      {one.role === 'agent' ? (
+                        <p className="turn__worked">
+                          &gt; Worked for {String(elapsedSinceLastUser(index))}s
+                        </p>
+                      ) : null}
+                      {one.role === 'agent' &&
+                      /^Worked for \d+s\. PR #\d+ (?:is ready|was created|was updated)/.test(one.text) &&
+                      live.pullRequest !== null ? (
+                        <div className="turn__pr-card">
+                          <p className="turn__commit">
+                            {one.text
+                              .replace(
+                                /^Worked for \d+s\. PR #\d+ (?:is ready|was created|was updated) for /,
+                                '',
+                              )
+                              .split('. ')[0] ?? 'Nimbus change'}
+                          </p>
+                          <a
+                            className="turn__pr-meta"
+                            href={live.pullRequest.url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <svg className="turn__pr-icon" viewBox="0 0 16 16" aria-hidden="true">
+                              <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z" />
+                            </svg>
+                            <span>
+                              {detail.repository.name} #{String(live.pullRequest.number)}
+                            </span>
+                            <span className="turn__pr-separator" aria-hidden="true">
+                              &bull;
+                            </span>
+                            <strong className="turn__pr-added">+{prLines(one.text)?.added ?? '—'}</strong>
+                            <strong className="turn__pr-removed">−{prLines(one.text)?.removed ?? '—'}</strong>
+                            <span className="turn__pr-separator" aria-hidden="true">
+                              &bull;
+                            </span>
+                            <span>nimbus-cloud-agent[bot]</span>
+                          </a>
+                          <p className="turn__pr-summary">
+                            {detail.title} pushed as a PR:{' '}
+                            <a href={live.pullRequest.url} target="_blank" rel="noreferrer">
+                              {detail.repository.name}#{String(live.pullRequest.number)}
+                            </a>
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="turn__body">{one.text.replace(/^Worked for \d+s\. /, '')}</p>
+                      )}
+                    </motion.div>
+                  ))}
+
+                  {running && live.status !== 'awaiting_user' && live.question === null ? (
+                    <motion.div
+                      className="thread__working"
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                    >
+                      <span className="thread__working-dot" aria-hidden="true" />
+                      <span>
+                        {live.progress.currentActivity ?? 'Working'} (
+                        {String(
+                          Math.max(
+                            1,
+                            Math.round(
+                              (clock -
+                                Date.parse(
+                                  live.messages.at(-1)?.sentAt ?? new Date(clock).toISOString(),
+                                )) /
+                                1_000,
+                            ),
+                          ),
+                        )}
+                        s)
                       </span>
-                    ))}
-                  </div>
+                    </motion.div>
+                  ) : null}
+
+                  {live.question === null ? null : (
+                    <motion.div
+                      key="question"
+                      className="card card--ask"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+                    >
+                      <p className="card__word">
+                        <span className="card__pulse" aria-hidden="true" />
+                        Nimbus is awaiting instructions
+                      </p>
+                      <p className="card__what">{live.question.question}</p>
+                      <p className="card__why">
+                        Answer below and the run carries on from where it paused.
+                      </p>
+                    </motion.div>
+                  )}
+
+                  {live.approval === null ? null : (
+                    <motion.div
+                      key={live.approval.approvalId}
+                      className="card"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+                    >
+                      <p className="card__word">Needs your approval</p>
+                      <p className="card__what">{live.approval.effect.summary}</p>
+                      <p className="card__why">{live.approval.effect.reason}</p>
+
+                      {live.approval.effect.paths.length === 0 ? null : (
+                        <div className="card__paths">
+                          {live.approval.effect.paths.map((path) => (
+                            <span className="card__path" key={path}>
+                              {path}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <p className="card__meta">
+                        <span className="risk" data-risk={live.approval.effect.risk}>
+                          {live.approval.effect.risk} risk
+                        </span>
+                        <span>{live.approval.effect.category.split('_').join(' ')}</span>
+                        {live.approval.effect.commandCategory === undefined ? null : (
+                          <span>{live.approval.effect.commandCategory}</span>
+                        )}
+                      </p>
+
+                      <div className="card__acts">
+                        <Button
+                          tone="primary"
+                          disabled={busy}
+                          onClick={(): void => void decide('approved')}
+                        >
+                          Approve this action
+                        </Button>
+
+                        <Button
+                          tone="danger"
+                          disabled={busy}
+                          onClick={(): void => void decide('rejected')}
+                        >
+                          Refuse
+                        </Button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {running || (live.failure === null && live.deliveryStatus === 'no_changes') ? null : (
+                  <>
+                    <div className="done">
+                      <p className="done__what">
+                        {live.failure === null
+                          ? live.deliveryStatus === 'pr_created'
+                            ? 'A pull request is ready for review.'
+                            : live.deliveryStatus === 'pr_updated'
+                              ? 'The pull request was updated.'
+                              : 'Done.'
+                          : live.failure.message}
+                      </p>
+                      <p className="done__why">
+                        {live.failure?.code === 'CHECKS_FAILED'
+                          ? 'The compile check failed. Ask Nimbus to retry or make another change.'
+                          : live.deliveryStatus === 'pr_updated'
+                            ? 'You can continue working in this session.'
+                            : live.deliveryStatus === 'pr_created'
+                              ? 'Ask Nimbus for another change below and it will update this pull request.'
+                              : 'You can ask for another change below.'}
+                      </p>
+                    </div>
+                  </>
                 )}
 
-                <p className="card__meta">
-                  <span className="risk" data-risk={live.approval.effect.risk}>
-                    {live.approval.effect.risk} risk
-                  </span>
-                  <span>{live.approval.effect.category.split('_').join(' ')}</span>
-                  {live.approval.effect.commandCategory === undefined ? null : (
-                    <span>{live.approval.effect.commandCategory}</span>
-                  )}
-                </p>
-
-                <div className="card__acts">
-                  <Button
-                    tone="primary"
-                    disabled={busy}
-                    onClick={(): void => void decide('approved')}
-                  >
-                    Approve this action
-                  </Button>
-
-                  <Button
-                    tone="secondary"
-                    disabled={busy}
-                    onClick={(): void => void decide('rejected')}
-                  >
-                    Refuse
-                  </Button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {running ? null : (
-            <div className="done">
-              <p className="done__what">
-                {live.failure === null
-                  ? `This session is ${statusWords(live.status).toLowerCase()}.`
-                  : live.failure.message}
-              </p>
-              <p className="done__why">
-                Nothing more will happen here. Start another session from the dashboard.
-              </p>
-            </div>
-          )}
-
-          <div ref={bottom} />
-        </div>
-      </div>
-
-      {running ? (
-        <div className="say">
-          <div className="say__inner">
-            {problem === null ? null : (
-              <p className="note note--problem" role="alert">
-                <span className="note__mark" aria-hidden="true" />
-                {problem}
-              </p>
-            )}
-
-            <div className="say__box">
-              <textarea
-                className="say__input"
-                aria-label={live.question === null ? 'Message Nimbus' : 'Your answer'}
-                value={text}
-                disabled={busy}
-                placeholder={
-                  live.question === null
-                    ? 'Say something to steer the run'
-                    : 'Answer the question above'
-                }
-                onKeyDown={onKeyDown}
-                onChange={(event): void => {
-                  setText(event.target.value);
-                }}
-              />
-
-              <div className="say__foot">
-                <span className="say__hint">Enter sends, shift and enter makes a new line</span>
-
-                <Button
-                  tone="primary"
-                  className="say__send"
-                  disabled={busy || text.trim() === ''}
-                  onClick={(): void => void send()}
-                >
-                  {live.question === null ? 'Send' : 'Answer'}
-                </Button>
+                <div ref={bottom} />
               </div>
             </div>
-          </div>
+
+            {canMessage ? (
+              <div className="say">
+                <div className="say__inner">
+                  {problem === null ? null : (
+                    <p className="note note--problem" role="alert">
+                      <span className="note__mark" aria-hidden="true" />
+                      {problem}
+                    </p>
+                  )}
+
+                  <div className="say__box">
+                    <textarea
+                      className="say__input"
+                      aria-label={live.question === null ? 'Message Nimbus' : 'Your answer'}
+                      value={text}
+                      disabled={composerDisabled}
+                      placeholder={
+                        live.question === null
+                          ? 'Say something to steer the run'
+                          : 'Answer the question above'
+                      }
+                      onKeyDown={onKeyDown}
+                      onChange={(event): void => {
+                        setText(event.target.value);
+                      }}
+                    />
+
+                    <div className="say__foot">
+                      <span className="say__hint">
+                        Enter sends, shift and enter makes a new line
+                      </span>
+
+                      <Button
+                        tone="primary"
+                        className="say__send"
+                        disabled={composerDisabled || text.trim() === ''}
+                        onClick={(): void => void send()}
+                      >
+                        {live.question === null ? 'Send' : 'Answer'}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </section>
+
+          {inspectorOpen ? (
+            <section className="pane" aria-label="What the run did">
+              <div className="pane__tabs" role="tablist" aria-label="What to look at">
+                {SESSION_TABS.map((one) => {
+                  const count = tabCount(one, live);
+
+                  return (
+                    <button
+                      className="pane__tab"
+                      type="button"
+                      key={one}
+                      role="tab"
+                      aria-selected={tab === one}
+                      data-active={tab === one}
+                      onClick={(): void => {
+                        setTab(one);
+                      }}
+                    >
+                      {TAB_WORDS[one]}
+                      {count === null ? null : <span className="pane__count">{String(count)}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="pane__body" role="tabpanel">
+                {paneFor(tab, live, prStates, setPrState)}
+              </div>
+            </section>
+          ) : null}
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }

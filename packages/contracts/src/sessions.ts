@@ -16,6 +16,7 @@ import { PullRequestResultSchema } from './pull-request.js';
 import { CheckResultSchema, FileChangeSchema } from './tools.js';
 
 export const SESSION_STATUSES = [
+  'ready',
   'queued',
   'provisioning',
   'indexing',
@@ -23,6 +24,7 @@ export const SESSION_STATUSES = [
   'awaiting_user',
   'validating',
   'pushing',
+  'completed',
   'pr_created',
   'failed',
   'cancelled',
@@ -30,22 +32,51 @@ export const SESSION_STATUSES = [
 
 export const SessionStatusSchema = z.enum(SESSION_STATUSES);
 
-export const TERMINAL_SESSION_STATUSES = ['pr_created', 'failed', 'cancelled'] as const;
+/** A conversation is only deleted explicitly. These are terminal *turn* states. */
+export const TERMINAL_SESSION_STATUSES = ['completed', 'pr_created', 'failed', 'cancelled'] as const;
+
+export const RUN_STATUSES = [
+  'queued',
+  'working',
+  'awaiting_user',
+  'succeeded',
+  'failed',
+  'cancelled',
+] as const;
+
+export const DELIVERY_STATUSES = [
+  'no_changes',
+  'changes_ready',
+  'pr_created',
+  'pr_updated',
+  'validation_failed',
+  'checks_failed',
+] as const;
+
+export const RunStatusSchema = z.enum(RUN_STATUSES);
+export const DeliveryStatusSchema = z.enum(DELIVERY_STATUSES);
+export const ManualPrStateSchema = z.enum(['open', 'merged', 'closed']);
+export const ManualPrStatesSchema = z.record(z.string().regex(/^\d+$/), ManualPrStateSchema).default({});
 
 export const FAILURE_CODES = [
   'TASK_TOO_BROAD',
   'CLARIFICATION_TIMEOUT',
   'APPROVAL_TIMEOUT',
   'POLICY_DENIED',
+  'AGENT_STUCK',
   'STEP_BUDGET_EXHAUSTED',
   'TOKEN_BUDGET_EXHAUSTED',
   'TIME_BUDGET_EXHAUSTED',
   'SANDBOX_FAILED',
+  'REPOSITORY_EMPTY',
   'CHECKS_FAILED',
   'PATCH_REJECTED',
   'PUSH_FAILED',
   'PULL_REQUEST_FAILED',
   'PROVIDER_UNAVAILABLE',
+  'MODEL_RATE_LIMITED',
+  'MODEL_KEY_REJECTED',
+  'MODEL_ANSWER_UNUSABLE',
   'INTERNAL_ERROR',
 ] as const;
 
@@ -90,6 +121,10 @@ export const CreateSessionBodySchema = z.strictObject({
 export const SessionSummarySchema = z.strictObject({
   sessionId: SessionIdSchema,
   status: SessionStatusSchema,
+  runStatus: RunStatusSchema.nullable().default(null),
+  deliveryStatus: DeliveryStatusSchema.nullable().default(null),
+  manualPrStates: ManualPrStatesSchema,
+  title: z.string().min(1).max(120),
   task: z.string().min(1).max(LIMITS.taskMaxChars),
   repository: RepositorySummarySchema,
   branch: BranchNameSchema.nullable(),
@@ -97,6 +132,14 @@ export const SessionSummarySchema = z.strictObject({
   createdAt: IsoTimestampSchema,
   lastActivityAt: IsoTimestampSchema,
   completedAt: IsoTimestampSchema.nullable(),
+});
+
+export const RenameSessionBodySchema = z.strictObject({
+  title: z.string().trim().min(1).max(120),
+});
+export const SetPullRequestStateBodySchema = z.strictObject({
+  number: z.int().positive(),
+  state: ManualPrStateSchema,
 });
 
 export const SessionProgressSchema = z.strictObject({
@@ -149,13 +192,20 @@ export const CancelSessionResponseSchema = z.strictObject({
   status: SessionStatusSchema,
 });
 
+export const DeleteSessionResponseSchema = z.strictObject({ sessionId: SessionIdSchema });
+
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
+export type RunStatus = z.infer<typeof RunStatusSchema>;
+export type DeliveryStatus = z.infer<typeof DeliveryStatusSchema>;
+export type ManualPrState = z.infer<typeof ManualPrStateSchema>;
+export type SetPullRequestStateBody = z.infer<typeof SetPullRequestStateBodySchema>;
 export type FailureCode = z.infer<typeof FailureCodeSchema>;
 export type SessionFailure = z.infer<typeof SessionFailureSchema>;
 export type ModelSelection = z.infer<typeof ModelSelectionSchema>;
 export type MessageRole = z.infer<typeof MessageRoleSchema>;
 export type SessionMessage = z.infer<typeof SessionMessageSchema>;
 export type CreateSessionBody = z.infer<typeof CreateSessionBodySchema>;
+export type RenameSessionBody = z.infer<typeof RenameSessionBodySchema>;
 export type SessionSummary = z.infer<typeof SessionSummarySchema>;
 export type SessionProgress = z.infer<typeof SessionProgressSchema>;
 export type SessionDetail = z.infer<typeof SessionDetailSchema>;
@@ -166,3 +216,4 @@ export type PostMessageBody = z.infer<typeof PostMessageBodySchema>;
 export type AnswerSessionBody = z.infer<typeof AnswerSessionBodySchema>;
 export type PostMessageResponse = z.infer<typeof PostMessageResponseSchema>;
 export type CancelSessionResponse = z.infer<typeof CancelSessionResponseSchema>;
+export type DeleteSessionResponse = z.infer<typeof DeleteSessionResponseSchema>;

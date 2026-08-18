@@ -28,6 +28,7 @@ import {
 } from './routes/github.js';
 
 const SESSION_ID = 'session-id-value';
+const CSRF_TOKEN = 'csrf-token-value';
 const WEB_ORIGIN = 'http://localhost:5173';
 const INSTALLATION_ID = 152_851_946;
 
@@ -67,6 +68,7 @@ interface Harness {
   app: Express;
   setups: { userId: string; installationId: number; state: string; code: string }[];
   listedFor: string[];
+  disconnectedFor: string[];
   deliveries: WebhookDelivery[];
 }
 
@@ -80,6 +82,7 @@ function harness(
 ): Harness {
   const setups: { userId: string; installationId: number; state: string; code: string }[] = [];
   const listedFor: string[] = [];
+  const disconnectedFor: string[] = [];
   const deliveries: WebhookDelivery[] = [];
   const { logger } = createTestLogger();
 
@@ -97,15 +100,30 @@ function harness(
       await Promise.resolve();
       return options.signedIn !== false && sessionId === SESSION_ID ? activeSession() : null;
     },
+    csrfMatches: (_session: ActiveSession, candidate: string): boolean => candidate === CSRF_TOKEN,
   };
 
   const installations = {
-    beginConnect: async (): Promise<{ redirectUrl: string; state: string }> => {
+    beginConnect: async (): Promise<{
+      redirectUrl: string;
+      installUrl: string | null;
+      state: string;
+    }> => {
       await Promise.resolve();
       return {
         redirectUrl: 'https://github.com/apps/nimbus-test/installations/new?state=non_abc',
+        installUrl: 'https://github.com/apps/nimbus-test/installations/new?state=non_abc',
         state: 'non_abc',
       };
+    },
+    disconnect: async (userId: string): Promise<{ uninstalledOnGitHub: boolean }> => {
+      disconnectedFor.push(userId);
+      await Promise.resolve();
+      return { uninstalledOnGitHub: true };
+    },
+    ownsInstallation: async (_userId: string, installationId: number): Promise<boolean> => {
+      await Promise.resolve();
+      return installationId === INSTALLATION.installationId;
     },
     completeSetup: async (input: {
       userId: string;
@@ -135,11 +153,11 @@ function harness(
   const app = createApp({
     config: testConfig(),
     logger,
-    routers: [createGitHubRouter({ installations, webhooks, webOrigin: WEB_ORIGIN })],
+    routers: [createGitHubRouter({ installations, webhooks, sessions, webOrigin: WEB_ORIGIN })],
     attachSession: createAttachSession(sessions, false),
   });
 
-  return { app, setups, listedFor, deliveries };
+  return { app, setups, listedFor, disconnectedFor, deliveries };
 }
 
 function errorBody(body: unknown): ApiErrorBody {
@@ -185,7 +203,9 @@ describe('GET /github/setup/callback', () => {
     const { app, setups } = harness();
 
     const response = await request(app)
-      .get(`/github/setup/callback?installation_id=${String(INSTALLATION_ID)}&state=non_abc`)
+      .get(
+        `/github/setup/callback?installation_id=${String(INSTALLATION_ID)}&state=non_abc&code=install-code`,
+      )
       .set('Cookie', cookie);
 
     expect(response.status).toBe(302);
@@ -206,14 +226,16 @@ describe('GET /github/setup/callback', () => {
     expect(setups[0]?.code).toBe('install-code');
   });
 
-  it('passes an empty proof when GitHub sends none, so the service can refuse', async () => {
+  it('sends an install that carries no proof round to authorize, rather than failing it', async () => {
     const { app, setups } = harness();
 
-    await request(app)
+    const response = await request(app)
       .get(`/github/setup/callback?installation_id=${String(INSTALLATION_ID)}&state=non_abc`)
       .set('Cookie', cookie);
 
-    expect(setups[0]?.code).toBe('');
+    expect(response.status).toBe(302);
+    expect(response.headers['location']).toContain('github.com');
+    expect(setups).toHaveLength(0);
   });
 
   it('takes the account from the session, never from the query', async () => {
@@ -221,7 +243,7 @@ describe('GET /github/setup/callback', () => {
 
     await request(app)
       .get(
-        `/github/setup/callback?installation_id=${String(INSTALLATION_ID)}&state=non_abc&userId=usr_somebodyelse`,
+        `/github/setup/callback?installation_id=${String(INSTALLATION_ID)}&state=non_abc&code=install-code&userId=usr_somebodyelse`,
       )
       .set('Cookie', cookie);
 
@@ -278,7 +300,9 @@ describe('GET /github/setup/callback', () => {
     });
 
     const response = await request(app)
-      .get(`/github/setup/callback?installation_id=${String(INSTALLATION_ID)}&state=non_abc`)
+      .get(
+        `/github/setup/callback?installation_id=${String(INSTALLATION_ID)}&state=non_abc&code=install-code`,
+      )
       .set('Cookie', cookie);
 
     expect(response.status).toBe(302);
@@ -294,7 +318,9 @@ describe('GET /github/setup/callback', () => {
       await request(app).get('/github/setup/callback?setup_action=cancel').set('Cookie', cookie),
       await request(app).get('/github/setup/callback').set('Cookie', cookie),
       await request(app)
-        .get(`/github/setup/callback?installation_id=${String(INSTALLATION_ID)}&state=non_abc`)
+        .get(
+          `/github/setup/callback?installation_id=${String(INSTALLATION_ID)}&state=non_abc&code=install-code`,
+        )
         .set('Cookie', cookie),
     ];
 

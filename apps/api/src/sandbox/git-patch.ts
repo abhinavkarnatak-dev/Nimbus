@@ -24,6 +24,10 @@ export const GIT_EXPORT_DIFF: readonly string[] = [
   '--no-renames',
   '--unified=3',
   '--',
+  '.',
+  ':(exclude)**/__pycache__/**',
+  ':(exclude)**/*.pyc',
+  ':(exclude)**/*.class',
 ];
 
 export const GIT_IS_REPOSITORY: readonly string[] = [

@@ -147,6 +147,7 @@ export interface Sandbox {
   listEntries(): Promise<WorkspaceEntry[]>;
   readFile(path: string): Promise<string>;
   writeFile(path: string, contents: string): Promise<void>;
+  removeFile(path: string): Promise<void>;
   markBaseline(): Promise<void>;
   exportPatch(): Promise<PatchExport>;
   terminate(reason: SandboxTerminationReason): Promise<void>;

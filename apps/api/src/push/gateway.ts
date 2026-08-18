@@ -41,6 +41,8 @@ export interface PushRequest {
   owner: string;
   name: string;
   sessionId: string;
+  /** Existing PR branch to extend for a follow-up, rather than deriving a new branch from its wording. */
+  branch?: string;
   task: string;
   baseCommitSha: string;
   patch: string;
@@ -168,7 +170,7 @@ export class TrustedPushGateway implements PushGateway {
   async push(request: PushRequest): Promise<PushResult> {
     this.assertJudged(request);
 
-    const branch = branchNameFor(request.sessionId, request.task);
+    const branch = request.branch ?? branchNameFor(request.sessionId, request.task);
 
     const token: InstallationToken = await this.options.tokens.getToken({
       installationId: request.installationId,
@@ -205,10 +207,20 @@ export class TrustedPushGateway implements PushGateway {
           });
         }
 
-        throw new PushError(
-          'PUSH_BRANCH_CONFLICT',
-          'That branch already holds different changes and will not be moved.',
-        );
+        if (existing.commitSha !== request.baseCommitSha) {
+          throw new PushError(
+            'PUSH_BRANCH_CONFLICT',
+            'That branch changed after this follow-up started and will not be moved.',
+          );
+        }
+
+        const commitSha = await client.createCommit({
+          message: commitMessageFor(request.task),
+          treeSha,
+          parentSha: request.baseCommitSha,
+        });
+        await client.updateRef(branch, commitSha);
+        return PushResultSchema.parse({ branch, commitSha, outcome: 'created' });
       }
 
       const commitSha = await client.createCommit({
