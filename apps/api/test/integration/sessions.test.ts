@@ -360,6 +360,16 @@ describe('pinning the repository base in the real collection', () => {
 });
 
 describe('a conversation kept on a session', () => {
+  it('opens the conversation with the task, because that is the first thing the person said', async () => {
+    const created = await service.create(OWNER_ID, keyed('a'));
+    const records = new MongoSessionRecords(testDatabase.db);
+    const opening = await records.conversationOf(created.session.sessionId);
+
+    expect(opening).toHaveLength(1);
+    expect(opening[0]?.role).toBe('user');
+    expect(opening[0]?.text).toBe(created.session.task);
+  });
+
   it('keeps both sides, in the order they were said', async () => {
     const created = await service.create(OWNER_ID, keyed('a'));
     const records = new MongoSessionRecords(testDatabase.db);
@@ -370,11 +380,12 @@ describe('a conversation kept on a session', () => {
 
     expect((await records.conversationOf(sessionId)).map((one) => one.role)).toStrictEqual([
       'user',
+      'user',
       'agent',
     ]);
     const ids = (await records.conversationOf(sessionId)).map((one) => one.messageId);
     expect(ids.every((id) => id.startsWith('msg_'))).toBe(true);
-    expect(new Set(ids).size).toBe(2);
+    expect(new Set(ids).size).toBe(3);
   });
 
   it('turns concurrent retries into exactly one message with the winner identity', async () => {
@@ -401,7 +412,7 @@ describe('a conversation kept on a session', () => {
         results.map((result) => (result.message === null ? 'none' : result.message.messageId)),
       ).size,
     ).toBe(1);
-    expect(await records.conversationOf(sessionId)).toHaveLength(1);
+    expect(await records.conversationOf(sessionId)).toHaveLength(2);
   });
 
   it('distinguishes a safe retry from the same key carrying different text', async () => {
@@ -429,7 +440,7 @@ describe('a conversation kept on a session', () => {
         })
       ).outcome,
     ).toBe('conflict');
-    expect(await records.conversationOf(sessionId)).toHaveLength(1);
+    expect(await records.conversationOf(sessionId)).toHaveLength(2);
   });
 
   it('can acknowledge a completed-session retry without creating another message', async () => {
@@ -463,8 +474,9 @@ describe('a conversation kept on a session', () => {
 
     const detail = await service.detail(OWNER_ID, created.session.sessionId);
 
-    expect(detail.session.messages).toHaveLength(1);
-    expect(detail.session.messages[0]?.role).toBe('user');
+    expect(detail.session.messages).toHaveLength(2);
+    expect(detail.session.messages.map((one) => one.role)).toStrictEqual(['user', 'user']);
+    expect(detail.session.messages[1]?.text).toBe('keep the old link working');
   });
 
   it('accepts a message written before roles existed, and reads it as the person', async () => {
@@ -482,9 +494,10 @@ describe('a conversation kept on a session', () => {
     const conversation = await records.conversationOf(sessionId);
     const reread = await records.conversationOf(sessionId);
 
-    expect(conversation.map((one) => one.role)).toStrictEqual(['user', 'agent']);
-    expect(conversation[0]?.messageId).toMatch(/^msg_/);
-    expect(reread[0]?.messageId).toBe(conversation[0]?.messageId);
+    expect(conversation.map((one) => one.role)).toStrictEqual(['user', 'user', 'agent']);
+    expect(conversation[1]?.text).toBe('an older message');
+    expect(conversation[1]?.messageId).toMatch(/^msg_/);
+    expect(reread[1]?.messageId).toBe(conversation[1]?.messageId);
   });
 
   it('keeps the newest turns once it is full, and the validator still accepts it', async () => {
@@ -511,6 +524,6 @@ describe('a conversation kept on a session', () => {
     const records = new MongoSessionRecords(testDatabase.db);
 
     expect(await records.addAgentMessage(sessionId, 'too late', new Date())).toBe(false);
-    expect(await records.conversationOf(sessionId)).toHaveLength(0);
+    expect(await records.conversationOf(sessionId)).toHaveLength(1);
   });
 });

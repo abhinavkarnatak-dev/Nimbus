@@ -205,7 +205,10 @@ export class LiveSessionWorkshop implements SessionWorkshop {
     };
   }
 
-  async #reviewComments(session: SessionDocument, token: InstallationToken): Promise<string | null> {
+  async #reviewComments(
+    session: SessionDocument,
+    token: InstallationToken,
+  ): Promise<string | null> {
     if (session.pullRequest === null) return null;
 
     try {
@@ -225,15 +228,20 @@ export class LiveSessionWorkshop implements SessionWorkshop {
         }),
       ]);
       const comments = [
-        ...review.data.map((one) =>
-          `${one.path ?? 'pull request'}${one.line === null ? '' : `:${String(one.line)}`}: ${one.body}`,
+        ...review.data.map(
+          (one) =>
+            `${one.path}${one.line === undefined ? '' : `:${String(one.line)}`}: ${one.body}`,
         ),
-        ...discussion.data.map((one) => `pull request: ${one.body}`),
+        ...discussion.data.map((one) => `pull request: ${one.body ?? ''}`),
       ].filter((one) => one.trim() !== '');
       return comments.length === 0 ? null : comments.join('\n\n').slice(0, 12_000);
     } catch (error) {
       this.#options.logger.warn(
-        { sessionId: session.sessionId, pullRequest: session.pullRequest.number, error: String(error) },
+        {
+          sessionId: session.sessionId,
+          pullRequest: session.pullRequest.number,
+          error: String(error),
+        },
         'pull request comments could not be read for a follow-up',
       );
       return null;
@@ -410,7 +418,7 @@ export function resumedState(
   session: SessionDocument,
 ): ReturnType<typeof createState> {
   const userTurns = session.messages.filter((message) => message.role === 'user');
-  const followUp = userTurns.length > 1 ? userTurns.at(-1)?.text ?? null : null;
+  const followUp = userTurns.length > 1 ? (userTurns.at(-1)?.text ?? null) : null;
   const fresh = createState({
     ...input,
     // A normal follow-up is the new instruction. Earlier turns are still supplied to the

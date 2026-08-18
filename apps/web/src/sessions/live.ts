@@ -137,7 +137,8 @@ export function applyEvent(live: LiveSession, event: ServerEvent): LiveSession {
         messages: [
           ...live.messages,
           {
-            messageId: `msg_question_${event.expiresAt.replace(/[^0-9]/g, '').slice(-14)}` as SessionMessage['messageId'],
+            messageId:
+              `msg_question_${event.expiresAt.replace(/[^0-9]/g, '').slice(-14)}` as SessionMessage['messageId'],
             role: 'agent',
             text: event.question,
             sentAt: new Date().toISOString(),

@@ -53,9 +53,7 @@ export interface ScopeOptions {
 function isRepositoryQuestion(task: string): boolean {
   const request = task.trim().replace(/^@[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\s+/, '');
 
-  return /^(what|which|who|where|when|why|how|tell|explain|describe|show|read)\b/i.test(
-    request,
-  );
+  return /^(what|which|who|where|when|why|how|tell|explain|describe|show|read)\b/i.test(request);
 }
 
 export async function validateScope(

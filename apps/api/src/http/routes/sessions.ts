@@ -88,12 +88,27 @@ export function createSessionsRouter(options: SessionsRouterOptions): Router {
     },
   );
 
-  router.patch('/sessions/:sessionId/pull-request-state', requireAuth, requireCsrf, validateBody(SetPullRequestStateBodySchema), async (request, response) => {
-    const account = requireSession(request);
-    const sessionId = readSessionId(request.params['sessionId']);
-    const body = validatedBody(request, SetPullRequestStateBodySchema);
-    response.status(200).json(await options.sessions.setPullRequestState(account.user.userId, sessionId, body.number, body.state));
-  });
+  router.patch(
+    '/sessions/:sessionId/pull-request-state',
+    requireAuth,
+    requireCsrf,
+    validateBody(SetPullRequestStateBodySchema),
+    async (request, response) => {
+      const account = requireSession(request);
+      const sessionId = readSessionId(request.params['sessionId']);
+      const body = validatedBody(request, SetPullRequestStateBodySchema);
+      response
+        .status(200)
+        .json(
+          await options.sessions.setPullRequestState(
+            account.user.userId,
+            sessionId,
+            body.number,
+            body.state,
+          ),
+        );
+    },
+  );
 
   router.delete('/sessions/:sessionId', requireAuth, requireCsrf, async (request, response) => {
     const account = requireSession(request);

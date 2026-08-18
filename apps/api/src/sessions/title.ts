@@ -17,7 +17,11 @@ export class LlmSessionTitleGenerator implements SessionTitleGenerator {
     this.#logger = options.logger;
   }
 
-  async generate(input: { userId: string; task: string; model: ModelSelection | null }): Promise<string> {
+  async generate(input: {
+    userId: string;
+    task: string;
+    model: ModelSelection | null;
+  }): Promise<string> {
     try {
       const provider = await this.#text.for(input.userId);
       const result = await provider.complete({
@@ -42,7 +46,10 @@ export class LlmSessionTitleGenerator implements SessionTitleGenerator {
 }
 
 export function cleanTitle(candidate: string, fallback: string): string {
-  const value = candidate.replace(/[\r\n]+/g, ' ').replace(/["'`*_#]/g, '').trim();
+  const value = candidate
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/["'`*_#]/g, '')
+    .trim();
   const usable = value.length > 0 ? value : fallback.trim();
   return usable.slice(0, 120).trim() || 'New session';
 }

@@ -84,6 +84,7 @@ export const sessionSummaryFixture = () => ({
   status: 'working' as const,
   runStatus: 'working' as const,
   deliveryStatus: null,
+  manualPrStates: {},
   title: 'Format invoice dates',
   task: 'Format the invoice dates using the existing date helper',
   repository: repositoryFixture(),

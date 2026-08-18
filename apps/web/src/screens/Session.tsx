@@ -32,15 +32,6 @@ import type { SessionsHandle } from '../sessions/useSessions.js';
 import { Button } from '../ui/Button.js';
 import { Skeleton } from '../ui/Skeleton.js';
 
-const WIRE_WORDS: Readonly<Record<string, string>> = {
-  idle: 'offline',
-  connecting: 'connecting',
-  live: 'live',
-  waiting: 'reconnecting',
-  signed_out: 'signed out',
-  closed: 'closed',
-};
-
 function actProblem(error: unknown): string {
   if (error instanceof NetworkError) {
     return 'Nimbus is not answering. Check your connection and try again.';
@@ -62,7 +53,12 @@ function actProblem(error: unknown): string {
   return known[error.code] ?? 'That did not work. Try again.';
 }
 
-function paneFor(tab: SessionTab, live: LiveSession, prStates: Record<number, ManualPrState>, onPrState: (number: number, state: ManualPrState) => void): React.JSX.Element {
+function paneFor(
+  tab: SessionTab,
+  live: LiveSession,
+  prStates: Record<number, ManualPrState>,
+  onPrState: (number: number, state: ManualPrState) => void,
+): React.JSX.Element {
   if (tab === 'progress') {
     return <ProgressPane live={live} />;
   }
@@ -99,10 +95,7 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
   const detail = view.detail;
   const live = view.live;
   const running = live !== null && isLive(live.status);
-    // A session is a durable conversation. Only an actively executing turn is
-    // blocked; completed and failed turns immediately accept another request.
-    const canMessage = true;
-    const composerDisabled = busy || (running && live?.question === null);
+  const composerDisabled = busy || (running && live.question === null);
   const refreshSessions = sessions.refresh;
 
   useEffect(() => {
@@ -124,7 +117,8 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
       held.pullRequest?.number === live.pullRequest?.number &&
       held.pullRequest?.headSha === live.pullRequest?.headSha &&
       held.lastActivityAt === (live.messages.at(-1)?.sentAt ?? held.lastActivityAt)
-    ) return;
+    )
+      return;
     sessions.replaceSession({
       ...held,
       status: live.status,
@@ -137,8 +131,12 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
 
   useEffect(() => {
     if (!running) return;
-    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
-    return (): void => window.clearInterval(timer);
+    const timer = window.setInterval(() => {
+      setClock(Date.now());
+    }, 1_000);
+    return (): void => {
+      window.clearInterval(timer);
+    };
   }, [running]);
 
   if (view.load === 'missing') {
@@ -158,8 +156,21 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
       <div className="run run--loading" aria-label="Loading session">
         <Rail sessions={sessions} openSessionId={sessionId} api={api} />
         <div className="work">
-          <header className="run__head"><div className="run__what"><Skeleton shape="line" width="42%" /><Skeleton shape="line" width="28%" /></div></header>
-          <section className="chat"><div className="thread"><div className="thread__inner session-skeleton"><Skeleton shape="line" width="58%" /><Skeleton shape="block" height="7rem" /><Skeleton shape="line" width="42%" /></div></div></section>
+          <header className="run__head">
+            <div className="run__what">
+              <Skeleton shape="line" width="42%" />
+              <Skeleton shape="line" width="28%" />
+            </div>
+          </header>
+          <section className="chat">
+            <div className="thread">
+              <div className="thread__inner session-skeleton">
+                <Skeleton shape="line" width="58%" />
+                <Skeleton shape="block" height="7rem" />
+                <Skeleton shape="line" width="42%" />
+              </div>
+            </div>
+          </section>
         </div>
       </div>
     );
@@ -271,16 +282,19 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
       const next = { ...held, [number]: state };
       return next;
     });
-    void api.patch(`/sessions/${sessionId}/pull-request-state`, { number, state }, SessionSummarySchema)
-      .then((saved) => setPrStates(saved.manualPrStates as Record<number, ManualPrState>))
+    void api
+      .patch(`/sessions/${sessionId}/pull-request-state`, { number, state }, SessionSummarySchema)
+      .then((saved) => {
+        setPrStates(saved.manualPrStates);
+      })
       .catch(() => {
         void view.refresh();
       });
   };
 
   useEffect(() => {
-    setPrStates(detail?.manualPrStates as Record<number, ManualPrState> ?? {});
-  }, [detail?.manualPrStates]);
+    setPrStates(detail.manualPrStates);
+  }, [detail.manualPrStates]);
 
   const elapsedSinceLastUser = (at: number): number => {
     const last = [...live.messages.slice(0, at)]
@@ -299,13 +313,50 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
   };
 
   return (
-      <div className="run" data-rail-open={railOpen}>
-      <Rail sessions={sessions} openSessionId={sessionId} api={api} prStates={{ [sessionId]: live?.pullRequest === null ? 'open' : prStates[live.pullRequest.number] ?? 'open' }} onClose={(): void => setRailOpen(false)} />
-      {railOpen || inspectorOpen ? <button className="run__drawer-scrim" type="button" aria-label="Close open panel" onClick={(): void => { setRailOpen(false); setInspectorOpen(false); }} /> : null}
+    <div className="run" data-rail-open={railOpen}>
+      <Rail
+        sessions={sessions}
+        openSessionId={sessionId}
+        api={api}
+        prStates={{
+          [sessionId]:
+            live.pullRequest === null ? 'open' : (prStates[live.pullRequest.number] ?? 'open'),
+        }}
+        onClose={(): void => {
+          setRailOpen(false);
+        }}
+      />
+      {railOpen || inspectorOpen ? (
+        <button
+          className="run__drawer-scrim"
+          type="button"
+          aria-label="Close open panel"
+          onClick={(): void => {
+            setRailOpen(false);
+            setInspectorOpen(false);
+          }}
+        />
+      ) : null}
 
       <div className="work">
         <header className="run__head">
-          <button className="run__rail-toggle" type="button" aria-label="Show sessions" onClick={(): void => { setRailOpen((open) => !open); setInspectorOpen(false); }}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h13A2.5 2.5 0 0 1 21 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5v-13ZM9 3v18" stroke="currentColor" strokeWidth="1.7" /></svg></button>
+          <button
+            className="run__rail-toggle"
+            type="button"
+            aria-label="Show sessions"
+            onClick={(): void => {
+              setRailOpen((open) => !open);
+              setInspectorOpen(false);
+            }}
+          >
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M3 5.5A2.5 2.5 0 0 1 5.5 3h13A2.5 2.5 0 0 1 21 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5v-13ZM9 3v18"
+                stroke="currentColor"
+                strokeWidth="1.7"
+              />
+            </svg>
+          </button>
           <div className="run__what">
             <p className="run__task">{plainText(detail.title, 100)}</p>
 
@@ -340,7 +391,13 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
                 <svg viewBox="0 0 16 16" aria-hidden="true">
                   <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5Zm0 9.5a.75.75 0 1 0 0 1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z" />
                 </svg>
-                <span>{prStates[live.pullRequest.number] === 'merged' ? 'PR merged' : prStates[live.pullRequest.number] === 'closed' ? 'PR closed' : `#${String(live.pullRequest.number)}`}</span>
+                <span>
+                  {prStates[live.pullRequest.number] === 'merged'
+                    ? 'PR merged'
+                    : prStates[live.pullRequest.number] === 'closed'
+                      ? 'PR closed'
+                      : `#${String(live.pullRequest.number)}`}
+                </span>
               </button>
             )}
 
@@ -392,7 +449,9 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
                         </p>
                       ) : null}
                       {one.role === 'agent' &&
-                      /^Worked for \d+s\. PR #\d+ (?:is ready|was created|was updated)/.test(one.text) &&
+                      /^Worked for \d+s\. PR #\d+ (?:is ready|was created|was updated)/.test(
+                        one.text,
+                      ) &&
                       live.pullRequest !== null ? (
                         <div className="turn__pr-card">
                           <p className="turn__commit">
@@ -418,8 +477,12 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
                             <span className="turn__pr-separator" aria-hidden="true">
                               &bull;
                             </span>
-                            <strong className="turn__pr-added">+{prLines(one.text)?.added ?? '—'}</strong>
-                            <strong className="turn__pr-removed">−{prLines(one.text)?.removed ?? '—'}</strong>
+                            <strong className="turn__pr-added">
+                              +{prLines(one.text)?.added ?? '—'}
+                            </strong>
+                            <strong className="turn__pr-removed">
+                              −{prLines(one.text)?.removed ?? '—'}
+                            </strong>
                             <span className="turn__pr-separator" aria-hidden="true">
                               &bull;
                             </span>
@@ -539,7 +602,8 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
                   )}
                 </AnimatePresence>
 
-                {running || (live.failure === null && live.deliveryStatus === 'no_changes') ? null : (
+                {running ||
+                (live.failure === null && live.deliveryStatus === 'no_changes') ? null : (
                   <>
                     <div className="done">
                       <p className="done__what">
@@ -568,51 +632,47 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
               </div>
             </div>
 
-            {canMessage ? (
-              <div className="say">
-                <div className="say__inner">
-                  {problem === null ? null : (
-                    <p className="note note--problem" role="alert">
-                      <span className="note__mark" aria-hidden="true" />
-                      {problem}
-                    </p>
-                  )}
+            <div className="say">
+              <div className="say__inner">
+                {problem === null ? null : (
+                  <p className="note note--problem" role="alert">
+                    <span className="note__mark" aria-hidden="true" />
+                    {problem}
+                  </p>
+                )}
 
-                  <div className="say__box">
-                    <textarea
-                      className="say__input"
-                      aria-label={live.question === null ? 'Message Nimbus' : 'Your answer'}
-                      value={text}
-                      disabled={composerDisabled}
-                      placeholder={
-                        live.question === null
-                          ? 'Say something to steer the run'
-                          : 'Answer the question above'
-                      }
-                      onKeyDown={onKeyDown}
-                      onChange={(event): void => {
-                        setText(event.target.value);
-                      }}
-                    />
+                <div className="say__box">
+                  <textarea
+                    className="say__input"
+                    aria-label={live.question === null ? 'Message Nimbus' : 'Your answer'}
+                    value={text}
+                    disabled={composerDisabled}
+                    placeholder={
+                      live.question === null
+                        ? 'Say something to steer the run'
+                        : 'Answer the question above'
+                    }
+                    onKeyDown={onKeyDown}
+                    onChange={(event): void => {
+                      setText(event.target.value);
+                    }}
+                  />
 
-                    <div className="say__foot">
-                      <span className="say__hint">
-                        Enter sends, shift and enter makes a new line
-                      </span>
+                  <div className="say__foot">
+                    <span className="say__hint">Enter sends, shift and enter makes a new line</span>
 
-                      <Button
-                        tone="primary"
-                        className="say__send"
-                        disabled={composerDisabled || text.trim() === ''}
-                        onClick={(): void => void send()}
-                      >
-                        {live.question === null ? 'Send' : 'Answer'}
-                      </Button>
-                    </div>
+                    <Button
+                      tone="primary"
+                      className="say__send"
+                      disabled={composerDisabled || text.trim() === ''}
+                      onClick={(): void => void send()}
+                    >
+                      {live.question === null ? 'Send' : 'Answer'}
+                    </Button>
                   </div>
                 </div>
               </div>
-            ) : null}
+            </div>
           </section>
 
           {inspectorOpen ? (

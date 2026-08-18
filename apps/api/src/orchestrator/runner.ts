@@ -211,10 +211,9 @@ export class SessionRunner {
         );
         const failed = {
           status: 'failed' as const,
-          failure:
-            result.state.checks.some((check) => check.status === 'failed')
-              ? failureOf('CHECKS_FAILED')
-              : failureForRun(result.state.stopReason, result.threw),
+          failure: result.state.checks.some((check) => check.status === 'failed')
+            ? failureOf('CHECKS_FAILED')
+            : failureForRun(result.state.stopReason, result.threw),
           currentActivity: null,
           ...progress,
         };
@@ -382,7 +381,8 @@ export class SessionRunner {
     await this.#say(session, { type: 'pr.created', pullRequest: opened });
     const changed = progress.filesChanged?.length ?? 0;
     const added = progress.filesChanged?.reduce((total, file) => total + file.addedLines, 0) ?? 0;
-    const removed = progress.filesChanged?.reduce((total, file) => total + file.removedLines, 0) ?? 0;
+    const removed =
+      progress.filesChanged?.reduce((total, file) => total + file.removedLines, 0) ?? 0;
     const checks = progress.checks?.filter((check) => check.status === 'passed').length ?? 0;
     const elapsedSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1_000));
     await this.#narrate(

@@ -238,8 +238,19 @@ export class AgentSessionService {
     return toSessionSummary(renamed);
   }
 
-  async setPullRequestState(userId: string, sessionId: string, number: number, state: 'open' | 'merged' | 'closed'): Promise<SessionSummary> {
-    const written = await this.#records.setPullRequestState(userId, sessionId, number, state, this.#now());
+  async setPullRequestState(
+    userId: string,
+    sessionId: string,
+    number: number,
+    state: 'open' | 'merged' | 'closed',
+  ): Promise<SessionSummary> {
+    const written = await this.#records.setPullRequestState(
+      userId,
+      sessionId,
+      number,
+      state,
+      this.#now(),
+    );
     if (written === null) throw new ApiError('NOT_FOUND', 'We could not find that session.');
     return toSessionSummary(written);
   }
@@ -324,15 +335,14 @@ export class AgentSessionService {
       sentAt: this.#now(),
       idempotencyKey,
     };
-    const written =
-      !isActiveSessionStatus(document.status)
-        ? await this.#records.reopenWithMessage(
-            userId,
-            sessionId,
-            input,
-            document.pullRequest?.headSha ?? document.baseCommitSha,
-          )
-        : await this.#records.writeUserMessage(userId, sessionId, input);
+    const written = !isActiveSessionStatus(document.status)
+      ? await this.#records.reopenWithMessage(
+          userId,
+          sessionId,
+          input,
+          document.pullRequest?.headSha ?? document.baseCommitSha,
+        )
+      : await this.#records.writeUserMessage(userId, sessionId, input);
 
     if (written.outcome === 'inactive') {
       throw new ApiError('SESSION_NOT_ACTIVE', 'Nimbus is working on this conversation right now.');

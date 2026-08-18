@@ -1,4 +1,9 @@
-import { MessageIdSchema, SessionMessageSchema, type ServerEvent, type ToolInvocation } from '@nimbus/contracts';
+import {
+  MessageIdSchema,
+  SessionMessageSchema,
+  type ServerEvent,
+  type ToolInvocation,
+} from '@nimbus/contracts';
 
 import type {
   ActionReporter,

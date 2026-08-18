@@ -1,8 +1,6 @@
 import {
   CreateSessionResponseSchema,
   LIMITS,
-  taskThinness,
-  wordsStillNeeded,
   type RepositorySummary,
   type SelectableModel,
 } from '@nimbus/contracts';
@@ -83,8 +81,6 @@ export function Dashboard({
   const picked = mentionedRepository(task, repositories);
   const spoken = withoutMentions(task, repositories);
   const tooLong = task.length > LIMITS.taskMaxChars;
-  const thin = spoken === '' ? null : taskThinness(spoken);
-  const shortBy = wordsStillNeeded(spoken);
   const matches = mention === null ? [] : matchRepositories(repositories, mention.query);
   const ready = picked !== null && !tooLong && active === null && !attachments.busy;
 
@@ -196,13 +192,43 @@ export function Dashboard({
 
   return (
     <div className="dash" data-rail-open={railOpen}>
-      <Rail sessions={sessions} api={api} onClose={(): void => setRailOpen(false)} />
-      {railOpen ? <button className="dash__drawer-scrim" type="button" aria-label="Close sessions" onClick={(): void => setRailOpen(false)} /> : null}
+      <Rail
+        sessions={sessions}
+        api={api}
+        onClose={(): void => {
+          setRailOpen(false);
+        }}
+      />
+      {railOpen ? (
+        <button
+          className="dash__drawer-scrim"
+          type="button"
+          aria-label="Close sessions"
+          onClick={(): void => {
+            setRailOpen(false);
+          }}
+        />
+      ) : null}
 
       <div className="dash__main">
         <div className="dash__inner">
           <header className="dash__head">
-            <button className="dash__rail-toggle" type="button" aria-label="Show sessions" onClick={(): void => setRailOpen(true)}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h13A2.5 2.5 0 0 1 21 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5v-13ZM9 3v18" stroke="currentColor" strokeWidth="1.7" /></svg></button>
+            <button
+              className="dash__rail-toggle"
+              type="button"
+              aria-label="Show sessions"
+              onClick={(): void => {
+                setRailOpen(true);
+              }}
+            >
+              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M3 5.5A2.5 2.5 0 0 1 5.5 3h13A2.5 2.5 0 0 1 21 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5v-13ZM9 3v18"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                />
+              </svg>
+            </button>
             <p className="dash__eyebrow">Nimbus</p>
             <h1 className="dash__title">What should change?</h1>
             <p className="dash__sub">
@@ -402,7 +428,6 @@ export function Dashboard({
             )}
 
             <p className="compose__foot-row">
-
               <span className="compose__count" data-over={tooLong}>
                 {String(task.length)} / {String(LIMITS.taskMaxChars)}
               </span>

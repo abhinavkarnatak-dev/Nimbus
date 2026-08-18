@@ -889,8 +889,14 @@
   gap: var(--space-3);
 }
 
-.run__pr-ready[data-state='merged'] { color: #c084fc; border-color: #a855f7; }
-.run__pr-ready[data-state='closed'] { color: var(--signal-negative); border-color: var(--signal-negative); }
+.run__pr-ready[data-state='merged'] {
+  color: #c084fc;
+  border-color: #a855f7;
+}
+.run__pr-ready[data-state='closed'] {
+  color: var(--signal-negative);
+  border-color: var(--signal-negative);
+}
 
 .status[data-tone='merged'] {
   color: #c084fc;
@@ -1210,17 +1216,34 @@
     transform: translateX(0);
   }
 
-  .run__rail-toggle { display: inline-flex !important; }
+  .run__rail-toggle {
+    display: inline-flex !important;
+  }
 }
 
-.run__rail-toggle { display: none; }
-.run__drawer-scrim { display: none; }
+.run__rail-toggle {
+  display: none;
+}
+.run__drawer-scrim {
+  display: none;
+}
 
-.rail__close { display: none; }
+.rail__close {
+  display: none;
+}
 
 @media (width < 78rem) {
-  .run > .rail { background: var(--surface-raised); }
-  .run__drawer-scrim { display: block; position: fixed; z-index: 29; inset: 0; border: 0; background: rgb(0 0 0 / 0.45); }
+  .run > .rail {
+    background: var(--surface-raised);
+  }
+  .run__drawer-scrim {
+    display: block;
+    position: fixed;
+    z-index: 29;
+    inset: 0;
+    border: 0;
+    background: rgb(0 0 0 / 0.45);
+  }
   .rail__close {
     display: grid;
     place-items: center;
@@ -1236,7 +1259,9 @@
     z-index: 1;
   }
 
-  .rail__close + .rail__new { margin-top: 3.5rem; }
+  .rail__close + .rail__new {
+    margin-top: 3.5rem;
+  }
 }
 
 @media (width < 62rem) {
@@ -1252,7 +1277,9 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .run__split[data-inspector-open='true'] { grid-template-columns: minmax(0, 1fr); }
+  .run__split[data-inspector-open='true'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
   .pane {
     display: none;
@@ -1271,8 +1298,12 @@
     box-shadow: -1rem 0 2rem rgb(0 0 0 / 0.3);
   }
 
-  .thread { min-height: 0; }
-  .pane__body { overflow-y: auto; }
+  .thread {
+    min-height: 0;
+  }
+  .pane__body {
+    overflow-y: auto;
+  }
 }
 
 @media (width < 40rem) {

@@ -208,10 +208,18 @@ describe('a failed check is a delivery gate', () => {
     harness.state = parseState({
       ...harness.state,
       filesChanged: ['src/routing/redirect.ts'],
-      checks: [{ name: 'Java compile', kind: 'build', status: 'failed', summary: 'javac: missing symbol' }],
+      checks: [
+        { name: 'Java compile', kind: 'build', status: 'failed', summary: 'javac: missing symbol' },
+      ],
       toolEvents: [
         { step: 1, tool: 'apply_patch', outcome: 'ok', summary: 'changed source', atMs: 1 },
-        { step: 2, tool: 'run_checks', outcome: 'failed', summary: 'javac: missing symbol', atMs: 2 },
+        {
+          step: 2,
+          tool: 'run_checks',
+          outcome: 'failed',
+          summary: 'javac: missing symbol',
+          atMs: 2,
+        },
       ],
     });
 

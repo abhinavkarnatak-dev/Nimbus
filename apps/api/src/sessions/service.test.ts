@@ -105,9 +105,9 @@ describe('brief tasks', () => {
   it('is queued so the repository can provide the missing context', async () => {
     const harness = sessionHarness();
 
-    expect((await harness.service.create(OWNER_ID, newBody({ task: 'fix it please' }))).created).toBe(
-      true,
-    );
+    expect(
+      (await harness.service.create(OWNER_ID, newBody({ task: 'fix it please' }))).created,
+    ).toBe(true);
     expect(harness.records.documents).toHaveLength(1);
   });
 
@@ -115,8 +115,12 @@ describe('brief tasks', () => {
     const harness = sessionHarness();
 
     expect(
-      (await harness.service.create(OWNER_ID, newBody({ task: 'please make the code a bit nicer' })))
-        .created,
+      (
+        await harness.service.create(
+          OWNER_ID,
+          newBody({ task: 'please make the code a bit nicer' }),
+        )
+      ).created,
     ).toBe(true);
   });
 
@@ -407,7 +411,7 @@ describe('sending a message', () => {
 
   it('starts a fresh turn after a successful no-change answer without losing the conversation', async () => {
     const harness = sessionHarness();
-    const created = await harness.service.create(OWNER_ID, newBody());
+    await harness.service.create(OWNER_ID, newBody());
     const held = harness.records.documents[0];
 
     if (held === undefined) throw new Error('expected a session');

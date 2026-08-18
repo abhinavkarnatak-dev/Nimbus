@@ -284,7 +284,15 @@ export function ShellPane({ live }: { live: LiveSession }): React.JSX.Element {
 
 export type ManualPrState = 'open' | 'merged' | 'closed';
 
-export function PullRequestPane({ live, states, onState }: { live: LiveSession; states: Record<number, ManualPrState>; onState: (number: number, state: ManualPrState) => void }): React.JSX.Element {
+export function PullRequestPane({
+  live,
+  states,
+  onState,
+}: {
+  live: LiveSession;
+  states: Record<number, ManualPrState>;
+  onState: (number: number, state: ManualPrState) => void;
+}): React.JSX.Element {
   const pr = live.pullRequest;
   const passedChecks = live.checks.filter((check) => check.status === 'passed').length;
 
@@ -301,11 +309,13 @@ export function PullRequestPane({ live, states, onState }: { live: LiveSession; 
       ? []
       : numbers.length === 0
         ? [pr]
-        : numbers.map((number) => ({
-            ...pr,
-            number: Number(number),
-            url: pr.url.replace(/\/pull\/\d+(?:$|[?#])/, `/pull/${number}`),
-          })).sort((left, right) => right.number - left.number);
+        : numbers
+            .map((number) => ({
+              ...pr,
+              number: Number(number),
+              url: pr.url.replace(/\/pull\/\d+(?:$|[?#])/, `/pull/${number}`),
+            }))
+            .sort((left, right) => right.number - left.number);
 
   if (pr === null) {
     return (
@@ -322,78 +332,90 @@ export function PullRequestPane({ live, states, onState }: { live: LiveSession; 
         const url = safeHref(one.url);
         const current = one.number === pr.number;
         const state = states[one.number] ?? 'open';
-        const delivery = live.messages.find((message) =>
-          message.role === 'agent' && message.text.includes(`PR #${String(one.number)}`),
+        const delivery = live.messages.find(
+          (message) =>
+            message.role === 'agent' && message.text.includes(`PR #${String(one.number)}`),
         )?.text;
         const lineMatch = delivery === undefined ? null : /\+(\d+)\s+−(\d+)\s+lines/.exec(delivery);
         return (
-    <div className="pr" key={one.number} data-state={state}>
-      <div className="pr__head">
-        <p className="pr__eyebrow">{current ? 'Current pull request' : 'Pull request'} · {state}</p>
-        <p className="pr__no">#{String(one.number)}</p>
-      </div>
+          <div className="pr" key={one.number} data-state={state}>
+            <div className="pr__head">
+              <p className="pr__eyebrow">
+                {current ? 'Current pull request' : 'Pull request'} · {state}
+              </p>
+              <p className="pr__no">#{String(one.number)}</p>
+            </div>
 
-      <p className="pr__summary">
-        Nimbus pushed from <code>{one.branch}</code> with <span className="pr__added">+{lineMatch?.[1] ?? '—'}</span> and{' '}<span className="pr__removed">−{lineMatch?.[2] ?? '—'}</span> lines.{' '}
-        {passedChecks === 0
-          ? 'No checks were recorded for this run.'
-          : `${String(passedChecks)} ${passedChecks === 1 ? 'check' : 'checks'} passed before it was opened.`}
-      </p>
+            <p className="pr__summary">
+              Nimbus pushed from <code>{one.branch}</code> with{' '}
+              <span className="pr__added">+{lineMatch?.[1] ?? '—'}</span> and{' '}
+              <span className="pr__removed">−{lineMatch?.[2] ?? '—'}</span> lines.{' '}
+              {passedChecks === 0
+                ? 'No checks were recorded for this run.'
+                : `${String(passedChecks)} ${passedChecks === 1 ? 'check' : 'checks'} passed before it was opened.`}
+            </p>
 
-      <dl className="facts">
-        <div className="fact">
-          <dt>Branch</dt>
-          <dd>{one.branch}</dd>
-        </div>
+            <dl className="facts">
+              <div className="fact">
+                <dt>Branch</dt>
+                <dd>{one.branch}</dd>
+              </div>
 
-        <div className="fact">
-          <dt>Commit</dt>
-          <dd>{one.headSha.slice(0, 12)}</dd>
-        </div>
+              <div className="fact">
+                <dt>Commit</dt>
+                <dd>{one.headSha.slice(0, 12)}</dd>
+              </div>
 
-        <div className="fact">
-          <dt>Opened</dt>
-          <dd>{new Date(one.createdAt).toLocaleString()}</dd>
-        </div>
-      </dl>
+              <div className="fact">
+                <dt>Opened</dt>
+                <dd>{new Date(one.createdAt).toLocaleString()}</dd>
+              </div>
+            </dl>
 
-      {url === null ? null : (
-        <a
-          className="button button--primary pr__review"
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Review it on GitHub
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M6 3h7v7h-1.5V5.56L4.53 12.53l-1.06-1.06L10.44 4.5H6V3Z" />
-          </svg>
-        </a>
-      )}
+            {url === null ? null : (
+              <a
+                className="button button--primary pr__review"
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Review it on GitHub
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M6 3h7v7h-1.5V5.56L4.53 12.53l-1.06-1.06L10.44 4.5H6V3Z" />
+                </svg>
+              </a>
+            )}
 
-      <div className="pr__state-actions" aria-label={`Set pull request #${String(one.number)} status`}>
-        <button
-          className="pr__state"
-          type="button"
-          data-active={state === 'merged'}
-          onClick={(): void => onState(one.number, 'merged')}
-        >
-          Mark merged
-        </button>
-        <button
-          className="pr__state pr__state--closed"
-          type="button"
-          data-active={state === 'closed'}
-          onClick={(): void => onState(one.number, 'closed')}
-        >
-          Mark closed
-        </button>
-      </div>
+            <div
+              className="pr__state-actions"
+              aria-label={`Set pull request #${String(one.number)} status`}
+            >
+              <button
+                className="pr__state"
+                type="button"
+                data-active={state === 'merged'}
+                onClick={(): void => {
+                  onState(one.number, 'merged');
+                }}
+              >
+                Mark merged
+              </button>
+              <button
+                className="pr__state pr__state--closed"
+                type="button"
+                data-active={state === 'closed'}
+                onClick={(): void => {
+                  onState(one.number, 'closed');
+                }}
+              >
+                Mark closed
+              </button>
+            </div>
 
-      <p className="pr__why">
-        Nothing is merged. Reviewing, changing and merging all happen on GitHub, by you.
-      </p>
-    </div>
+            <p className="pr__why">
+              Nothing is merged. Reviewing, changing and merging all happen on GitHub, by you.
+            </p>
+          </div>
         );
       })}
     </div>

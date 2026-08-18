@@ -64,8 +64,16 @@ export const MESSAGE_ID_PREFIX = 'msg';
 
 export const MAX_SESSION_MESSAGES = LIMITS.maxMessagesPerSession;
 
-export const ACTIVE_SESSION_STATUSES: readonly SessionStatus[] = SESSION_STATUSES.filter(
-  (status) => ['queued', 'provisioning', 'indexing', 'working', 'awaiting_user', 'validating', 'pushing'].includes(status),
+export const ACTIVE_SESSION_STATUSES: readonly SessionStatus[] = SESSION_STATUSES.filter((status) =>
+  [
+    'queued',
+    'provisioning',
+    'indexing',
+    'working',
+    'awaiting_user',
+    'validating',
+    'pushing',
+  ].includes(status),
 );
 
 export interface SessionRepositoryDocument {

@@ -33,7 +33,12 @@ export const SESSION_STATUSES = [
 export const SessionStatusSchema = z.enum(SESSION_STATUSES);
 
 /** A conversation is only deleted explicitly. These are terminal *turn* states. */
-export const TERMINAL_SESSION_STATUSES = ['completed', 'pr_created', 'failed', 'cancelled'] as const;
+export const TERMINAL_SESSION_STATUSES = [
+  'completed',
+  'pr_created',
+  'failed',
+  'cancelled',
+] as const;
 
 export const RUN_STATUSES = [
   'queued',
@@ -56,7 +61,9 @@ export const DELIVERY_STATUSES = [
 export const RunStatusSchema = z.enum(RUN_STATUSES);
 export const DeliveryStatusSchema = z.enum(DELIVERY_STATUSES);
 export const ManualPrStateSchema = z.enum(['open', 'merged', 'closed']);
-export const ManualPrStatesSchema = z.record(z.string().regex(/^\d+$/), ManualPrStateSchema).default({});
+export const ManualPrStatesSchema = z
+  .record(z.string().regex(/^\d+$/), ManualPrStateSchema)
+  .default({});
 
 export const FAILURE_CODES = [
   'TASK_TOO_BROAD',

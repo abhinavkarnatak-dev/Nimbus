@@ -90,7 +90,13 @@ export interface SessionRecords {
     title: string,
     at: Date,
   ): Promise<SessionDocument | null>;
-  setPullRequestState(userId: string, sessionId: string, number: number, state: 'open' | 'merged' | 'closed', at: Date): Promise<SessionDocument | null>;
+  setPullRequestState(
+    userId: string,
+    sessionId: string,
+    number: number,
+    state: 'open' | 'merged' | 'closed',
+    at: Date,
+  ): Promise<SessionDocument | null>;
   finish(
     userId: string,
     sessionId: string,
@@ -194,7 +200,13 @@ export class MongoSessionRecords implements SessionRecords {
     );
   }
 
-  async setPullRequestState(userId: string, sessionId: string, number: number, state: 'open' | 'merged' | 'closed', at: Date): Promise<SessionDocument | null> {
+  async setPullRequestState(
+    userId: string,
+    sessionId: string,
+    number: number,
+    state: 'open' | 'merged' | 'closed',
+    at: Date,
+  ): Promise<SessionDocument | null> {
     return await sessionsCollection(this.db).findOneAndUpdate(
       { userId, sessionId },
       { $set: { [`manualPrStates.${String(number)}`]: state, updatedAt: at, lastActivityAt: at } },
@@ -603,7 +615,13 @@ export class InMemorySessionRecords implements SessionRecords {
     return Promise.resolve({ ...held });
   }
 
-  async setPullRequestState(userId: string, sessionId: string, number: number, state: 'open' | 'merged' | 'closed', at: Date): Promise<SessionDocument | null> {
+  async setPullRequestState(
+    userId: string,
+    sessionId: string,
+    number: number,
+    state: 'open' | 'merged' | 'closed',
+    at: Date,
+  ): Promise<SessionDocument | null> {
     const held = this.documents.find((one) => one.userId === userId && one.sessionId === sessionId);
     if (held === undefined) return Promise.resolve(null);
     held.manualPrStates = { ...(held.manualPrStates ?? {}), [String(number)]: state };
@@ -620,7 +638,9 @@ export class InMemorySessionRecords implements SessionRecords {
   ): Promise<SessionDocument | null> {
     const held = this.documents.find(
       (one) =>
-        one.sessionId === sessionId && one.userId === userId && (isActiveSessionStatus(one.status) || one.status === 'ready'),
+        one.sessionId === sessionId &&
+        one.userId === userId &&
+        (isActiveSessionStatus(one.status) || one.status === 'ready'),
     );
 
     if (held === undefined) {
@@ -927,7 +947,9 @@ export class InMemorySessionRecords implements SessionRecords {
     messageId = newPrefixedId(MESSAGE_ID_PREFIX),
   ): Promise<boolean> {
     const held = this.documents.find(
-      (one) => one.sessionId === sessionId && (isActiveSessionStatus(one.status) || one.status === 'ready'),
+      (one) =>
+        one.sessionId === sessionId &&
+        (isActiveSessionStatus(one.status) || one.status === 'ready'),
     );
 
     if (held === undefined) {
@@ -1032,7 +1054,7 @@ export function outcomeFields(outcome: RunOutcome, at: Date): Partial<SessionDoc
           ? 'cancelled'
           : awaiting
             ? 'awaiting_user'
-        : 'working';
+            : 'working';
   const deliveryStatus =
     outcome.deliveryStatus ??
     (outcome.status === 'completed'

@@ -127,7 +127,7 @@ export function useLiveSession(api: ApiClient, sessionId: SessionId | null): Liv
           return;
         }
 
-        setLoaded((held) => ({
+        setLoaded(() => ({
           sessionId,
           detail: found.session,
           from: found.lastEventSequence,

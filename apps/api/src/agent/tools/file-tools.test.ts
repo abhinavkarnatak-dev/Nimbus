@@ -336,7 +336,14 @@ describe('apply_patch', () => {
   it('applies matching context when a model supplied a stale hunk line number', async () => {
     const { sandbox } = await workspace({ 'one.txt': 'first\nsecond\nthird\n' });
     await applyPatch(sandbox, {
-      patch: ['--- a/one.txt', '+++ b/one.txt', '@@ -20,1 +20,1 @@', '-second', '+updated', ''].join('\n'),
+      patch: [
+        '--- a/one.txt',
+        '+++ b/one.txt',
+        '@@ -20,1 +20,1 @@',
+        '-second',
+        '+updated',
+        '',
+      ].join('\n'),
     });
     expect(await sandbox.readFile('one.txt')).toBe('first\nupdated\nthird\n');
   });

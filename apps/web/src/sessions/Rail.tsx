@@ -75,7 +75,9 @@ function RunRow({
     };
 
     document.addEventListener('pointerdown', closeFromOutside);
-    return (): void => document.removeEventListener('pointerdown', closeFromOutside);
+    return (): void => {
+      document.removeEventListener('pointerdown', closeFromOutside);
+    };
   }, [menuOpen]);
   const rename = async (): Promise<void> => {
     const nextTitle = title.trim();
@@ -118,7 +120,9 @@ function RunRow({
               autoFocus
               value={title}
               maxLength={120}
-              onChange={(event): void => setTitle(event.target.value)}
+              onChange={(event): void => {
+                setTitle(event.target.value);
+              }}
               onKeyDown={(event): void => {
                 if (event.key === 'Enter') void rename();
                 if (event.key === 'Escape') {
@@ -156,7 +160,9 @@ function RunRow({
           className="run-row__session"
           href={sessionPath(session.sessionId)}
           aria-current={open ? 'page' : undefined}
-          onClick={(event): void => navigateFromRail(event, sessionPath(session.sessionId))}
+          onClick={(event): void => {
+            navigateFromRail(event, sessionPath(session.sessionId));
+          }}
         >
           <span className="run-row__task">{plainText(title, 240)}</span>
           <span className="run-row__repo">
@@ -188,7 +194,12 @@ function RunRow({
               <>
                 <span className="run-row__confirm">Delete this session?</span>
                 <span className="run-row__confirm-actions">
-                  <button type="button" onClick={(): void => setConfirmingDelete(false)}>
+                  <button
+                    type="button"
+                    onClick={(): void => {
+                      setConfirmingDelete(false);
+                    }}
+                  >
                     Cancel
                   </button>
                   <button type="button" onClick={(): void => void remove()}>
@@ -208,7 +219,12 @@ function RunRow({
                 >
                   Rename
                 </button>
-                <button type="button" onClick={(): void => setConfirmingDelete(true)}>
+                <button
+                  type="button"
+                  onClick={(): void => {
+                    setConfirmingDelete(true);
+                  }}
+                >
                   Delete
                 </button>
               </>
@@ -218,7 +234,15 @@ function RunRow({
         {session.status === 'awaiting_user' || session.status === 'queued' ? null : (
           <span
             className="status"
-            data-tone={pullRequest === null ? toneFor(session.status) : prState === 'closed' ? 'failed' : prState === 'merged' ? 'merged' : 'done'}
+            data-tone={
+              pullRequest === null
+                ? toneFor(session.status)
+                : prState === 'closed'
+                  ? 'failed'
+                  : prState === 'merged'
+                    ? 'merged'
+                    : 'done'
+            }
           >
             <span className="status__dot" aria-hidden="true" />
             {pullRequest === null
@@ -231,9 +255,9 @@ function RunRow({
           </span>
         )}
         {pullRequest === null ? null : (
-            <a
-              className="run-row__pr"
-              data-state={prState}
+          <a
+            className="run-row__pr"
+            data-state={prState}
             href={pullRequest.url}
             aria-label={`Open pull request #${String(pullRequest.number)} on GitHub`}
             title={`Open pull request #${String(pullRequest.number)} on GitHub`}
@@ -250,7 +274,13 @@ function RunRow({
   );
 }
 
-export function Rail({ sessions, openSessionId, api, prStates = {}, onClose }: RailProps): React.JSX.Element {
+export function Rail({
+  sessions,
+  openSessionId,
+  api,
+  prStates = {},
+  onClose,
+}: RailProps): React.JSX.Element {
   const now = Date.now();
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -272,7 +302,9 @@ export function Rail({ sessions, openSessionId, api, prStates = {}, onClose }: R
 
   return (
     <aside className="rail" aria-label="Your sessions">
-      <button className="rail__close" type="button" aria-label="Hide sessions" onClick={onClose}>×</button>
+      <button className="rail__close" type="button" aria-label="Hide sessions" onClick={onClose}>
+        ×
+      </button>
       <a
         className="rail__new button button--secondary"
         href={ROUTE_PATHS.dashboard}
@@ -300,7 +332,9 @@ export function Rail({ sessions, openSessionId, api, prStates = {}, onClose }: R
                 type="search"
                 value={query}
                 placeholder="Search sessions"
-                onChange={(event): void => setQuery(event.target.value)}
+                onChange={(event): void => {
+                  setQuery(event.target.value);
+                }}
               />
               <button
                 type="button"
@@ -324,7 +358,9 @@ export function Rail({ sessions, openSessionId, api, prStates = {}, onClose }: R
                   aria-label="Search sessions"
                   aria-pressed={searchOpen}
                   title="Search sessions"
-                  onClick={(): void => setSearchOpen((open) => !open)}
+                  onClick={(): void => {
+                    setSearchOpen((open) => !open);
+                  }}
                 >
                   <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <circle cx="10.8" cy="10.8" r="6.3" />
@@ -337,7 +373,9 @@ export function Rail({ sessions, openSessionId, api, prStates = {}, onClose }: R
                   aria-label={`Sort sessions by last ${sortBy === 'updated' ? 'updated' : 'created'}`}
                   aria-expanded={sortOpen}
                   title="Sort sessions"
-                  onClick={(): void => setSortOpen((open) => !open)}
+                  onClick={(): void => {
+                    setSortOpen((open) => !open);
+                  }}
                 >
                   <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
                     <path
@@ -384,15 +422,17 @@ export function Rail({ sessions, openSessionId, api, prStates = {}, onClose }: R
           ) : (
             <div className="history__list">
               {visibleSessions.map((one) => (
-          <RunRow
+                <RunRow
                   key={one.sessionId}
                   session={one}
                   now={now}
                   open={one.sessionId === openSessionId}
                   api={api}
                   refresh={sessions.refresh}
-            replaceSession={sessions.replaceSession}
-            {...(prStates[one.sessionId] === undefined ? {} : { prState: prStates[one.sessionId] })}
+                  replaceSession={sessions.replaceSession}
+                  {...(prStates[one.sessionId] === undefined
+                    ? {}
+                    : { prState: prStates[one.sessionId] })}
                 />
               ))}
             </div>

@@ -150,7 +150,12 @@ describe('a note from the agent', () => {
     ]);
     expect(events.published.at(-1)?.event).toStrictEqual({
       type: 'agent.message',
-      message: { messageId: MESSAGE_ID, role: 'agent', text: 'I found the redirect.', sentAt: AT.toISOString() },
+      message: {
+        messageId: MESSAGE_ID,
+        role: 'agent',
+        text: 'I found the redirect.',
+        sentAt: AT.toISOString(),
+      },
     });
   });
 
