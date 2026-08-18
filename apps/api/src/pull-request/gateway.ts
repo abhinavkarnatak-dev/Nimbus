@@ -8,6 +8,7 @@ import {
 import type { MailService } from '../email/mail-service.js';
 import type { GitHubTokenProvider, InstallationToken } from '../github/token-provider.js';
 import type { Logger } from '../logging/logger.js';
+import { alerting } from '../logging/alerts.js';
 import { buildPullRequestBody } from './body.js';
 import {
   PullRequestExistsError,
@@ -106,7 +107,7 @@ export class TrustedPullRequestGateway implements PullRequestGateway {
       });
     } catch (error) {
       this.options.logger?.warn(
-        { err: error, pullRequest: opened.number },
+        alerting('pull_request_anomaly', { err: error, pullRequest: opened.number }),
         'pull request opened but the notification could not be sent',
       );
     }

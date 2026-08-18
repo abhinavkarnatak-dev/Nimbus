@@ -21,6 +21,7 @@ import { ApiError } from '../http/api-error.js';
 import { newPrefixedId } from '../lib/id.js';
 import type { SecretBox } from '../lib/secret-box.js';
 import { SecretBoxError } from '../lib/secret-box.js';
+import { alerting } from '../logging/alerts.js';
 import type { Logger } from '../logging/logger.js';
 import type { ProviderKeyVerifier } from './verify.js';
 
@@ -163,11 +164,11 @@ export class ProviderKeyService {
       return this.#box.open(document.sealed, sealedBinding(document.userId, document.provider));
     } catch (error) {
       this.#logger.error(
-        {
+        alerting('provider_key_rejected', {
           userId: document.userId,
           provider: document.provider,
           sealedBy: error instanceof SecretBoxError ? 'a different secret' : 'an unknown fault',
-        },
+        }),
         'a saved provider key could not be opened, that provider is unusable until it is saved again',
       );
       return null;

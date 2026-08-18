@@ -71,6 +71,11 @@ export interface AppConfig {
   redis: { url: string };
   session: { secret: string; ttlSeconds: number };
   otp: { ttlSeconds: number; maxAttempts: number; requestLimitPerHour: number };
+  operations: {
+    agentSessionsEnabled: boolean;
+    sessionStartLimitPerHour: number;
+    sessionMessageLimitPerMinute: number;
+  };
   google: GoogleConfig | null;
   github: GitHubConfig | null;
   sandbox: SandboxConfig;
@@ -273,6 +278,11 @@ function toAppConfig(raw: RawEnvironment): AppConfig {
     mongo: { uri: raw.MONGODB_URI },
     redis: { url: raw.REDIS_URL },
     session: { secret: raw.SESSION_SECRET, ttlSeconds: raw.SESSION_TTL_SECONDS },
+    operations: {
+      agentSessionsEnabled: raw.AGENT_SESSIONS_ENABLED,
+      sessionStartLimitPerHour: raw.SESSION_START_LIMIT_PER_HOUR,
+      sessionMessageLimitPerMinute: raw.SESSION_MESSAGE_LIMIT_PER_MINUTE,
+    },
     otp: {
       ttlSeconds: raw.OTP_TTL_SECONDS,
       maxAttempts: raw.OTP_MAX_ATTEMPTS,

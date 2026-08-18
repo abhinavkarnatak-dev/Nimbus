@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { recordAuditEvent } from '../auth/audit.js';
 import type { GitHubConfig } from '../config/load.js';
+import { alerting } from '../logging/alerts.js';
 import type { AuditAction } from '../db/models/audit-event.js';
 import {
   githubInstallationsCollection,
@@ -111,7 +112,11 @@ export class GitHubWebhookService {
   async handle(delivery: WebhookDelivery): Promise<WebhookResult> {
     if (!verifySignature(this.github.webhookSecret, delivery.body, delivery.signature)) {
       this.logger.warn(
-        { event: delivery.event, ip: delivery.ip, signed: delivery.signature !== '' },
+        alerting('webhook_failed', {
+          event: delivery.event,
+          ip: delivery.ip,
+          signed: delivery.signature !== '',
+        }),
         'Refused a GitHub webhook with a missing or invalid signature',
       );
       throw new ApiError('UNAUTHENTICATED', 'That request could not be verified.');

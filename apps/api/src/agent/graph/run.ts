@@ -1,3 +1,4 @@
+import { alerting } from '../../logging/alerts.js';
 import type { SandboxTerminationReason } from '../../sandbox/index.js';
 import { stopped } from '../state/state.js';
 import { buildAgentGraph, type RunInput, type RunResult } from './graph.js';
@@ -87,7 +88,10 @@ async function tearDown(input: RunInput, result: RunResult | null): Promise<void
     await input.sandbox.terminate(result === null ? 'failed' : terminationFor(result));
   } catch (error) {
     input.logger.warn(
-      { sessionId: input.state.sessionId, error: String(error) },
+      alerting('sandbox_cleanup_failed', {
+        sessionId: input.state.sessionId,
+        error: String(error),
+      }),
       'a sandbox could not be torn down',
     );
   }

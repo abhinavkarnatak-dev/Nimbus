@@ -3,6 +3,7 @@ import { PushResultSchema, type PatchValidationReport, type PushResult } from '@
 import { applyPatchToFile, parsePatch, type PatchFile } from '../agent/tools/patch.js';
 import type { GitHubTokenProvider, InstallationToken } from '../github/token-provider.js';
 import type { Logger } from '../logging/logger.js';
+import { alerting } from '../logging/alerts.js';
 import { branchNameFor } from './branch-name.js';
 import {
   BLOB_MODE,
@@ -241,7 +242,10 @@ export class TrustedPushGateway implements PushGateway {
       try {
         await this.options.tokens.revoke(token);
       } catch (error) {
-        this.options.logger?.warn({ err: error }, 'push token could not be revoked');
+        this.options.logger?.warn(
+          alerting('push_anomaly', { err: error }),
+          'push token could not be revoked',
+        );
       }
     }
   }

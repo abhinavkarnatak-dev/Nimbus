@@ -73,6 +73,10 @@ export const environmentSchema = z.object({
   OTP_MAX_ATTEMPTS: positiveInt.max(20).default(5),
   OTP_REQUEST_LIMIT_PER_HOUR: positiveInt.max(100).default(5),
 
+  AGENT_SESSIONS_ENABLED: boolean.default(true),
+  SESSION_START_LIMIT_PER_HOUR: positiveInt.max(500).default(20),
+  SESSION_MESSAGE_LIMIT_PER_MINUTE: positiveInt.max(600).default(20),
+
   GOOGLE_CLIENT_ID: optionalText,
   GOOGLE_CLIENT_SECRET: optionalText,
   GOOGLE_CALLBACK_URL: httpUrl.optional(),

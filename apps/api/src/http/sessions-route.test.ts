@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../app.js';
 import { CSRF_HEADER } from '../auth/csrf.js';
+import { allowEveryRequest, type RequestLimiter } from './middleware/rate-limit.js';
 import type { ActiveSession } from '../auth/session-service.js';
 import { InMemorySessionRecords } from '../sessions/repository.js';
 import { AgentSessionService } from '../sessions/service.js';
@@ -71,7 +72,14 @@ beforeEach(() => {
   });
 });
 
-function harness(options: { signedIn?: boolean; user?: AuthenticatedUser } = {}): Express {
+function harness(
+  options: {
+    signedIn?: boolean;
+    user?: AuthenticatedUser;
+    agentSessionsEnabled?: boolean;
+    startLimit?: RequestLimiter;
+  } = {},
+): Express {
   const { logger } = createTestLogger();
   const user = options.user ?? USER;
 
@@ -86,7 +94,15 @@ function harness(options: { signedIn?: boolean; user?: AuthenticatedUser } = {})
   return createApp({
     config: testConfig(),
     logger,
-    routers: [createSessionsRouter({ sessions: service, auth })],
+    routers: [
+      createSessionsRouter({
+        sessions: service,
+        auth,
+        agentSessionsEnabled: options.agentSessionsEnabled ?? true,
+        startLimit: options.startLimit ?? allowEveryRequest(),
+        messageLimit: allowEveryRequest(),
+      }),
+    ],
     attachSession: createAttachSession(auth, false),
   });
 }

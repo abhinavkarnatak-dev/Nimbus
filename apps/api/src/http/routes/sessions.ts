@@ -14,14 +14,29 @@ import {
 import { Router } from 'express';
 
 import type { CsrfChecker } from '../../auth/session-service.js';
+import type { Logger } from '../../logging/logger.js';
 import type { AgentSessionService } from '../../sessions/service.js';
 import { ApiError } from '../api-error.js';
+import { createRateLimit, type RequestLimiter } from '../middleware/rate-limit.js';
 import { createRequireAuth, createRequireCsrf, requireSession } from '../middleware/session.js';
 import { validateBody, validatedBody } from '../middleware/validate.js';
+
+export const SESSIONS_SWITCHED_OFF =
+  'Starting a session is switched off on this deployment right now. Everything you already have stays readable.';
+
+export const TOO_MANY_SESSIONS =
+  'You have started a lot of sessions in a short time. Wait a moment and try again.';
+
+export const TOO_MANY_MESSAGES =
+  'You are sending messages faster than Nimbus can act on them. Wait a moment and try again.';
 
 export interface SessionsRouterOptions {
   sessions: AgentSessionService;
   auth: CsrfChecker;
+  agentSessionsEnabled: boolean;
+  startLimit: RequestLimiter;
+  messageLimit: RequestLimiter;
+  logger?: Logger;
 }
 
 function readSessionId(value: unknown): string {
@@ -44,12 +59,31 @@ export function createSessionsRouter(options: SessionsRouterOptions): Router {
     response.status(200).json(await options.sessions.modelCatalogue(account.user.userId));
   });
 
+  const startLimit = createRateLimit({
+    limiter: options.startLimit,
+    subject: (request) => requireSession(request).user.userId,
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
+    message: TOO_MANY_SESSIONS,
+  });
+
+  const messageLimit = createRateLimit({
+    limiter: options.messageLimit,
+    subject: (request) => requireSession(request).user.userId,
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
+    message: TOO_MANY_MESSAGES,
+  });
+
   router.post(
     '/sessions',
     requireAuth,
     requireCsrf,
+    startLimit,
     validateBody(CreateSessionBodySchema),
     async (request, response) => {
+      if (!options.agentSessionsEnabled) {
+        throw new ApiError('AGENT_SESSIONS_DISABLED', SESSIONS_SWITCHED_OFF);
+      }
+
       const account = requireSession(request);
       const body = validatedBody(request, CreateSessionBodySchema);
       const created = await options.sessions.create(account.user.userId, body);
@@ -139,6 +173,7 @@ export function createSessionsRouter(options: SessionsRouterOptions): Router {
     '/sessions/:sessionId/messages',
     requireAuth,
     requireCsrf,
+    messageLimit,
     validateBody(PostMessageBodySchema),
     async (request, response) => {
       const account = requireSession(request);

@@ -60,6 +60,7 @@ import { createGitHubRouter } from './http/routes/github.js';
 import type { DependencyCheck } from './http/routes/health.js';
 import type { Logger } from './logging/logger.js';
 import { LeaseManager } from './redis/lease.js';
+import { RateLimiter } from './redis/rate-limit.js';
 import { closeRedis, connectRedis } from './redis/client.js';
 import { LiveE2bClient } from './sandbox/e2b-live-client.js';
 import { SandboxSweeper, leaseLock } from './sandbox/sweeper.js';
@@ -334,6 +335,18 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     routers.push(
       createSessionsRouter({
         auth: sessions,
+        logger,
+        agentSessionsEnabled: config.operations.agentSessionsEnabled,
+        startLimit: new RateLimiter(redis, {
+          name: 'session-start-account',
+          capacity: config.operations.sessionStartLimitPerHour,
+          refillWindowSeconds: 3_600,
+        }),
+        messageLimit: new RateLimiter(redis, {
+          name: 'session-message-account',
+          capacity: config.operations.sessionMessageLimitPerMinute,
+          refillWindowSeconds: 60,
+        }),
         sessions: new AgentSessionService({
           records: sessionRecords,
           attachments: attachmentRecords,
@@ -351,7 +364,15 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     );
   }
 
-  logger.info({ agentSessions: repositories !== null }, 'Agent sessions ready');
+  logger.info(
+    {
+      agentSessions: repositories !== null,
+      startingNewOnesAllowed: config.operations.agentSessionsEnabled,
+      startsPerHour: config.operations.sessionStartLimitPerHour,
+      messagesPerMinute: config.operations.sessionMessageLimitPerMinute,
+    },
+    'Agent sessions ready',
+  );
 
   const orchestrator =
     repositories === null || githubTokens === null
