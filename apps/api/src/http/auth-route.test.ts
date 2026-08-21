@@ -46,6 +46,7 @@ function activeSession(): ActiveSession {
     sessionId: SESSION_ID,
     sessionKey: 'hashed',
     csrfToken: CSRF_TOKEN,
+    expiresInSeconds: 604_800,
     user: USER,
     record: {
       userId: USER.userId,
@@ -244,7 +245,7 @@ describe('POST /auth/otp/verify', () => {
 
     const response = await request(app)
       .post('/auth/otp/verify')
-      .send({ requestId: REQUEST_ID, email: 'person@example.com', code: '12345678' });
+      .send({ requestId: REQUEST_ID, email: 'person@example.com', code: '123456' });
 
     expect(response.status).toBe(200);
     const cookies = response.headers['set-cookie'] as unknown as string[];
@@ -256,7 +257,7 @@ describe('POST /auth/otp/verify', () => {
 
     const response = await request(app)
       .post('/auth/otp/verify')
-      .send({ requestId: REQUEST_ID, email: 'person@example.com', code: '12345678' });
+      .send({ requestId: REQUEST_ID, email: 'person@example.com', code: '123456' });
 
     const cookie = (response.headers['set-cookie'] as unknown as string[]).join(';');
     expect(cookie).toContain('HttpOnly');
@@ -269,7 +270,7 @@ describe('POST /auth/otp/verify', () => {
 
     const response = await request(app)
       .post('/auth/otp/verify')
-      .send({ requestId: REQUEST_ID, email: 'person@example.com', code: '12345678' });
+      .send({ requestId: REQUEST_ID, email: 'person@example.com', code: '123456' });
 
     const context = MeResponseSchema.parse(response.body);
     expect(context.csrfToken).toBe(CSRF_TOKEN);
@@ -283,7 +284,7 @@ describe('POST /auth/otp/verify', () => {
     await request(app)
       .post('/auth/otp/verify')
       .set('Cookie', cookieHeader())
-      .send({ requestId: REQUEST_ID, email: 'person@example.com', code: '12345678' });
+      .send({ requestId: REQUEST_ID, email: 'person@example.com', code: '123456' });
 
     expect(startedFor[0]?.replacing).toBe(SESSION_ID);
   });
@@ -304,7 +305,7 @@ describe('POST /auth/otp/verify', () => {
 
     const response = await request(app)
       .post('/auth/otp/verify')
-      .send({ requestId: 'nope', email: 'person@example.com', code: '12345678' });
+      .send({ requestId: 'nope', email: 'person@example.com', code: '123456' });
 
     expect(response.status).toBe(400);
     expect(verifyCalls).toHaveLength(0);

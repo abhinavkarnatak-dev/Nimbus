@@ -24,7 +24,6 @@ import {
 import { SessionStore, type SessionRecord } from './session-store.js';
 
 export const SESSION_ID_BYTES = 32;
-export const ABSOLUTE_LIFETIME_MULTIPLIER = 24;
 
 export interface SessionServiceOptions {
   redis: Redis;
@@ -46,6 +45,7 @@ export interface ActiveSession {
   csrfToken: string;
   user: AuthenticatedUser;
   record: SessionRecord;
+  expiresInSeconds: number;
 }
 
 export interface SessionReader {
@@ -78,13 +78,20 @@ export class SessionService {
     this.db = options.db;
     this.idleTtlSeconds = options.config.session.ttlSeconds;
     this.absoluteLifetimeSeconds =
-      options.absoluteLifetimeSeconds ?? this.idleTtlSeconds * ABSOLUTE_LIFETIME_MULTIPLIER;
+      options.absoluteLifetimeSeconds ?? options.config.session.absoluteTtlSeconds;
     this.sessionKeyMaterial = deriveKey(options.config.session.secret, SESSION_KEY_INFO);
     this.csrfKeyMaterial = deriveKey(options.config.session.secret, CSRF_KEY_INFO);
     this.store = new SessionStore(options.redis, {
       idleTtlSeconds: this.idleTtlSeconds,
+      absoluteTtlSeconds: this.absoluteLifetimeSeconds,
       logger: options.logger,
     });
+  }
+
+  private cookieSecondsFor(absoluteExpiresAt: string): number {
+    const remaining = Math.floor((new Date(absoluteExpiresAt).getTime() - Date.now()) / 1000);
+
+    return Math.max(0, Math.min(this.idleTtlSeconds, remaining));
   }
 
   keyFor(sessionId: string): string {
@@ -103,19 +110,20 @@ export class SessionService {
     const sessionId = generateSessionId();
     const sessionKey = this.keyFor(sessionId);
     const now = new Date();
+    const absoluteExpiresAt = new Date(
+      now.getTime() + this.absoluteLifetimeSeconds * 1000,
+    ).toISOString();
 
     await this.store.save(sessionKey, {
       userId,
       createdAt: now.toISOString(),
-      absoluteExpiresAt: new Date(
-        now.getTime() + this.absoluteLifetimeSeconds * 1000,
-      ).toISOString(),
+      absoluteExpiresAt,
     });
 
     return {
       sessionId,
       csrfToken: this.csrfTokenForKey(sessionKey),
-      expiresInSeconds: this.idleTtlSeconds,
+      expiresInSeconds: this.cookieSecondsFor(absoluteExpiresAt),
     };
   }
 
@@ -154,6 +162,7 @@ export class SessionService {
       csrfToken: this.csrfTokenForKey(sessionKey),
       record,
       user: toAuthenticatedUser(document),
+      expiresInSeconds: this.cookieSecondsFor(record.absoluteExpiresAt),
     };
   }
 

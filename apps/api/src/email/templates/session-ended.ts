@@ -1,4 +1,11 @@
-import { joinLines, layout, paragraph, type EmailTemplate, type RenderedEmail } from '../render.js';
+import {
+  fineParagraph,
+  joinLines,
+  layout,
+  paragraph,
+  type EmailTemplate,
+  type RenderedEmail,
+} from '../render.js';
 
 export interface SessionEndedData {
   repository: string;
@@ -36,7 +43,7 @@ export const sessionEndedTemplate: EmailTemplate<SessionEndedData> = {
         paragraph(`Repository: ${data.repository}`),
         paragraph(`Task: ${data.task}`),
         paragraph(`What happened: ${data.reason}`),
-        paragraph(
+        fineParagraph(
           'Nothing was pushed and no pull request was opened, so your repository is unchanged. You can start another session whenever you are ready.',
         ),
       ]),

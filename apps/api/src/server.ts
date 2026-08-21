@@ -224,7 +224,14 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
           logger,
         });
 
-  logger.info({ googleSignIn: google !== undefined }, 'Sign in methods ready');
+  logger.info(
+    {
+      googleSignIn: google !== undefined,
+      staysSignedInForDays: config.session.ttlSeconds / 86_400,
+      mustSignInAgainAfterDays: config.session.absoluteTtlSeconds / 86_400,
+    },
+    'Sign in methods ready',
+  );
 
   const authRouter = createAuthRouter({
     otp,
@@ -407,7 +414,6 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
             pullRequests: new TrustedPullRequestGateway({
               tokens: githubTokens,
               clients: new OctokitPullRequestClientFactory(),
-              mail,
               logger,
             }),
             logger,

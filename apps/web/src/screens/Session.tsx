@@ -663,47 +663,45 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
             </div>
           </section>
 
-          {inspectorOpen ? (
-            <section className="pane" aria-label="What the run did">
-              <button
-                className="pane__close"
-                type="button"
-                aria-label="Hide session details"
-                onClick={(): void => {
-                  setInspectorOpen(false);
-                }}
-              >
-                ×
-              </button>
+          <section className="pane" aria-label="What the run did">
+            <button
+              className="pane__close"
+              type="button"
+              aria-label="Hide session details"
+              onClick={(): void => {
+                setInspectorOpen(false);
+              }}
+            >
+              ×
+            </button>
 
-              <div className="pane__tabs" role="tablist" aria-label="What to look at">
-                {SESSION_TABS.map((one) => {
-                  const count = tabCount(one, live);
+            <div className="pane__tabs" role="tablist" aria-label="What to look at">
+              {SESSION_TABS.map((one) => {
+                const count = tabCount(one, live);
 
-                  return (
-                    <button
-                      className="pane__tab"
-                      type="button"
-                      key={one}
-                      role="tab"
-                      aria-selected={tab === one}
-                      data-active={tab === one}
-                      onClick={(): void => {
-                        setTab(one);
-                      }}
-                    >
-                      {TAB_WORDS[one]}
-                      {count === null ? null : <span className="pane__count">{String(count)}</span>}
-                    </button>
-                  );
-                })}
-              </div>
+                return (
+                  <button
+                    className="pane__tab"
+                    type="button"
+                    key={one}
+                    role="tab"
+                    aria-selected={tab === one}
+                    data-active={tab === one}
+                    onClick={(): void => {
+                      setTab(one);
+                    }}
+                  >
+                    {TAB_WORDS[one]}
+                    {count === null ? null : <span className="pane__count">{String(count)}</span>}
+                  </button>
+                );
+              })}
+            </div>
 
-              <div className="pane__body" role="tabpanel">
-                {paneFor(tab, live, prStates, setPrState)}
-              </div>
-            </section>
-          ) : null}
+            <div className="pane__body" role="tabpanel">
+              {paneFor(tab, live, prStates, setPrState)}
+            </div>
+          </section>
         </div>
       </div>
     </div>

@@ -1,0 +1,89 @@
+name: nimbus-prod
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: nimbus-api:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: '4000'
+      MONGODB_URI: mongodb://mongo:27017/nimbus
+      REDIS_URL: redis://redis:6379
+      WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
+      AGENT_SESSIONS_ENABLED: ${AGENT_SESSIONS_ENABLED:-true}
+      SESSION_START_LIMIT_PER_HOUR: ${SESSION_START_LIMIT_PER_HOUR:-20}
+      SESSION_MESSAGE_LIMIT_PER_MINUTE: ${SESSION_MESSAGE_LIMIT_PER_MINUTE:-20}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?set GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?set GOOGLE_CLIENT_SECRET}
+      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:?set GOOGLE_CALLBACK_URL}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:?set GITHUB_APP_ID}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:?set GITHUB_APP_SLUG}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:?set GITHUB_APP_PRIVATE_KEY}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?set GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:?set GITHUB_CLIENT_SECRET}
+      GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL:?set GITHUB_CALLBACK_URL}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?set GITHUB_WEBHOOK_SECRET}
+      E2B_API_KEY: ${E2B_API_KEY:?set E2B_API_KEY}
+      SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:?set SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?set SMTP_PASSWORD}
+      MAIL_FROM: ${MAIL_FROM:?set MAIL_FROM}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - '127.0.0.1:4000:4000'
+    stop_grace_period: 45s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: ${PUBLIC_API_URL:?set PUBLIC_API_URL}
+    image: nimbus-web:latest
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - '127.0.0.1:8080:8080'
+
+  mongo:
+    image: mongo:8.0.28
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    command: ['--bind_ip', '0.0.0.0']
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    stop_grace_period: 20s
+
+  redis:
+    image: redis:8.10.0-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    command: ['redis-server', '--appendonly', 'yes']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 20s
+
+volumes:
+  mongo_data:
+  redis_data:

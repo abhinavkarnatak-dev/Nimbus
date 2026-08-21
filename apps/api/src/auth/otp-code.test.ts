@@ -14,11 +14,11 @@ const SECRET = 'z'.repeat(48);
 const KEY = deriveOtpKey(SECRET);
 
 describe('generating a code', () => {
-  it('is always eight digits', () => {
+  it('is always six digits', () => {
     for (let i = 0; i < 500; i += 1) {
       const code = generateOtpCode();
       expect(code).toHaveLength(OTP_DIGITS);
-      expect(code).toMatch(/^[0-9]{8}$/);
+      expect(code).toMatch(new RegExp(`^[0-9]{${String(OTP_DIGITS)}}$`));
     }
   });
 
@@ -36,8 +36,9 @@ describe('generating a code', () => {
   });
 
   it('spreads across the whole range rather than clustering', () => {
+    const midpoint = 10 ** OTP_DIGITS / 2;
     const codes = Array.from({ length: 4_000 }, () => Number(generateOtpCode()));
-    const half = codes.filter((code) => code < 50_000_000).length;
+    const half = codes.filter((code) => code < midpoint).length;
 
     expect(half).toBeGreaterThan(1_800);
     expect(half).toBeLessThan(2_200);
@@ -167,15 +168,15 @@ describe('comparing hashes', () => {
 });
 
 describe('recognising a code shape', () => {
-  it('accepts eight digits', () => {
-    expect(looksLikeOtpCode('01234567')).toBe(true);
+  it('accepts six digits', () => {
+    expect(looksLikeOtpCode('012345')).toBe(true);
   });
 
   it('rejects anything else', () => {
+    expect(looksLikeOtpCode('12345')).toBe(false);
     expect(looksLikeOtpCode('1234567')).toBe(false);
-    expect(looksLikeOtpCode('123456789')).toBe(false);
-    expect(looksLikeOtpCode('1234567a')).toBe(false);
-    expect(looksLikeOtpCode('        ')).toBe(false);
+    expect(looksLikeOtpCode('12345a')).toBe(false);
+    expect(looksLikeOtpCode('      ')).toBe(false);
     expect(looksLikeOtpCode('')).toBe(false);
   });
 });

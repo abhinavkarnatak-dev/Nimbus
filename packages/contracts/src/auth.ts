@@ -7,9 +7,9 @@ export const EmailSchema = z
   .email({ error: 'Enter a valid email address' })
   .max(LIMITS.emailMaxChars);
 
-export const OtpCodeSchema = z
-  .string()
-  .regex(new RegExp(`^[0-9]{${String(LIMITS.otpDigits)}}$`), { error: 'Enter the 8 digit code' });
+export const OtpCodeSchema = z.string().regex(new RegExp(`^[0-9]{${String(LIMITS.otpDigits)}}$`), {
+  error: `Enter the ${String(LIMITS.otpDigits)} digit code`,
+});
 
 export const AuthProviderSchema = z.enum(['email_otp', 'google']);
 

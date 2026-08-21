@@ -5,10 +5,8 @@ import {
   type PullRequestResult,
 } from '@nimbus/contracts';
 
-import type { MailService } from '../email/mail-service.js';
 import type { GitHubTokenProvider, InstallationToken } from '../github/token-provider.js';
 import type { Logger } from '../logging/logger.js';
-import { alerting } from '../logging/alerts.js';
 import { buildPullRequestBody } from './body.js';
 import {
   PullRequestExistsError,
@@ -47,7 +45,6 @@ export interface OpenPullRequestRequest {
   summary: string;
   report: PatchValidationReport;
   checks: readonly CheckResult[];
-  notifyEmail: string;
 }
 
 export interface PullRequestGateway {
@@ -58,7 +55,6 @@ export interface PullRequestGateway {
 export interface TrustedPullRequestGatewayOptions {
   tokens: GitHubTokenProvider;
   clients: PullRequestClientFactory;
-  mail: MailService;
   logger?: Logger;
   now?: () => Date;
   wait?: (ms: number) => Promise<void>;
@@ -94,23 +90,6 @@ export class TrustedPullRequestGateway implements PullRequestGateway {
       headSha: pullRequest.headSha,
       createdAt: this.now().toISOString(),
     });
-  }
-
-  private async notify(request: OpenPullRequestRequest, opened: OpenPullRequest): Promise<void> {
-    try {
-      await this.options.mail.sendPullRequestReady(request.notifyEmail, {
-        repository: `${request.owner}/${request.name}`,
-        task: request.task,
-        branch: request.branch,
-        pullRequestNumber: opened.number,
-        pullRequestUrl: opened.url,
-      });
-    } catch (error) {
-      this.options.logger?.warn(
-        alerting('pull_request_anomaly', { err: error, pullRequest: opened.number }),
-        'pull request opened but the notification could not be sent',
-      );
-    }
   }
 
   async open(request: OpenPullRequestRequest): Promise<PullRequestResult> {
@@ -178,8 +157,6 @@ export class TrustedPullRequestGateway implements PullRequestGateway {
       if (opened === null) {
         throw new PullRequestError('PULL_REQUEST_FAILED', 'The pull request could not be opened.');
       }
-
-      await this.notify(request, opened);
 
       return this.describe(opened, request.branch);
     } catch (error) {

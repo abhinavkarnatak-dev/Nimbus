@@ -12,6 +12,7 @@ import { describeFailure, runAgent } from '../agent/graph/run.js';
 import type { EventPublisher } from '../events/publisher.js';
 import type { SessionDocument } from '../db/models/session.js';
 import type { Logger } from '../logging/logger.js';
+import { alerting } from '../logging/alerts.js';
 import type { MailService } from '../email/mail-service.js';
 import type { PullRequestGateway } from '../pull-request/gateway.js';
 import type { PushGateway } from '../push/gateway.js';
@@ -358,7 +359,6 @@ export class SessionRunner {
         summary: patch.summary,
         report,
         checks: result.state.checks,
-        notifyEmail: await this.#notifyEmailFor(session),
       });
     } catch (error) {
       this.#logger.error(
@@ -379,6 +379,11 @@ export class SessionRunner {
     );
 
     await this.#say(session, { type: 'pr.created', pullRequest: opened });
+
+    if (opened.number !== session.pullRequest?.number) {
+      await this.#mailPullRequest(session, latestRequest, opened);
+    }
+
     const changed = progress.filesChanged?.length ?? 0;
     const added = progress.filesChanged?.reduce((total, file) => total + file.addedLines, 0) ?? 0;
     const removed =
@@ -565,6 +570,35 @@ export class SessionRunner {
 
     await this.#say(session, { type: 'session.failed', failure: outcome.failure });
     await this.#mailEnded(session, 'failed', outcome.failure.message);
+  }
+
+  async #mailPullRequest(
+    session: SessionDocument,
+    task: string,
+    opened: PullRequestResult,
+  ): Promise<void> {
+    if (this.#mail === null) {
+      return;
+    }
+
+    try {
+      await this.#mail.sendPullRequestReady(await this.#notifyEmailFor(session), {
+        repository: `${session.repository.owner}/${session.repository.name}`,
+        task,
+        branch: opened.branch,
+        pullRequestNumber: opened.number,
+        pullRequestUrl: opened.url,
+      });
+    } catch (error) {
+      this.#logger.warn(
+        alerting('pull_request_anomaly', {
+          sessionId: session.sessionId,
+          pullRequest: opened.number,
+          error: String(error),
+        }),
+        'a pull request was opened but the notification could not be sent',
+      );
+    }
   }
 
   async #mailEnded(

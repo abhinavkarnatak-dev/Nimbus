@@ -55,6 +55,7 @@ function activeSession(): ActiveSession {
     sessionId: SESSION_ID,
     sessionKey: 'hashed',
     csrfToken: 'csrf-token-value',
+    expiresInSeconds: 604_800,
     user: USER,
     record: {
       userId: USER.userId,

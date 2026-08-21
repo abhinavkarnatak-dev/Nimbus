@@ -18,7 +18,6 @@ export class FakePullRequestGateway implements PullRequestGateway {
   readonly name = 'github-fake';
 
   readonly requests: OpenPullRequestRequest[] = [];
-  readonly emails: string[] = [];
   readonly byBranch = new Map<string, OpenedPullRequest>();
 
   private readonly now: () => Date;
@@ -63,7 +62,6 @@ export class FakePullRequestGateway implements PullRequestGateway {
     };
 
     this.byBranch.set(request.branch, opened);
-    this.emails.push(request.notifyEmail);
 
     return Promise.resolve(
       PullRequestResultSchema.parse({

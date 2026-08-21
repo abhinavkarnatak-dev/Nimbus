@@ -63,39 +63,39 @@ export function useAttachments(api: ApiClient, csrf: CsrfSource): AttachmentsHan
     (files: readonly File[]): void => {
       setRefusals([]);
 
-      setHeld((all) => {
-        const allowed = roomFor(all.length, files.length);
-        const refused: string[] = [];
-        const taken: HeldAttachment[] = [];
+      const allowed = roomFor(held.length, files.length);
+      const refused: string[] = [];
+      const taken: { attachment: HeldAttachment; file: File }[] = [];
 
-        if (files.length > allowed) {
-          refused.push(
-            `Nimbus takes ${String(LIMITS.maxAttachmentsPerSession)} attachments on a session.`,
-          );
+      if (files.length > allowed) {
+        refused.push(
+          `Nimbus takes ${String(LIMITS.maxAttachmentsPerSession)} attachments on a session.`,
+        );
+      }
+
+      for (const file of files.slice(0, allowed)) {
+        const refusal = refusalFor(file);
+
+        if (refusal !== null) {
+          refused.push(refusal);
+          continue;
         }
 
-        for (const file of files.slice(0, allowed)) {
-          const refusal = refusalFor(file);
+        const kind = kindOf(file.type);
 
-          if (refusal !== null) {
-            refused.push(refusal);
-            continue;
-          }
+        if (kind === null) {
+          continue;
+        }
 
-          const kind = kindOf(file.type);
+        const localId = newPrefixedId('loc');
+        const previewUrl = kind === 'image' ? URL.createObjectURL(file) : null;
 
-          if (kind === null) {
-            continue;
-          }
+        if (previewUrl !== null) {
+          previews.current.set(localId, previewUrl);
+        }
 
-          const localId = newPrefixedId('loc');
-          const previewUrl = kind === 'image' ? URL.createObjectURL(file) : null;
-
-          if (previewUrl !== null) {
-            previews.current.set(localId, previewUrl);
-          }
-
-          taken.push({
+        taken.push({
+          attachment: {
             localId,
             name: file.name,
             byteSize: file.size,
@@ -104,19 +104,26 @@ export function useAttachments(api: ApiClient, csrf: CsrfSource): AttachmentsHan
             progress: 0,
             saved: null,
             problem: null,
-          });
+          },
+          file,
+        });
+      }
 
-          void send(localId, file);
-        }
+      if (refused.length > 0) {
+        setRefusals(refused);
+      }
 
-        if (refused.length > 0) {
-          setRefusals(refused);
-        }
+      if (taken.length === 0) {
+        return;
+      }
 
-        return [...all, ...taken];
-      });
+      setHeld((all) => [...all, ...taken.map((one) => one.attachment)]);
+
+      for (const one of taken) {
+        void send(one.attachment.localId, one.file);
+      }
     },
-    [send],
+    [held, send],
   );
 
   const forget = useCallback((localId: string): void => {
@@ -132,24 +139,21 @@ export function useAttachments(api: ApiClient, csrf: CsrfSource): AttachmentsHan
     (localId: string): void => {
       forget(localId);
 
-      setHeld((all) => {
-        const going = all.find((one) => one.localId === localId);
-        const saved = going?.saved ?? null;
+      const saved = held.find((one) => one.localId === localId)?.saved ?? null;
 
-        if (saved !== null) {
-          void api
-            .send({
-              method: 'DELETE',
-              path: `/attachments/${saved.attachmentId}`,
-              schema: NOTHING,
-            })
-            .catch(() => undefined);
-        }
+      setHeld((all) => all.filter((one) => one.localId !== localId));
 
-        return all.filter((one) => one.localId !== localId);
-      });
+      if (saved !== null) {
+        void api
+          .send({
+            method: 'DELETE',
+            path: `/attachments/${saved.attachmentId}`,
+            schema: NOTHING,
+          })
+          .catch(() => undefined);
+      }
     },
-    [api, forget],
+    [api, forget, held],
   );
 
   const clear = useCallback((): void => {

@@ -4,7 +4,7 @@ import { CSRF_HEADER } from '../../auth/csrf.js';
 import type { ActiveSession, CsrfChecker, SessionReader } from '../../auth/session-service.js';
 import { attachToRequestContext } from '../../logging/request-context.js';
 import { ApiError } from '../api-error.js';
-import { sessionCookieName } from '../cookies.js';
+import { sessionCookieName, setSessionCookie } from '../cookies.js';
 
 const SESSION = Symbol('nimbus.session');
 
@@ -38,7 +38,7 @@ export function createAttachSession(
   sessions: SessionReader,
   isProduction: boolean,
 ): RequestHandler {
-  return (request, _response, next): void => {
+  return (request, response, next): void => {
     const sessionId = readSessionCookie(request, isProduction);
 
     if (sessionId === '') {
@@ -51,6 +51,10 @@ export function createAttachSession(
         if (session !== null) {
           (request as RequestWithSession)[SESSION] = session;
           attachToRequestContext({ userId: session.user.userId });
+
+          if (session.expiresInSeconds > 0) {
+            setSessionCookie(response, isProduction, session.sessionId, session.expiresInSeconds);
+          }
         }
         next();
       },

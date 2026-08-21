@@ -132,7 +132,6 @@ async function main(): Promise<void> {
   const pullRequests = new TrustedPullRequestGateway({
     tokens,
     clients: new OctokitPullRequestClientFactory(),
-    mail,
     logger,
   });
 
@@ -148,11 +147,20 @@ async function main(): Promise<void> {
     summary: 'Made the comment say when the example prints 200.',
     report,
     checks: [{ name: 'vitest', kind: 'test', status: 'not_run', summary: 'no checks were run' }],
-    notifyEmail,
   });
 
   line('pull request', `#${String(opened.number)}`);
   line('url', opened.url);
+
+  await mail.sendPullRequestReady(notifyEmail, {
+    repository: `${owner}/${name}`,
+    task: TASK,
+    branch: pushed.branch,
+    pullRequestNumber: opened.number,
+    pullRequestUrl: opened.url,
+  });
+
+  line('notification', `sent to ${notifyEmail}`);
 
   heading('Doing it all again, to prove it is idempotent');
   const pushedAgain = await push.push({
@@ -179,7 +187,6 @@ async function main(): Promise<void> {
     summary: 'Made the comment say when the example prints 200.',
     report,
     checks: [{ name: 'vitest', kind: 'test', status: 'not_run', summary: 'no checks were run' }],
-    notifyEmail,
   });
 
   line('second push outcome', pushedAgain.outcome);

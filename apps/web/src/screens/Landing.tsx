@@ -47,14 +47,14 @@ export function Landing(): React.JSX.Element {
           <p className="hero__eyebrow">Cloud coding agent</p>
 
           <h1 className="hero__title">
-            Describe the change.
+            Ask about the repo.
             <br />
-            <em>Review the pull request.</em>
+            <em>Or ask it to make the change.</em>
           </h1>
 
           <p className="hero__lede">
-            Nimbus takes one small task on one repository, works in an isolated sandbox, checks its
-            own patch, and opens a pull request for you to review. It changes nothing else.
+            Nimbus reads one public repository in an isolated sandbox. Ask how something works and
+            it answers. Ask for a change and it opens a pull request with your checks run.
           </p>
 
           <div className="hero__actions">
@@ -73,7 +73,20 @@ export function Landing(): React.JSX.Element {
             </a>
           </div>
 
-          <p className="hero__meta">One public repository, one task at a time, no card required.</p>
+          <p className="hero__broke">
+            <span className="hero__broke-emoji" aria-hidden="true">
+              💸
+            </span>
+            <span>
+              <strong className="hero__broke-lead">We are broke. Like, properly broke. 🥲</strong>{' '}
+              No free model credits here, so bring your own Google Gemini key and Nimbus will
+              happily burn your quota instead of ours 😇 Google gives one away free anyway.
+            </span>
+          </p>
+
+          <p className="hero__meta">
+            One session at a time, on a branch Nimbus creates. What gets merged is always your call.
+          </p>
         </div>
 
         <div className="hero-run" aria-label="What a finished session looks like">

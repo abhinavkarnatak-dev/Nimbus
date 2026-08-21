@@ -434,9 +434,27 @@ describe('telling the person it ended badly', () => {
     expect(held.mailer.sent[0]?.text).toContain('your repository is unchanged');
   });
 
-  it('writes nothing when a run reaches a pull request, since 023 already did', async () => {
+  it('writes once when a run opens a pull request', async () => {
     const held = mailing();
     await held.runner.run(sessionDocument(), new AbortController().signal);
+
+    expect(held.mailer.sent).toHaveLength(1);
+    expect(held.mailer.sent[0]?.subject).toContain('opened pull request');
+  });
+
+  it('writes nothing when the run only pushed more work to the pull request it already had', async () => {
+    const held = mailing();
+    const carrying = sessionDocument({
+      pullRequest: {
+        number: 1,
+        url: 'https://github.com/octocat/hello-world/pull/1',
+        branch: 'nimbus/already-open',
+        headSha: 'b'.repeat(40),
+        createdAt: new Date('2026-08-20T00:00:00.000Z'),
+      },
+    });
+
+    await held.runner.run(carrying, new AbortController().signal);
 
     expect(held.mailer.sent).toHaveLength(0);
   });

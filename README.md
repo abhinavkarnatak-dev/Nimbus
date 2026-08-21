@@ -291,7 +291,7 @@ curl -i -X POST http://localhost:4000/auth/otp/request \
 }
 ```
 
-An eight digit code arrives by email, or prints to your terminal if SMTP is blank.
+A six digit code arrives by email, or prints to your terminal if SMTP is blank.
 
 Send it back to finish signing in:
 
@@ -319,8 +319,9 @@ Three properties are worth knowing about, each covered by tests:
   branch on and nothing to leak. A stranger typing your address also cannot cause a record carrying
   it to exist.
 - **Redis never holds the code.** It holds a keyed HMAC, bound to the request and the address, with
-  the key derived from `SESSION_SECRET`. Eight digits is small enough to reverse a plain hash in
-  seconds, so the server side key is what makes a stolen dump worthless. Comparison is constant time.
+  the key derived from `SESSION_SECRET`. Six digits is a million values, small enough to reverse a
+  plain hash instantly, so the server side key is what makes a stolen dump worthless. Comparison is
+  constant time.
 - **A code works exactly once.** The record is deleted at the moment it is accepted and the delete
   itself elects the winner, so ten simultaneous attempts produce one success and one account.
 
@@ -369,7 +370,7 @@ session is over.
 | `POST /auth/logout`     | The cookie and a CSRF token                           |
 
 ```text
-Set-Cookie: nimbus_session=...; Max-Age=3600; Path=/; HttpOnly; SameSite=Lax
+Set-Cookie: nimbus_session=...; Max-Age=604800; Path=/; HttpOnly; SameSite=Lax
 ```
 
 In production the cookie is `Secure` and named `__Host-nimbus_session`, a prefix browsers only accept
@@ -387,8 +388,11 @@ Four properties, each with tests:
   from the session, so it is stable across browser tabs and changes automatically when the session
   does. A failed check refuses the request but does **not** end the session, or any website could
   sign you out with one blind request.
-- **Two expiry clocks.** An hour of inactivity ends a session, and an absolute lifetime ends it
-  regardless of activity, so a stolen cookie kept quietly warm still dies.
+- **Two expiry clocks.** Seven days of inactivity ends a session, and an absolute lifetime of thirty
+  days ends it regardless of activity, so a stolen cookie kept quietly warm still dies. Both are set
+  by `SESSION_TTL_SECONDS` and `SESSION_ABSOLUTE_TTL_SECONDS`. The cookie is rewritten on every
+  request that carries a working session, with whichever is smaller of the idle window and the time
+  the session has left, so the browser and the server never disagree about when it ends.
 - **Disabling an account takes effect on the next request**, not at the next login, because the
   account is re-read every time rather than trusted from the session. Every session that person holds
   is revoked at once.
@@ -1212,12 +1216,23 @@ Nimbus is designed to run its entire browser journey, from OTP login through Git
 agent work, approvals, checks, and a pull request, against fake adapters that need no paid
 credentials.
 
-## External service setup _(not yet implemented)_
+## External service setup
 
 Google OAuth, the GitHub App, E2B, SMTP, and optional Qdrant each require configuration before the
 corresponding real adapter can be used. Gemini is not among them, because its key belongs to the
-account rather than to the deployment. Exact steps, GitHub App
-permissions, callback URLs, and webhook events will be documented as those features land.
+account rather than to the deployment.
+
+Three callback URLs have to match what is configured with each provider, and all three are built from
+the public API host:
+
+| What           | Path                     | Environment variable        |
+| -------------- | ------------------------ | --------------------------- |
+| Google sign in | `/auth/google/callback`  | `GOOGLE_CALLBACK_URL`       |
+| GitHub install | `/github/setup/callback` | `GITHUB_SETUP_CALLBACK_URL` |
+| GitHub webhook | `/github/webhook`        | set in the GitHub App       |
+
+`SANDBOX_TEMPLATE_ID` is the E2B template the sandbox is built from, taken from `e2b template list`.
+An alias works as well as an id.
 
 The GitHub App needs four things set before the GitHub routes will mount at all: the App id, slug and
 private key, an OAuth client id and secret with "Request user authorization (OAuth) during
@@ -1265,11 +1280,53 @@ residual risks in [`docs/threat-model.md`](./docs/threat-model.md).
 Nimbus will document precisely which repository snippets and images are sent to which provider, and
 guarantees that secrets, environment values, and tokens are never included.
 
-## Deployment _(not yet implemented)_
+## Deployment
 
-Nimbus runs long-lived WebSockets and durable workers. A host that sleeps or terminates workers is
-unsuitable without an external durable worker; this will be documented rather than worked around
-with keep-awake pings.
+Nimbus runs long-lived WebSockets and durable workers, so a host that terminates workers is
+unsuitable. A host that sleeps can be used if something wakes it, which is what the health endpoint
+is for.
+
+The live deployment is the API on Render, the browser application on Vercel, MongoDB on Atlas, Redis
+on Upstash, object storage on Cloudflare R2, sandboxes on E2B, and mail over SMTP. UptimeRobot polls
+`GET /health`, which answers `{"status":"ok","uptimeSeconds":n}` without touching the database.
+
+**Both halves must share one registrable domain.** This is a requirement, not a preference. The
+session cookie is `httpOnly`, `Secure` and `SameSite=Lax`, and browsers decide same-site by
+registrable domain rather than by host. A frontend on `something.vercel.app` calling an API on
+`something.onrender.com` is cross-site: the cookie is set at sign in and then never sent again, so
+every later request is anonymous. No CORS header changes that, and `SameSite=None` would give up the
+protection the cookie exists to provide. Putting the two on `app.example.com` and `api.example.com`
+makes them the same site and the problem disappears.
+
+`WEB_ORIGIN` must name the frontend host exactly, since CORS is checked against it. Naming the apex
+domain when the app lives on a subdomain leaves the sign in page loading and every API call failing.
+
+A static host must serve `index.html` for unknown paths, because `/auth/callback` exists only inside
+the client router. `vercel.json` does this on Vercel and `apps/web/nginx.conf` does it in the
+container.
+
+Build settings that work on a host without Corepack:
+
+| Setting       | Value                                                                      |
+| ------------- | -------------------------------------------------------------------------- |
+| Root          | the repository root for the API, `apps/web` for the client                 |
+| Node          | `NODE_VERSION=22.13.0`                                                     |
+| Install       | `npm i -g pnpm@10.12.1 && pnpm install --frozen-lockfile`                  |
+| Build the API | `pnpm --filter @nimbus/contracts build && pnpm --filter @nimbus/api build` |
+| Start the API | `pnpm --filter @nimbus/api start`                                          |
+
+`corepack enable` fails on a read-only filesystem and `corepack pnpm` fails its signature check
+against an outdated key list, so the package manager is installed directly and pinned to the version
+the workspace declares. `22.13.0` is the lowest Node that satisfies both the workspace and
+`@eslint/js`.
+
+To run the whole system on one machine instead, `pnpm prod:build` and `pnpm prod:up` bring up the API,
+an nginx image serving the built client, MongoDB and Redis from `docker-compose.prod.yml`.
+
+The database user needs permission to run `collMod`, because `ensureDatabaseSchema` installs the
+collection validators on every boot. A successful boot logs how many collections and indexes it
+created, which is the way to tell that the validators are really installed rather than silently
+skipped.
 
 ## Known limitations
 

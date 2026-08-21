@@ -18,7 +18,7 @@ These hold for the whole system. If a change would break one, the change is wron
 
 ## 2. Authentication
 
-**Email one time password.** Codes are 8 digits generated with a cryptographically secure RNG.
+**Email one time password.** Codes are 6 digits generated with a cryptographically secure RNG.
 Only an HMAC of the code is stored, in Redis, with a short TTL, a request id, an attempt counter,
 and a purpose field. A new request invalidates prior codes. A code is single use and invalidated on
 success. Requests are limited per normalized account and per IP; verification attempts are capped

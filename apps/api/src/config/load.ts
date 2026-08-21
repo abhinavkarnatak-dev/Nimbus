@@ -69,7 +69,7 @@ export interface AppConfig {
   };
   mongo: { uri: string };
   redis: { url: string };
-  session: { secret: string; ttlSeconds: number };
+  session: { secret: string; ttlSeconds: number; absoluteTtlSeconds: number };
   otp: { ttlSeconds: number; maxAttempts: number; requestLimitPerHour: number };
   operations: {
     agentSessionsEnabled: boolean;
@@ -212,6 +212,15 @@ function buildQdrant(raw: RawEnvironment): QdrantConfig | null {
   };
 }
 
+function sessionLifetimeIssues(config: AppConfig): string[] {
+  if (config.session.absoluteTtlSeconds >= config.session.ttlSeconds) {
+    return [];
+  }
+  return [
+    'SESSION_ABSOLUTE_TTL_SECONDS: must be at least as long as SESSION_TTL_SECONDS, otherwise a session dies before its first idle window ends',
+  ];
+}
+
 function productionIssues(config: AppConfig): string[] {
   if (!config.isProduction) {
     return [];
@@ -277,7 +286,11 @@ function toAppConfig(raw: RawEnvironment): AppConfig {
     },
     mongo: { uri: raw.MONGODB_URI },
     redis: { url: raw.REDIS_URL },
-    session: { secret: raw.SESSION_SECRET, ttlSeconds: raw.SESSION_TTL_SECONDS },
+    session: {
+      secret: raw.SESSION_SECRET,
+      ttlSeconds: raw.SESSION_TTL_SECONDS,
+      absoluteTtlSeconds: raw.SESSION_ABSOLUTE_TTL_SECONDS,
+    },
     operations: {
       agentSessionsEnabled: raw.AGENT_SESSIONS_ENABLED,
       sessionStartLimitPerHour: raw.SESSION_START_LIMIT_PER_HOUR,
@@ -328,7 +341,11 @@ export function loadConfig(source: Record<string, string | undefined> = process.
   }
 
   const config = toAppConfig(parsed.data);
-  const issues = [...modelCatalogueIssues(config.llm), ...productionIssues(config)];
+  const issues = [
+    ...modelCatalogueIssues(config.llm),
+    ...sessionLifetimeIssues(config),
+    ...productionIssues(config),
+  ];
 
   if (issues.length > 0) {
     throw new ConfigError(issues.sort((a, b) => a.localeCompare(b)));

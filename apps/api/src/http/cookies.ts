@@ -23,6 +23,8 @@ export function setSessionCookie(
   sessionId: string,
   maxAgeSeconds: number,
 ): void {
+  dropQueuedSessionCookie(response, isProduction);
+
   response.cookie(
     sessionCookieName(isProduction),
     sessionId,
@@ -30,7 +32,25 @@ export function setSessionCookie(
   );
 }
 
+export function dropQueuedSessionCookie(response: Response, isProduction: boolean): void {
+  const prefix = `${sessionCookieName(isProduction)}=`;
+  const queued = response.getHeader('Set-Cookie');
+
+  if (Array.isArray(queued)) {
+    response.setHeader(
+      'Set-Cookie',
+      queued.filter((value) => !value.startsWith(prefix)),
+    );
+    return;
+  }
+  if (typeof queued === 'string' && queued.startsWith(prefix)) {
+    response.removeHeader('Set-Cookie');
+  }
+}
+
 export function clearSessionCookie(response: Response, isProduction: boolean): void {
+  dropQueuedSessionCookie(response, isProduction);
+
   response.clearCookie(sessionCookieName(isProduction), {
     httpOnly: true,
     secure: isProduction,

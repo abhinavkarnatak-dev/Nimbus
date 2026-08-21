@@ -58,7 +58,7 @@ describe('checking an email before asking the server', () => {
 
 describe('the code somebody types', () => {
   it('keeps only digits, because the code is only digits', () => {
-    expect(onlyDigits('12-34 56ab78')).toBe('12345678');
+    expect(onlyDigits('12-34 56ab78')).toBe('123456');
   });
 
   it('never grows past the length of a real code', () => {

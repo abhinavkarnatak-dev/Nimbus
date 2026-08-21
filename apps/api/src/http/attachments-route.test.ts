@@ -39,6 +39,7 @@ function sessionFor(user: AuthenticatedUser): ActiveSession {
     sessionId: SESSION_ID,
     sessionKey: 'hashed',
     csrfToken: CSRF_TOKEN,
+    expiresInSeconds: 604_800,
     user,
     record: {
       userId: user.userId,

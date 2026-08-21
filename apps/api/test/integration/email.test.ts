@@ -7,7 +7,7 @@ import { SmtpMailer } from '../../src/email/smtp-mailer.js';
 import { createTestLogger, type CapturedLog } from '../../src/http/http.fixtures.js';
 
 const SMTP_PASSWORD = 'sup3r-secret-smtp-password';
-const SIGN_IN_CODE = '48210375';
+const SIGN_IN_CODE = '482103';
 
 const servers: FakeSmtpServer[] = [];
 const mailers: SmtpMailer[] = [];

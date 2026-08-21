@@ -5,6 +5,8 @@ import { DEFAULT_LIMITS, HARD_LIMITS } from './limits.js';
 
 const SESSION_SECRET_PLACEHOLDER = 'replace-with-at-least-32-random-bytes';
 
+export const SESSION_TTL_MAX_SECONDS = 31_536_000;
+
 const trimmed = z.string().trim();
 
 const optionalText = trimmed.transform((value) => (value === '' ? undefined : value)).optional();
@@ -68,7 +70,8 @@ export const environmentSchema = z.object({
     .refine((value) => value !== SESSION_SECRET_PLACEHOLDER, {
       error: 'is still the example placeholder and must be replaced',
     }),
-  SESSION_TTL_SECONDS: positiveInt.default(3600),
+  SESSION_TTL_SECONDS: positiveInt.max(SESSION_TTL_MAX_SECONDS).default(604_800),
+  SESSION_ABSOLUTE_TTL_SECONDS: positiveInt.max(SESSION_TTL_MAX_SECONDS).default(2_592_000),
   OTP_TTL_SECONDS: positiveInt.default(600),
   OTP_MAX_ATTEMPTS: positiveInt.max(20).default(5),
   OTP_REQUEST_LIMIT_PER_HOUR: positiveInt.max(100).default(5),

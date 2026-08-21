@@ -19,6 +19,7 @@ function userIndexKey(userId: string): string {
 
 export interface SessionStoreOptions {
   idleTtlSeconds: number;
+  absoluteTtlSeconds: number;
   logger?: Logger;
 }
 
@@ -26,10 +27,12 @@ export class SessionStore {
   private readonly client: Redis;
   private readonly records: TypedStore<SessionRecord>;
   private readonly idleTtlSeconds: number;
+  private readonly absoluteTtlSeconds: number;
 
   constructor(client: Redis, options: SessionStoreOptions) {
     this.client = client;
     this.idleTtlSeconds = options.idleTtlSeconds;
+    this.absoluteTtlSeconds = options.absoluteTtlSeconds;
     this.records = new TypedStore(client, {
       namespace: NAMESPACES.session,
       schema: SessionRecordSchema,
@@ -41,7 +44,7 @@ export class SessionStore {
   async save(sessionKey: string, record: SessionRecord): Promise<void> {
     await this.records.set(sessionKey, record, this.idleTtlSeconds);
     await this.client.sadd(userIndexKey(record.userId), sessionKey);
-    await this.client.expire(userIndexKey(record.userId), this.idleTtlSeconds * 24);
+    await this.client.expire(userIndexKey(record.userId), this.absoluteTtlSeconds);
   }
 
   async read(sessionKey: string): Promise<SessionRecord | null> {

@@ -1,7 +1,7 @@
 export const LIMITS = {
   emailMaxChars: 320,
   displayNameMaxChars: 120,
-  otpDigits: 8,
+  otpDigits: 6,
 
   taskMinChars: 1,
   taskMaxChars: 2000,

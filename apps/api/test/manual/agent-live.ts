@@ -321,10 +321,10 @@ async function main(): Promise<void> {
   line('commit', pushed.commitSha);
 
   heading('Opening the pull request');
+  const mail = createMailService({ config, logger });
   const pullRequests = new TrustedPullRequestGateway({
     tokens,
     clients: new OctokitPullRequestClientFactory(),
-    mail: createMailService({ config, logger }),
     logger,
   });
 
@@ -340,11 +340,20 @@ async function main(): Promise<void> {
     summary: result.patch.summary,
     report: result.report,
     checks: result.state.checks,
-    notifyEmail,
   });
 
   line('pull request', `#${String(opened.number)}`);
   line('url', opened.url);
+
+  await mail.sendPullRequestReady(notifyEmail, {
+    repository: `${owner}/${name}`,
+    task,
+    branch: pushed.branch,
+    pullRequestNumber: opened.number,
+    pullRequestUrl: opened.url,
+  });
+
+  line('notification', `sent to ${notifyEmail}`);
 }
 
 await main();

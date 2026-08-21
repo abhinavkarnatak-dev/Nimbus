@@ -61,7 +61,7 @@ export function SignIn({
   });
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
-  const [emailTouched, setEmailTouched] = useState(false);
+  const [sendAttempted, setSendAttempted] = useState(false);
   const codeInput = useRef<HTMLInputElement>(null);
 
   const onCodeStep = state.step.name === 'code';
@@ -91,7 +91,7 @@ export function SignIn({
 
   const onEmailSubmit = (event: SyntheticEvent): void => {
     event.preventDefault();
-    setEmailTouched(true);
+    setSendAttempted(true);
 
     if (emailProblem(email) !== null) {
       return;
@@ -124,7 +124,7 @@ export function SignIn({
     }
   };
 
-  const shownEmailProblem = emailTouched ? emailProblem(email) : null;
+  const shownEmailProblem = sendAttempted ? emailProblem(email) : null;
 
   return (
     <div className="container">
@@ -181,9 +181,6 @@ export function SignIn({
                 value={email}
                 problem={shownEmailProblem}
                 disabled={state.busy === 'sending'}
-                onBlur={(): void => {
-                  setEmailTouched(true);
-                }}
                 onChange={(event): void => {
                   setEmail(event.target.value);
                 }}

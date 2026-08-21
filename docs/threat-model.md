@@ -84,7 +84,7 @@ patch becomes a branch. That is a boundary a reviewer can actually verify.
 
 | Threat                        | Mitigation                                                                                                 | Feature  |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------- | -------- |
-| One time password brute force | 8 digits from a cryptographically secure RNG, hashed at rest in Redis, short TTL, capped attempts, backoff | 010      |
+| One time password brute force | 6 digits from a cryptographically secure RNG, hashed at rest in Redis, short TTL, capped attempts, backoff | 010      |
 | Account enumeration           | Identical response body and approximately constant timing whether or not the account exists                | 010      |
 | Code replay                   | Single use, invalidated on success, and a new request invalidates prior codes                              | 010      |
 | Request flooding              | Rate limits per normalized account and per IP                                                              | 010      |

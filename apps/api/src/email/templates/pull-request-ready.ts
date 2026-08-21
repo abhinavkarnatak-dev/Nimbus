@@ -1,5 +1,8 @@
 import {
+  EMAIL_FONT,
+  EMAIL_PALETTE,
   escapeHtml,
+  fineParagraph,
   joinLines,
   layout,
   paragraph,
@@ -22,8 +25,8 @@ function linkBlock(url: string, label: string): string {
     return paragraph(label);
   }
   return joinLines([
-    '<p style="margin:0 0 20px">',
-    `<a href="${href}" style="display:inline-block;padding:10px 18px;background:#1b1f24;color:#ffffff;border-radius:8px;text-decoration:none;font-size:15px">`,
+    '<p style="margin:24px 0">',
+    `<a href="${href}" style="display:inline-block;padding:12px 20px;background:${EMAIL_PALETTE.markSurface};color:${EMAIL_PALETTE.markText};border-radius:10px;text-decoration:none;font-family:${EMAIL_FONT};font-size:15px;font-weight:600">`,
     escapeHtml(label),
     '</a>',
     '</p>',
@@ -58,7 +61,7 @@ export const pullRequestReadyTemplate: EmailTemplate<PullRequestReadyData> = {
         paragraph(`Task: ${data.task}`),
         paragraph(`Branch: ${data.branch}`),
         linkBlock(data.pullRequestUrl, `Review pull request #${number}`),
-        paragraph(
+        fineParagraph(
           'Nothing has been merged. Nimbus never merges pull requests and never writes to the default branch. Review the changes before merging.',
         ),
       ]),

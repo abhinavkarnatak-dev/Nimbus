@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { CapturingMailer } from '../email/capturing-mailer.js';
-import { MailService } from '../email/mail-service.js';
 import { FakeGitHubTokenProvider } from '../github/fake-token-provider.js';
 import { createTestLogger, type CapturedLog } from '../http/http.fixtures.js';
 import { INSTALLATION_ID, REPOSITORY_ID } from '../push/push.fixtures.js';
@@ -13,12 +12,11 @@ import {
   type FakePullRequestState,
 } from './fake-client.js';
 import { PullRequestError, TrustedPullRequestGateway, titleFor } from './gateway.js';
-import { FAILING_CHECKS, NOTIFY_EMAIL, openRequest } from './pull-request.fixtures.js';
+import { FAILING_CHECKS, openRequest } from './pull-request.fixtures.js';
 
 let state: FakePullRequestState;
 let tokens: FakeGitHubTokenProvider;
 let mailer: CapturingMailer;
-let mail: MailService;
 let lines: CapturedLog[];
 
 function gatewayWith(options: FakePullRequestOptions = {}): {
@@ -33,7 +31,6 @@ function gatewayWith(options: FakePullRequestOptions = {}): {
     gateway: new TrustedPullRequestGateway({
       tokens,
       clients,
-      mail,
       logger: captured.logger,
     }),
     clients,
@@ -53,7 +50,6 @@ beforeEach(() => {
   state = newPullRequestState();
   tokens = new FakeGitHubTokenProvider({ knownInstallationIds: [INSTALLATION_ID] });
   mailer = new CapturingMailer();
-  mail = new MailService(mailer, 'Nimbus <noreply@example.com>');
 });
 
 describe('opening a pull request', () => {
@@ -87,12 +83,10 @@ describe('opening a pull request', () => {
     expect(titleFor('x'.repeat(300))).toHaveLength(72);
   });
 
-  it('sends exactly one email', async () => {
+  it('sends no email of its own, because telling people is the runner job', async () => {
     await gatewayWith().gateway.open(openRequest());
 
-    expect(mailer.sent).toHaveLength(1);
-    expect(mailer.sent[0]?.to).toBe(NOTIFY_EMAIL);
-    expect(mailer.sent[0]?.subject).toContain('#41');
+    expect(mailer.sent).toHaveLength(0);
   });
 });
 
@@ -106,14 +100,6 @@ describe('asking twice', () => {
     expect(second.number).toBe(first.number);
     expect(again.clients.clients[0]?.created).toHaveLength(0);
     expect(state.byBranch.size).toBe(1);
-  });
-
-  it('does not send a second email', async () => {
-    await gatewayWith().gateway.open(openRequest());
-    await gatewayWith().gateway.open(openRequest());
-    await gatewayWith().gateway.open(openRequest());
-
-    expect(mailer.sent).toHaveLength(1);
   });
 });
 
@@ -129,14 +115,6 @@ describe('two workers at the same moment', () => {
     expect(loser.clients.clients[0]?.created).toHaveLength(1);
     expect(loser.clients.clients[0]?.finds).toHaveLength(2);
     expect(state.byBranch.size).toBe(1);
-  });
-
-  it('does not email again after losing the race', async () => {
-    await gatewayWith().gateway.open(openRequest());
-    state.hiddenBranches.add(openRequest().branch);
-    await gatewayWith().gateway.open(openRequest());
-
-    expect(mailer.sent).toHaveLength(1);
   });
 
   it('reports honestly when the winner cannot be found afterwards', async () => {
@@ -157,20 +135,6 @@ describe('when things break', () => {
     expect(await codeOf(() => gatewayWith({ failCreate: true }).gateway.open(openRequest()))).toBe(
       'PULL_REQUEST_FAILED',
     );
-    expect(mailer.sent).toHaveLength(0);
-  });
-
-  it('keeps the pull request when the email fails', async () => {
-    mailer.failNextSends(new Error('smtp is down'));
-
-    const result = await gatewayWith().gateway.open(openRequest());
-
-    expect(result.number).toBe(41);
-    expect(
-      lines.some(
-        (line) => line.msg === 'pull request opened but the notification could not be sent',
-      ),
-    ).toBe(true);
   });
 });
 

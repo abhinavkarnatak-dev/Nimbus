@@ -41,9 +41,9 @@ function build(overrides: Record<string, string | undefined> = {}): OtpService {
 
 function codeFromLastEmail(): string {
   const text = mailer.lastMessage?.text ?? '';
-  const match = /\b[0-9]{8}\b/.exec(text);
+  const match = /\b[0-9]{6}\b/.exec(text);
   if (match === null) {
-    throw new Error('No eight digit code found in the captured email');
+    throw new Error('No six digit code found in the captured email');
   }
   return match[0];
 }
@@ -79,14 +79,14 @@ beforeEach(async () => {
 });
 
 describe('asking for a code', () => {
-  it('sends one email carrying an eight digit code', async () => {
+  it('sends one email carrying a six digit code', async () => {
     const result = await service.requestCode({ email: EMAIL, ip: IP });
 
     expect(result.requestId).toMatch(/^req_[0-9A-Za-z_-]{21}$/);
     expect(result.expiresInSeconds).toBeGreaterThan(0);
     expect(result.resendAvailableInSeconds).toBe(RESEND_COOLDOWN_SECONDS);
     expect(mailer.sent).toHaveLength(1);
-    expect(codeFromLastEmail()).toMatch(/^[0-9]{8}$/);
+    expect(codeFromLastEmail()).toMatch(/^[0-9]{6}$/);
   });
 
   it('creates no user, so asking about a stranger reveals nothing', async () => {
@@ -251,7 +251,7 @@ describe('proving a code', () => {
   it('refuses a wrong code without saying how wrong', async () => {
     const { requestId } = await service.requestCode({ email: EMAIL, ip: IP });
     const code = codeFromLastEmail();
-    const wrong = code === '00000000' ? '11111111' : '00000000';
+    const wrong = code === '000000' ? '111111' : '000000';
 
     const error = await apiErrorFrom(
       service.verifyCode({ requestId, email: EMAIL, code: wrong, ip: IP }),
@@ -267,7 +267,7 @@ describe('proving a code', () => {
       service.verifyCode({
         requestId: 'req_aaaaaaaaaaaaaaaaaaaaa',
         email: EMAIL,
-        code: '12345678',
+        code: '123456',
         ip: IP,
       }),
     );
@@ -287,7 +287,7 @@ describe('proving a code', () => {
     expect(await usersCollection(db.db).countDocuments({})).toBe(0);
   });
 
-  it('refuses a code that is not eight digits', async () => {
+  it('refuses a code that is not six digits', async () => {
     const { requestId } = await service.requestCode({ email: EMAIL, ip: IP });
 
     const error = await apiErrorFrom(
@@ -327,11 +327,11 @@ describe('proving a code', () => {
     const code = codeFromLastEmail();
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      await apiErrorFrom(service.verifyCode({ requestId, email: EMAIL, code: '00000001', ip: IP }));
+      await apiErrorFrom(service.verifyCode({ requestId, email: EMAIL, code: '000001', ip: IP }));
     }
 
     const exhausted = await apiErrorFrom(
-      service.verifyCode({ requestId, email: EMAIL, code: '00000001', ip: IP }),
+      service.verifyCode({ requestId, email: EMAIL, code: '000001', ip: IP }),
     );
     expect(exhausted.code).toBe('OTP_ATTEMPTS_EXCEEDED');
 
@@ -357,7 +357,7 @@ describe('proving a code', () => {
   it('records a rejection when a code is wrong', async () => {
     const { requestId } = await service.requestCode({ email: EMAIL, ip: IP });
 
-    await apiErrorFrom(service.verifyCode({ requestId, email: EMAIL, code: '00000001', ip: IP }));
+    await apiErrorFrom(service.verifyCode({ requestId, email: EMAIL, code: '000001', ip: IP }));
 
     const events = await auditEventsCollection(db.db)
       .find({ action: 'auth.otp.rejected' })

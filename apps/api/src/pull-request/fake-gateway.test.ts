@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { AI_NOTICE } from './body.js';
 import { FakePullRequestGateway } from './fake-gateway.js';
-import { NOTIFY_EMAIL, openRequest } from './pull-request.fixtures.js';
+import { openRequest } from './pull-request.fixtures.js';
 
 describe('the fake behaves like the real one', () => {
   it('opens one pull request and remembers it', async () => {
@@ -13,15 +13,6 @@ describe('the fake behaves like the real one', () => {
 
     expect(second.number).toBe(first.number);
     expect(gateway.byBranch.size).toBe(1);
-  });
-
-  it('notifies once, not once per attempt', async () => {
-    const gateway = new FakePullRequestGateway();
-
-    await gateway.open(openRequest());
-    await gateway.open(openRequest());
-
-    expect(gateway.emails).toEqual([NOTIFY_EMAIL]);
   });
 
   it('builds a real body rather than a placeholder', async () => {
@@ -45,6 +36,6 @@ describe('the fake behaves like the real one', () => {
     await gateway.open(openRequest());
 
     expect(gateway.requests).toHaveLength(1);
-    expect(gateway.requests[0]?.notifyEmail).toBe(NOTIFY_EMAIL);
+    expect(gateway.requests[0]?.branch).toBe(openRequest().branch);
   });
 });

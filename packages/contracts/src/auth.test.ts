@@ -39,21 +39,21 @@ describe('OTP verification', () => {
   const valid = () => ({
     requestId: VALID_REQUEST_ID,
     email: 'dev@example.com',
-    code: '12345678',
+    code: '123456',
   });
 
-  it('accepts an eight digit code', () => {
+  it('accepts a six digit code', () => {
     expect(OtpVerifyBodySchema.parse(valid())).toEqual(valid());
   });
 
   it('rejects codes of the wrong length or shape', () => {
-    for (const code of ['1234567', '123456789', '1234567a', '', '        ', '12 34 56 78']) {
+    for (const code of ['12345', '1234567', '12345a', '', '      ', '12 34 56']) {
       expect(OtpVerifyBodySchema.safeParse({ ...valid(), code }).success).toBe(false);
     }
   });
 
   it('rejects a numeric code, which would lose leading zeros', () => {
-    expect(OtpVerifyBodySchema.safeParse({ ...valid(), code: 12_345_678 }).success).toBe(false);
+    expect(OtpVerifyBodySchema.safeParse({ ...valid(), code: 123_456 }).success).toBe(false);
   });
 
   it('rejects a request id that is not a request id', () => {

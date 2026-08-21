@@ -27,7 +27,8 @@ describe('valid configuration', () => {
     expect(config.isProduction).toBe(false);
     expect(config.api.host).toBe('127.0.0.1');
     expect(config.api.port).toBe(4000);
-    expect(config.session.ttlSeconds).toBe(3600);
+    expect(config.session.ttlSeconds).toBe(604_800);
+    expect(config.session.absoluteTtlSeconds).toBe(2_592_000);
     expect(config.limits.maxAgentSteps).toBe(30);
     expect(config.logging.level).toBe('info');
   });

@@ -12,7 +12,6 @@ import {
 import { branchNameFor } from '../push/branch-name.js';
 import type { OpenPullRequestRequest } from './gateway.js';
 
-export const NOTIFY_EMAIL = 'person@example.com';
 export const SUMMARY = 'Changed the redirect so it keeps the query string.';
 
 export const PASSING_CHECKS: readonly CheckResult[] = [
@@ -43,7 +42,6 @@ export function openRequest(
     summary: SUMMARY,
     report: validatePatch({ patch, expectedBaseSha: BASE_SHA, reportedBaseSha: BASE_SHA }),
     checks: PASSING_CHECKS,
-    notifyEmail: NOTIFY_EMAIL,
     ...overrides,
   };
 }

@@ -40,6 +40,7 @@ function login(): ActiveSession {
     sessionId: 'login-id',
     sessionKey: 'hashed',
     csrfToken: 'csrf',
+    expiresInSeconds: 604_800,
     user: {
       userId: USER_ID,
       email: 'person@example.com',
