@@ -39,7 +39,7 @@ export const sessionEndedTemplate: EmailTemplate<SessionEndedData> = {
         '',
         'Nimbus, a cloud coding agent.',
       ]),
-      html: layout(headline, [
+      html: layout(headline, 'Nothing was pushed and no pull request was opened.', [
         paragraph(`Repository: ${data.repository}`),
         paragraph(`Task: ${data.task}`),
         paragraph(`What happened: ${data.reason}`),

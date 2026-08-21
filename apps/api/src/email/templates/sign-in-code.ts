@@ -39,7 +39,7 @@ export const signInCodeTemplate: EmailTemplate<SignInCodeData> = {
         '',
         'Nimbus, a cloud coding agent.',
       ]),
-      html: layout('Your sign in code', [
+      html: layout('Your sign in code', `Your code expires in ${minutes} minutes.`, [
         paragraph('Enter this code in the window where you started signing in to Nimbus.'),
         codeBlock(data.code),
         fineParagraph(`This code expires in ${minutes} minutes and can only be used once.`),

@@ -57,6 +57,17 @@ export function safeLink(url: string): string | null {
   return escapeHtml(parsed.toString());
 }
 
+const PREVIEW_FILLER = '&#847;&zwnj;&nbsp;'.repeat(60);
+
+function preheader(preview: string): string {
+  return joinLines([
+    '<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:transparent">',
+    escapeHtml(preview),
+    PREVIEW_FILLER,
+    '</div>',
+  ]);
+}
+
 function wordmark(): string {
   return joinLines([
     '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px">',
@@ -68,7 +79,7 @@ function wordmark(): string {
   ]);
 }
 
-export function layout(heading: string, blocks: readonly string[]): string {
+export function layout(heading: string, preview: string, blocks: readonly string[]): string {
   return joinLines([
     '<!doctype html>',
     '<html lang="en">',
@@ -80,6 +91,7 @@ export function layout(heading: string, blocks: readonly string[]): string {
     '<title>' + escapeHtml(heading) + '</title>',
     '</head>',
     `<body style="margin:0;padding:0;background:${EMAIL_PALETTE.page}">`,
+    preheader(preview),
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${EMAIL_PALETTE.page}">`,
     '<tr>',
     '<td align="center" style="padding:32px 16px">',

@@ -54,17 +54,21 @@ export const pullRequestReadyTemplate: EmailTemplate<PullRequestReadyData> = {
         '',
         'Nimbus, a cloud coding agent.',
       ]),
-      html: layout('Your pull request is ready', [
-        paragraph(
-          `Nimbus finished a task on ${data.repository} and opened a pull request for your review.`,
-        ),
-        paragraph(`Task: ${data.task}`),
-        paragraph(`Branch: ${data.branch}`),
-        linkBlock(data.pullRequestUrl, `Review pull request #${number}`),
-        fineParagraph(
-          'Nothing has been merged. Nimbus never merges pull requests and never writes to the default branch. Review the changes before merging.',
-        ),
-      ]),
+      html: layout(
+        'Your pull request is ready',
+        'Nothing has been merged. Read the diff and decide.',
+        [
+          paragraph(
+            `Nimbus finished a task on ${data.repository} and opened a pull request for your review.`,
+          ),
+          paragraph(`Task: ${data.task}`),
+          paragraph(`Branch: ${data.branch}`),
+          linkBlock(data.pullRequestUrl, `Review pull request #${number}`),
+          fineParagraph(
+            'Nothing has been merged. Nimbus never merges pull requests and never writes to the default branch. Review the changes before merging.',
+          ),
+        ],
+      ),
     };
   },
 };
