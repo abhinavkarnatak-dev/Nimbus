@@ -13,6 +13,12 @@ import {
   type OutgoingEmail,
 } from './mailer.js';
 import { escapeHtml, safeLink } from './render.js';
+import {
+  CONNECTION_TIMEOUT_MS,
+  GREETING_TIMEOUT_MS,
+  SOCKET_TIMEOUT_MS,
+  smtpTransportOptions,
+} from './smtp-mailer.js';
 import { pullRequestReadyTemplate } from './templates/pull-request-ready.js';
 import { signInCodeTemplate } from './templates/sign-in-code.js';
 
@@ -331,5 +337,32 @@ describe('choosing an adapter', () => {
 
     expect(mailer.name).toBe('smtp');
     expect(mailer.developmentOnly).toBe(false);
+  });
+});
+
+describe('how the smtp connection is made', () => {
+  const { logger } = createTestLogger();
+  const options = smtpTransportOptions({
+    smtp: { host: 'smtp.example.com', port: 587, secure: false },
+    logger,
+  });
+
+  it('asks for IPv4, because a host with no IPv6 route cannot reach an IPv6 mail server', () => {
+    expect(options['family']).toBe(4);
+  });
+
+  it('will not send credentials in the clear', () => {
+    expect(options['requireTLS']).toBe(true);
+    expect(options['tls']).toStrictEqual({ minVersion: 'TLSv1.2' });
+  });
+
+  it('bounds every stage, so a silent server cannot hold the request open', () => {
+    expect(options['connectionTimeout']).toBe(CONNECTION_TIMEOUT_MS);
+    expect(options['greetingTimeout']).toBe(GREETING_TIMEOUT_MS);
+    expect(options['socketTimeout']).toBe(SOCKET_TIMEOUT_MS);
+  });
+
+  it('omits authentication entirely when there is none to send', () => {
+    expect(options['auth']).toBeUndefined();
   });
 });

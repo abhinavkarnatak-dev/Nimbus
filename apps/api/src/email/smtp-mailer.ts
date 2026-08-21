@@ -12,6 +12,7 @@ import {
   type SendResult,
 } from './mailer.js';
 
+export const IP_FAMILY = 4;
 export const CONNECTION_TIMEOUT_MS = 10_000;
 export const GREETING_TIMEOUT_MS = 10_000;
 export const SOCKET_TIMEOUT_MS = 20_000;
@@ -43,6 +44,25 @@ function safeErrorFacts(error: unknown): Record<string, unknown> {
   };
 }
 
+export function smtpTransportOptions(options: SmtpMailerOptions): Record<string, unknown> {
+  const { smtp } = options;
+
+  return {
+    host: smtp.host,
+    port: smtp.port,
+    secure: smtp.secure,
+    family: IP_FAMILY,
+    requireTLS: options.requireTls ?? !smtp.secure,
+    tls: { minVersion: 'TLSv1.2' },
+    connectionTimeout: options.connectionTimeoutMs ?? CONNECTION_TIMEOUT_MS,
+    greetingTimeout: options.greetingTimeoutMs ?? GREETING_TIMEOUT_MS,
+    socketTimeout: options.socketTimeoutMs ?? SOCKET_TIMEOUT_MS,
+    ...(smtp.user === undefined || smtp.password === undefined
+      ? {}
+      : { auth: { user: smtp.user, pass: smtp.password } }),
+  };
+}
+
 export class SmtpMailer implements Mailer {
   readonly name = 'smtp';
   readonly developmentOnly = false;
@@ -51,22 +71,8 @@ export class SmtpMailer implements Mailer {
   private readonly logger: Logger;
 
   constructor(options: SmtpMailerOptions) {
-    const { smtp } = options;
     this.logger = options.logger;
-
-    this.transporter = createTransport({
-      host: smtp.host,
-      port: smtp.port,
-      secure: smtp.secure,
-      requireTLS: options.requireTls ?? !smtp.secure,
-      tls: { minVersion: 'TLSv1.2' },
-      connectionTimeout: options.connectionTimeoutMs ?? CONNECTION_TIMEOUT_MS,
-      greetingTimeout: options.greetingTimeoutMs ?? GREETING_TIMEOUT_MS,
-      socketTimeout: options.socketTimeoutMs ?? SOCKET_TIMEOUT_MS,
-      ...(smtp.user === undefined || smtp.password === undefined
-        ? {}
-        : { auth: { user: smtp.user, pass: smtp.password } }),
-    });
+    this.transporter = createTransport(smtpTransportOptions(options));
   }
 
   async send(email: OutgoingEmail): Promise<SendResult> {
