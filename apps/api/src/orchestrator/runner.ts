@@ -299,7 +299,8 @@ export class SessionRunner {
 
     const baseCommitSha = result.state.baseCommitSha;
 
-    const latestRequest = result.state.task;
+    const latestRequest =
+      session.messages.filter((message) => message.role === 'user').at(-1)?.text ?? session.task;
     const beforePush = await this.#verdict(signal, liveness, 'before pushing a branch');
 
     if (beforePush !== 'live') {
