@@ -78,9 +78,9 @@ export function Landing(): React.JSX.Element {
               💸
             </span>
             <span>
-              <strong className="hero__broke-lead">We are broke. Like, properly broke. 🥲</strong>{' '}
-              No free model credits here, so bring your own Google Gemini key and Nimbus will
-              happily burn your quota instead of ours 😇 Google gives one away free anyway.
+              <strong className="hero__broke-lead">I am broke. Like, properly broke. 🥲</strong> No
+              free model credits here, so bring your own Google Gemini key and Nimbus will happily
+              burn your quota instead of mine 😇 Google gives one away free anyway.
             </span>
           </p>
 
