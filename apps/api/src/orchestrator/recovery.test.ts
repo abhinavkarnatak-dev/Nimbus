@@ -266,6 +266,53 @@ describe('what a recovered run is told about the one before it', () => {
     );
   }
 
+  it('works on the original task when the last thing said was a clarification answer', () => {
+    const state = stateFor(
+      sessionDocument({
+        status: 'working',
+        clarificationQuestion: 'Where should the file go, and what should it be called?',
+        clarificationAnswer: 'at root, LinkedList.cpp',
+        messages: [
+          {
+            role: 'user',
+            text: 'add a simple linked list example',
+            sentAt: new Date('2026-08-01T10:00:00Z'),
+          },
+          {
+            role: 'user',
+            text: 'at root, LinkedList.cpp',
+            sentAt: new Date('2026-08-01T10:01:00Z'),
+          },
+        ],
+      }),
+    );
+
+    expect(state.task).toBe('the login redirect always sends people to the dashboard');
+    expect(state.clarificationAnswer).toBe('at root, LinkedList.cpp');
+  });
+
+  it('works on the new instruction when the last thing said was a real follow-up', () => {
+    const state = stateFor(
+      sessionDocument({
+        status: 'working',
+        messages: [
+          {
+            role: 'user',
+            text: 'add a simple linked list example',
+            sentAt: new Date('2026-08-01T10:00:00Z'),
+          },
+          {
+            role: 'user',
+            text: 'now add a doubly linked list too',
+            sentAt: new Date('2026-08-01T10:01:00Z'),
+          },
+        ],
+      }),
+    );
+
+    expect(state.task).toBe('now add a doubly linked list too');
+  });
+
   it('carries the steps that were already spent, so four crashes are not four budgets', () => {
     const state = stateFor(sessionDocument({ status: 'working', step: 18, maxSteps: 30 }));
 
