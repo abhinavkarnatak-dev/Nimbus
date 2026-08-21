@@ -92,7 +92,7 @@ Owned by features 013, 014, 015, 022, and 023.
 ## 6. Sandbox isolation
 
 A fresh sandbox is created per session with no filesystem reuse. It contains no GitHub token, no
-database URI, no Redis URL, no SMTP credential, no model provider key, and no application session
+database URI, no Redis URL, no mail credential, no model provider key, and no application session
 secret. Outbound network access is denied by default; any exception is narrow, time limited,
 explicitly approved, and routed through a controlled proxy or allowlist. Private, loopback, link
 local, cloud metadata, and internal service ranges are blocked from sandbox workloads.

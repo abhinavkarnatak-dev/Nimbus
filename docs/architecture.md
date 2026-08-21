@@ -22,12 +22,12 @@ The architecture is organized around a single question: where can a credential e
 | Z1   | Nimbus API, orchestrator, gateways   | Trusted                  | Yes, all of them                     |
 | Z2   | MongoDB, Redis, optional Qdrant      | Trusted, private network | Credentials to reach them live in Z1 |
 | Z3   | E2B sandbox                          | Untrusted execution      | No, never                            |
-| Z4   | GitHub, Gemini, SMTP                 | External                 | Reached only from Z1                 |
+| Z4   | GitHub, Gemini, the mail provider    | External                 | Reached only from Z1                 |
 | Z5   | Repository content, user attachments | Untrusted data           | Not applicable                       |
 
 Z3 is the important one. The sandbox runs commands proposed by a language model against source code
 written by strangers. Treating it as hostile is the design's foundation, not a precaution. It
-receives no GitHub token, no database URI, no Redis URL, no SMTP password, no model provider key,
+receives no GitHub token, no database URI, no Redis URL, no mail credential, no model provider key,
 and no application session secret. If the sandbox is fully compromised, the attacker gets a
 throwaway container holding a public repository that was already public.
 

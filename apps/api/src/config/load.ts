@@ -21,6 +21,10 @@ export interface GitHubConfig {
   setupCallbackUrl: string;
 }
 
+export interface ResendConfig {
+  apiKey: string;
+}
+
 export interface SmtpConfig {
   host: string;
   port: number;
@@ -81,6 +85,7 @@ export interface AppConfig {
   sandbox: SandboxConfig;
   storage: StorageConfig | null;
   llm: LlmConfig;
+  resend: ResendConfig | null;
   smtp: SmtpConfig | null;
   mail: { from: string };
   features: { semanticSearch: boolean };
@@ -238,8 +243,8 @@ function productionIssues(config: AppConfig): string[] {
       'GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_APP_PRIVATE_KEY_BASE64, GITHUB_WEBHOOK_SECRET, GITHUB_SETUP_CALLBACK_URL: all required in production',
     );
   }
-  if (config.smtp === null) {
-    issues.push('SMTP_HOST: required in production');
+  if (config.resend === null && config.smtp === null) {
+    issues.push('RESEND_API_KEY or SMTP_HOST: one of them is required in production');
   }
   if (config.sandbox.apiKey === undefined || config.sandbox.templateId === undefined) {
     issues.push('E2B_API_KEY, SANDBOX_TEMPLATE_ID: both required in production');
@@ -317,6 +322,7 @@ function toAppConfig(raw: RawEnvironment): AppConfig {
         ? {}
         : { defaultVisionModel: raw.DEFAULT_VISION_MODEL }),
     },
+    resend: raw.RESEND_API_KEY === undefined ? null : { apiKey: raw.RESEND_API_KEY },
     smtp: buildSmtp(raw),
     mail: { from: raw.MAIL_FROM },
     features: { semanticSearch: raw.ENABLE_SEMANTIC_SEARCH },

@@ -86,7 +86,7 @@ The whole environment is validated once at startup, and the process refuses to s
 missing or malformed. Error messages name the setting and the reason but never print the value, so a
 bad connection string cannot leak its password into a log.
 
-Google, GitHub, SMTP, and E2B may all be left blank in development, which is what makes the local
+Google, GitHub, mail, and E2B may all be left blank in development, which is what makes the local
 fake-adapter mode possible. In production they are required, and startup fails if they are absent.
 
 There is no model provider setting at all, because the server holds no model key of its own. Each
@@ -248,15 +248,20 @@ Two properties are enforced rather than documented:
 
 Nimbus picks a mail adapter from your settings at startup and says which one in the log.
 
-| Adapter     | Chosen when                       | Behaviour                                 |
-| ----------- | --------------------------------- | ----------------------------------------- |
-| `smtp`      | SMTP settings are filled in       | Really sends                              |
-| `console`   | SMTP is blank, outside production | Prints the whole message to your terminal |
-| `capturing` | Tests                             | Keeps messages in memory                  |
+| Adapter     | Chosen when                    | Behaviour                                 |
+| ----------- | ------------------------------ | ----------------------------------------- |
+| `resend`    | `RESEND_API_KEY` is set        | Really sends, over HTTPS                  |
+| `smtp`      | SMTP settings are filled in    | Really sends, over SMTP                   |
+| `console`   | Neither, and not in production | Prints the whole message to your terminal |
+| `capturing` | Tests                          | Keeps messages in memory                  |
 
-That means **you can develop the whole login flow without an email account**. Leave SMTP blank and
+Resend wins when both are configured, because a host that can reach `api.resend.com` on port 443 can
+always send, while SMTP depends on the host allowing outbound mail ports and on which address family
+DNS happens to return.
+
+That means **you can develop the whole login flow without an email account**. Leave both blank and
 the sign in code prints to your terminal. The console adapter throws if it is ever constructed in
-production, and production already refuses to start without SMTP.
+production, and production refuses to start unless one of `RESEND_API_KEY` or `SMTP_HOST` is set.
 
 Three guarantees, each with tests:
 
@@ -291,7 +296,7 @@ curl -i -X POST http://localhost:4000/auth/otp/request \
 }
 ```
 
-A six digit code arrives by email, or prints to your terminal if SMTP is blank.
+A six digit code arrives by email, or prints to your terminal when no mail provider is configured.
 
 Send it back to finish signing in:
 
@@ -1218,9 +1223,13 @@ credentials.
 
 ## External service setup
 
-Google OAuth, the GitHub App, E2B, SMTP, and optional Qdrant each require configuration before the
-corresponding real adapter can be used. Gemini is not among them, because its key belongs to the
-account rather than to the deployment.
+Google OAuth, the GitHub App, E2B, a mail provider, and optional Qdrant each require configuration
+before the corresponding real adapter can be used. Gemini is not among them, because its key belongs
+to the account rather than to the deployment.
+
+Mail needs either `RESEND_API_KEY` or the `SMTP_*` settings. Resend also needs the domain in
+`MAIL_FROM` verified with them, through DNS records they hand you; until it is, they will only
+deliver to the address that owns the Resend account.
 
 Three callback URLs have to match what is configured with each provider, and all three are built from
 the public API host:
@@ -1254,7 +1263,7 @@ The design is organized around one question: where can a credential exist?
 | Z1   | Nimbus API, orchestrator, gateways      | Yes, all of them           |
 | Z2   | MongoDB, Redis, optional Qdrant         | Reached only from Z1       |
 | Z3   | Sandbox                                 | No, never                  |
-| Z4   | GitHub, Gemini, SMTP                    | Reached only from Z1       |
+| Z4   | GitHub, Gemini, mail provider           | Reached only from Z1       |
 | Z5   | Repository content and user attachments | Untrusted data             |
 
 The sandbox runs commands proposed by a language model against source code written by strangers, so
@@ -1287,7 +1296,7 @@ unsuitable. A host that sleeps can be used if something wakes it, which is what 
 is for.
 
 The live deployment is the API on Render, the browser application on Vercel, MongoDB on Atlas, Redis
-on Upstash, object storage on Cloudflare R2, sandboxes on E2B, and mail over SMTP. UptimeRobot polls
+on Upstash, object storage on Cloudflare R2, sandboxes on E2B, and mail through Resend. UptimeRobot polls
 `GET /health`, which answers `{"status":"ok","uptimeSeconds":n}` without touching the database.
 
 **Both halves must share one registrable domain.** This is a requirement, not a preference. The

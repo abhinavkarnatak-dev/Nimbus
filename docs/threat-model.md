@@ -13,7 +13,7 @@ mitigation names the feature that owns it. A mitigation marked "planned" is not 
 | Repository author  | Wrote the code Nimbus reads. Often not the user     | No                                                      |
 | Language model     | Proposes actions. Influenced by repository content  | No                                                      |
 | Nimbus operator    | Runs the deployment                                 | Yes                                                     |
-| External services  | GitHub, Gemini, SMTP, E2B                           | Trusted to perform their function, not with excess data |
+| External services  | GitHub, Gemini, the mail provider, E2B              | Trusted to perform their function, not with excess data |
 
 The language model is explicitly an untrusted actor. It is influenced by text written by strangers,
 so its output is a proposal, never an authorization.
@@ -29,7 +29,7 @@ Ranked by what an attacker gains from them.
 | Application session cookies                  | Full account takeover                                      |
 | One time passwords in flight                 | Account takeover without a password                        |
 | Model provider API keys held for an account  | Financial loss to that account and an exfiltration channel |
-| SMTP credentials                             | Phishing from a trusted sender                             |
+| Mail provider credentials                    | Phishing from a trusted sender                             |
 | User to repository mapping                   | Discloses what a user is working on                        |
 | Private repository content held in a session | Source code disclosure                                     |
 | Stored per file diffs of a session's changes | Source code disclosure, scoped to that account's sessions  |

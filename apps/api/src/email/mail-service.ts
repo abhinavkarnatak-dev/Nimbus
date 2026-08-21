@@ -1,6 +1,7 @@
 import type { AppConfig } from '../config/load.js';
 import type { Logger } from '../logging/logger.js';
 import { ConsoleMailer } from './console-mailer.js';
+import { ResendMailer } from './resend-mailer.js';
 import { SmtpMailer } from './smtp-mailer.js';
 import type { Mailer, SendResult } from './mailer.js';
 import type { EmailTemplate } from './render.js';
@@ -18,6 +19,10 @@ export interface CreateMailerOptions {
 
 export function createMailer(options: CreateMailerOptions): Mailer {
   const { config, logger } = options;
+
+  if (config.resend !== null) {
+    return new ResendMailer({ resend: config.resend, logger });
+  }
 
   if (config.smtp !== null) {
     return new SmtpMailer({ smtp: config.smtp, logger });

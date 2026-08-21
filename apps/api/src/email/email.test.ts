@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { createTestLogger, productionConfig, testConfig } from '../http/http.fixtures.js';
+import {
+  createTestLogger,
+  productionConfig,
+  testConfig,
+  type CapturedLog,
+} from '../http/http.fixtures.js';
 import { CapturingMailer } from './capturing-mailer.js';
 import { ConsoleMailer, ProductionConsoleMailerError } from './console-mailer.js';
 import { MailService, createMailer } from './mail-service.js';
@@ -13,6 +18,7 @@ import {
   type OutgoingEmail,
 } from './mailer.js';
 import { escapeHtml, safeLink } from './render.js';
+import { RESEND_SEND_URL, ResendMailer } from './resend-mailer.js';
 import {
   CONNECTION_TIMEOUT_MS,
   GREETING_TIMEOUT_MS,
@@ -378,6 +384,75 @@ describe('how the smtp connection is made', () => {
 
   it('omits authentication entirely when there is none to send', () => {
     expect(resolved['auth']).toBeUndefined();
+  });
+});
+
+describe('sending over https', () => {
+  const KEY = 're_pretend_this_is_a_real_key';
+  const email: OutgoingEmail = {
+    to: 'person@example.com',
+    from: 'Nimbus <noreply@example.com>',
+    subject: 'Your Nimbus sign in code',
+    text: 'the code is 482103',
+    html: '<p>the code is 482103</p>',
+  };
+
+  function mailerWith(reply: { status: number; body: unknown }): {
+    mailer: ResendMailer;
+    calls: { url: string; init: RequestInit }[];
+    lines: CapturedLog[];
+  } {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const captured = createTestLogger();
+
+    const mailer = new ResendMailer({
+      resend: { apiKey: KEY },
+      logger: captured.logger,
+      fetch: async (url, init) => {
+        calls.push({ url: url instanceof Request ? url.url : url.toString(), init: init ?? {} });
+        return await Promise.resolve(
+          new Response(JSON.stringify(reply.body), { status: reply.status }),
+        );
+      },
+    });
+
+    return { mailer, calls, lines: captured.lines };
+  }
+
+  it('posts the message to Resend and keeps the returned id', async () => {
+    const held = mailerWith({ status: 200, body: { id: 'msg_123' } });
+
+    const result = await held.mailer.send(email);
+
+    expect(result).toStrictEqual({ messageId: 'msg_123', adapter: 'resend', delivered: true });
+    expect(held.calls[0]?.url).toBe(RESEND_SEND_URL);
+  });
+
+  it('refuses a bad address before spending a request on it', async () => {
+    const held = mailerWith({ status: 200, body: { id: 'msg_123' } });
+
+    await expect(held.mailer.send({ ...email, to: 'not-an-address' })).rejects.toThrow(MailError);
+    expect(held.calls).toHaveLength(0);
+  });
+
+  it('turns a refusal into a mail error rather than a silent success', async () => {
+    const held = mailerWith({
+      status: 403,
+      body: { name: 'validation_error', message: 'The domain is not verified.' },
+    });
+
+    await expect(held.mailer.send(email)).rejects.toThrow(MailError);
+    expect(held.lines.some((line) => line['resendError'] === 'validation_error')).toBe(true);
+  });
+
+  it('never writes the key or the message body to the logs', async () => {
+    const held = mailerWith({ status: 500, body: { name: 'application_error', message: 'boom' } });
+
+    await held.mailer.send(email).catch(() => undefined);
+    const written = JSON.stringify(held.lines);
+
+    expect(written).not.toContain(KEY);
+    expect(written).not.toContain('482103');
   });
 });
 

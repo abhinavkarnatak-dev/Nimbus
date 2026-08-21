@@ -109,6 +109,8 @@ export const environmentSchema = z.object({
   DEFAULT_TEXT_MODEL: optionalText,
   DEFAULT_VISION_MODEL: optionalText,
 
+  RESEND_API_KEY: optionalText,
+
   SMTP_HOST: optionalText,
   SMTP_PORT: port.default(587),
   SMTP_SECURE: boolean.default(false),
