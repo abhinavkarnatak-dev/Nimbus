@@ -1,4 +1,7 @@
-import { createTransport, type Transporter } from 'nodemailer';
+import { isIP } from 'node:net';
+import { promises as dns } from 'node:dns';
+
+import { createTransport } from 'nodemailer';
 
 import type { SmtpConfig } from '../config/load.js';
 import type { Logger } from '../logging/logger.js';
@@ -44,16 +47,20 @@ function safeErrorFacts(error: unknown): Record<string, unknown> {
   };
 }
 
-export function smtpTransportOptions(options: SmtpMailerOptions): Record<string, unknown> {
+export function smtpTransportOptions(
+  options: SmtpMailerOptions,
+  address: string,
+): Record<string, unknown> {
   const { smtp } = options;
+  const resolved = address !== smtp.host;
 
   return {
-    host: smtp.host,
+    host: address,
     port: smtp.port,
     secure: smtp.secure,
     family: IP_FAMILY,
     requireTLS: options.requireTls ?? !smtp.secure,
-    tls: { minVersion: 'TLSv1.2' },
+    tls: { minVersion: 'TLSv1.2', ...(resolved ? { servername: smtp.host } : {}) },
     connectionTimeout: options.connectionTimeoutMs ?? CONNECTION_TIMEOUT_MS,
     greetingTimeout: options.greetingTimeoutMs ?? GREETING_TIMEOUT_MS,
     socketTimeout: options.socketTimeoutMs ?? SOCKET_TIMEOUT_MS,
@@ -63,23 +70,45 @@ export function smtpTransportOptions(options: SmtpMailerOptions): Record<string,
   };
 }
 
+export async function ipv4AddressFor(host: string, logger?: Logger): Promise<string> {
+  if (isIP(host) !== 0) {
+    return host;
+  }
+
+  try {
+    const addresses = await dns.resolve4(host);
+    const first = addresses.at(0);
+
+    return first ?? host;
+  } catch (error) {
+    logger?.warn(
+      { host, err: redactValue(error) },
+      'no IPv4 address could be found for the mail server, so the name is being used as it is',
+    );
+    return host;
+  }
+}
+
 export class SmtpMailer implements Mailer {
   readonly name = 'smtp';
   readonly developmentOnly = false;
 
-  private readonly transporter: Transporter;
+  private readonly options: SmtpMailerOptions;
   private readonly logger: Logger;
 
   constructor(options: SmtpMailerOptions) {
+    this.options = options;
     this.logger = options.logger;
-    this.transporter = createTransport(smtpTransportOptions(options));
   }
 
   async send(email: OutgoingEmail): Promise<SendResult> {
     assertValidOutgoingEmail(email);
 
+    const address = await ipv4AddressFor(this.options.smtp.host, this.logger);
+    const transporter = createTransport(smtpTransportOptions(this.options, address));
+
     try {
-      const info = (await this.transporter.sendMail({
+      const info = (await transporter.sendMail({
         to: email.to,
         from: email.from,
         subject: email.subject,
@@ -106,11 +135,12 @@ export class SmtpMailer implements Mailer {
       );
 
       throw new MailError('MAIL_SEND_FAILED', 'The email could not be sent.', { cause: error });
+    } finally {
+      transporter.close();
     }
   }
 
   async close(): Promise<void> {
-    this.transporter.close();
     await Promise.resolve();
   }
 }

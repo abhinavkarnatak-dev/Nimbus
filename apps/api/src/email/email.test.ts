@@ -17,6 +17,7 @@ import {
   CONNECTION_TIMEOUT_MS,
   GREETING_TIMEOUT_MS,
   SOCKET_TIMEOUT_MS,
+  ipv4AddressFor,
   smtpTransportOptions,
 } from './smtp-mailer.js';
 import { pullRequestReadyTemplate } from './templates/pull-request-ready.js';
@@ -342,27 +343,54 @@ describe('choosing an adapter', () => {
 
 describe('how the smtp connection is made', () => {
   const { logger } = createTestLogger();
-  const options = smtpTransportOptions({
-    smtp: { host: 'smtp.example.com', port: 587, secure: false },
-    logger,
+  const mailer = { smtp: { host: 'smtp.example.com', port: 587, secure: false }, logger };
+  const resolved = smtpTransportOptions(mailer, '203.0.113.25');
+  const unresolved = smtpTransportOptions(mailer, 'smtp.example.com');
+
+  it('connects to an address rather than a name, so nobody else gets to choose one', () => {
+    expect(resolved['host']).toBe('203.0.113.25');
+  });
+
+  it('still proves the certificate against the real name it was asked for', () => {
+    expect(resolved['tls']).toStrictEqual({
+      minVersion: 'TLSv1.2',
+      servername: 'smtp.example.com',
+    });
+  });
+
+  it('claims no server name when it never resolved one', () => {
+    expect(unresolved['tls']).toStrictEqual({ minVersion: 'TLSv1.2' });
   });
 
   it('asks for IPv4, because a host with no IPv6 route cannot reach an IPv6 mail server', () => {
-    expect(options['family']).toBe(4);
+    expect(resolved['family']).toBe(4);
   });
 
   it('will not send credentials in the clear', () => {
-    expect(options['requireTLS']).toBe(true);
-    expect(options['tls']).toStrictEqual({ minVersion: 'TLSv1.2' });
+    expect(resolved['requireTLS']).toBe(true);
   });
 
   it('bounds every stage, so a silent server cannot hold the request open', () => {
-    expect(options['connectionTimeout']).toBe(CONNECTION_TIMEOUT_MS);
-    expect(options['greetingTimeout']).toBe(GREETING_TIMEOUT_MS);
-    expect(options['socketTimeout']).toBe(SOCKET_TIMEOUT_MS);
+    expect(resolved['connectionTimeout']).toBe(CONNECTION_TIMEOUT_MS);
+    expect(resolved['greetingTimeout']).toBe(GREETING_TIMEOUT_MS);
+    expect(resolved['socketTimeout']).toBe(SOCKET_TIMEOUT_MS);
   });
 
   it('omits authentication entirely when there is none to send', () => {
-    expect(options['auth']).toBeUndefined();
+    expect(resolved['auth']).toBeUndefined();
+  });
+});
+
+describe('finding the mail server', () => {
+  it('leaves an address alone, because there is nothing to resolve', async () => {
+    expect(await ipv4AddressFor('203.0.113.25')).toBe('203.0.113.25');
+    expect(await ipv4AddressFor('2404:6800:4003:c03::6c')).toBe('2404:6800:4003:c03::6c');
+  });
+
+  it('falls back to the name when no IPv4 address can be found', async () => {
+    const { logger, lines } = createTestLogger();
+
+    expect(await ipv4AddressFor('nothing.invalid', logger)).toBe('nothing.invalid');
+    expect(lines.some((line) => line.msg?.includes('no IPv4 address'))).toBe(true);
   });
 });
