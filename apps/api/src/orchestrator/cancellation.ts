@@ -83,6 +83,10 @@ export class RedisCancelWatcher implements CancelWatcher {
     const listener = this.#redis.duplicate();
     this.#listening = listener;
 
+    listener.on('error', (error: Error) => {
+      this.#logger.warn({ err: error }, 'the cancellation listener lost its connection to Redis');
+    });
+
     listener.on('message', (channel: string, payload: string) => {
       if (channel !== CANCEL_CHANNEL) {
         return;

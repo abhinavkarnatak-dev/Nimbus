@@ -22,6 +22,7 @@ export interface HeartbeatOptions {
   everyMs?: number;
   ttlSeconds?: number;
   onLost: () => void;
+  now?: () => number;
 }
 
 export class Heartbeat {
@@ -37,9 +38,13 @@ export class Heartbeat {
 
   readonly #onLost: () => void;
 
+  readonly #now: () => number;
+
   #timer: NodeJS.Timeout | null = null;
 
   #lost = false;
+
+  #heldSince: number;
 
   constructor(options: HeartbeatOptions) {
     this.#leases = options.leases;
@@ -48,6 +53,8 @@ export class Heartbeat {
     this.#everyMs = options.everyMs ?? ORCHESTRATOR_LIMITS.heartbeatMs;
     this.#ttlSeconds = options.ttlSeconds ?? ORCHESTRATOR_LIMITS.leaseSeconds;
     this.#onLost = options.onLost;
+    this.#now = options.now ?? ((): number => Date.now());
+    this.#heldSince = this.#now();
   }
 
   get lost(): boolean {
@@ -85,14 +92,21 @@ export class Heartbeat {
     try {
       held = await this.#leases.renew(this.#lease, this.#ttlSeconds);
     } catch (error) {
+      const surelyExpired = this.#now() - this.#heldSince >= this.#ttlSeconds * 1_000;
+
       this.#logger.warn(
-        { resource: this.#lease.resource, error: String(error) },
+        { resource: this.#lease.resource, error: String(error), surelyExpired },
         'a session lease could not be renewed',
       );
+
+      if (!surelyExpired) {
+        return true;
+      }
       held = false;
     }
 
     if (held) {
+      this.#heldSince = this.#now();
       return true;
     }
 

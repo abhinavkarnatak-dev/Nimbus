@@ -433,6 +433,52 @@ describe('a session left behind by a worker that died', () => {
   });
 });
 
+describe('a poll that fails', () => {
+  it('is logged and starts nothing, and the next poll works again', async () => {
+    const held = harness();
+    await held.records.insert(sessionDocument());
+
+    const findClaimable = held.records.findClaimable.bind(held.records);
+    let broken = true;
+    held.records.findClaimable = async (limit: number): Promise<SessionDocument[]> => {
+      if (broken) {
+        throw new Error('MongoServerSelectionError: connection refused');
+      }
+      return findClaimable(limit);
+    };
+
+    expect(await held.orchestrator.tick()).toBe(0);
+    expect(held.logs()).toContain('a poll for claimable sessions failed');
+
+    broken = false;
+    expect(await held.orchestrator.tick()).toBe(1);
+    await settle();
+  });
+
+  it('does not overlap a poll that is still running', async () => {
+    const held = harness();
+    await held.records.insert(sessionDocument());
+
+    const findClaimable = held.records.findClaimable.bind(held.records);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    held.records.findClaimable = async (limit: number): Promise<SessionDocument[]> => {
+      await gate;
+      return findClaimable(limit);
+    };
+
+    const first = held.orchestrator.tick();
+    const second = await held.orchestrator.tick();
+    release();
+
+    expect(second).toBe(0);
+    expect(await first).toBe(1);
+    await settle();
+  });
+});
+
 describe('how many run at once', () => {
   it('never runs more than it was told to', async () => {
     const held = harness({ runningConcurrently: 1 });

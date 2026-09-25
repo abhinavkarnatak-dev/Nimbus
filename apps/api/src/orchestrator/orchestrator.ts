@@ -81,6 +81,8 @@ export class Orchestrator {
 
   readonly #drained = new Set<string>();
 
+  #polling = false;
+
   #timer: NodeJS.Timeout | null = null;
 
   #stopping = false;
@@ -215,10 +217,26 @@ export class Orchestrator {
   }
 
   async tick(): Promise<number> {
-    if (this.#stopping) {
+    if (this.#stopping || this.#polling) {
       return 0;
     }
 
+    this.#polling = true;
+
+    try {
+      return await this.#claimWaiting();
+    } catch (error) {
+      this.#logger.error(
+        { error: String(error) },
+        'a poll for claimable sessions failed, the next one tries again',
+      );
+      return 0;
+    } finally {
+      this.#polling = false;
+    }
+  }
+
+  async #claimWaiting(): Promise<number> {
     const waiting = await this.#records.findClaimable(this.#claimBatch);
     let started = 0;
 
