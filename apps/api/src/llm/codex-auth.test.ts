@@ -28,7 +28,19 @@ describe('Codex device-auth output', () => {
 
   it('strips terminal color escapes before reading the code', () => {
     expect(
-      parseDeviceChallenge('\u001b[94mhttps://auth.openai.com/codex/device\u001b[0m\n\u001b[93mABCD-EFGHI\u001b[0m'),
+      parseDeviceChallenge(
+        '\u001b[94mhttps://auth.openai.com/codex/device\u001b[0m\n\u001b[93mABCD-EFGHI\u001b[0m',
+      ),
     ).toMatchObject({ code: 'ABCD-EFGHI' });
+  });
+
+  it('strips an escaped color sequence embedded in the code', () => {
+    expect(
+      parseDeviceChallenge('https://auth.openai.com/codex/device ABCD-\\u001b[93mEFGHI'),
+    ).toEqual({
+      url: 'https://auth.openai.com/codex/device',
+      code: 'ABCD-EFGHI',
+      expiresAt: null,
+    });
   });
 });
