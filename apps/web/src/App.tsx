@@ -14,6 +14,7 @@ import { Session } from './screens/Session.js';
 import { Settings } from './screens/Settings.js';
 import { SignIn } from './screens/SignIn.js';
 import { useProviderKeys } from './providers/useProviderKeys.js';
+import { useCodexAuth } from './providers/useCodexAuth.js';
 import { useSession } from './session/useSession.js';
 import { useLiveSession } from './sessions/useLiveSession.js';
 import { useSessions } from './sessions/useSessions.js';
@@ -42,9 +43,10 @@ export function App(): React.JSX.Element {
   const signedIn = session.state === 'signed_in';
   const installation = useInstallation(session.api, signedIn);
   const keys = useProviderKeys(session.api, signedIn);
+  const codex = useCodexAuth(session.api, signedIn, session.context?.user.userId ?? null);
   const sessions = useSessions(
     session.api,
-    signedIn && gateIsOpen(installation.gate) && keys.keys.length > 0,
+    signedIn && gateIsOpen(installation.gate) && (keys.keys.length > 0 || codex.connected),
   );
   const watching = route.name === 'session' ? route.sessionId : null;
   const liveView = useLiveSession(session.api, watching);
@@ -155,6 +157,7 @@ export function App(): React.JSX.Element {
           context={session.context}
           installation={installation}
           keys={keys}
+          codex={codex}
           onSignedOut={async (): Promise<void> => {
             await session.refresh();
           }}
@@ -170,8 +173,8 @@ export function App(): React.JSX.Element {
       return <ConnectSkeleton what="Checking which model keys this account has." />;
     }
 
-    if (route.name === 'keys' || keys.keys.length === 0) {
-      return <Keys keys={keys} />;
+    if (route.name === 'keys' || (keys.keys.length === 0 && !codex.connected)) {
+      return <Keys keys={keys} codex={codex} />;
     }
 
     if (route.name === 'session') {

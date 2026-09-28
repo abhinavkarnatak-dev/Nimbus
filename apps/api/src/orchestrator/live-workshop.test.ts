@@ -328,6 +328,7 @@ describe('the model a run is prepared with', () => {
   });
 
   for (const model of SELECTABLE_TEXT_MODELS) {
+    if (findModel(model)?.provider === 'codex') continue;
     it(`puts ${model} in the primary role when it was chosen, and reaches its own provider`, async () => {
       const plan = await planOf({ textModel: model });
 

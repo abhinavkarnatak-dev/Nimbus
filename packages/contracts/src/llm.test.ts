@@ -67,7 +67,8 @@ describe('CallReportSchema', () => {
   });
 
   it('knows the providers it talks to and nothing else', () => {
-    expect([...LLM_PROVIDERS].sort()).toEqual(['gemini']);
+    expect([...LLM_PROVIDERS].sort()).toEqual(['codex', 'gemini']);
+    expect(CallReportSchema.safeParse({ ...report, provider: 'codex' }).success).toBe(true);
     expect(CallReportSchema.safeParse({ ...report, provider: 'openai' }).success).toBe(false);
   });
 

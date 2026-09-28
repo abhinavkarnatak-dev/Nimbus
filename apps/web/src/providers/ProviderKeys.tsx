@@ -1,4 +1,4 @@
-import { providerKeyProblem, type LlmProviderName } from '@nimbus/contracts';
+import { providerKeyProblem, type KeyProviderName } from '@nimbus/contracts';
 import { useState } from 'react';
 
 import { Button } from '../ui/Button.js';
@@ -21,7 +21,7 @@ export interface ProviderKeysProps {
 }
 
 interface RowProps {
-  provider: LlmProviderName;
+  provider: KeyProviderName;
   keys: ProviderKeysHandle;
   onSaid: (said: string) => void;
 }

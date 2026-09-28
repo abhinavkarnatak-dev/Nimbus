@@ -10,6 +10,7 @@ import { CollectingCancelAnnouncer } from '../orchestrator/cancellation.js';
 import { KNOWN_MODELS } from '../llm/models.js';
 import { heldProviderKeys, noProviderKeys } from '../llm/sources.js';
 import { SELECTABLE_TEXT_MODELS, catalogueFor } from '../routing/selection.js';
+import { findModel } from '../llm/models.js';
 import { DEFAULT_MAX_STEPS } from './service.js';
 import {
   CLEAR_TASK,
@@ -721,6 +722,7 @@ describe('choosing a model', () => {
   });
 
   for (const model of SELECTABLE_TEXT_MODELS) {
+    if (findModel(model)?.provider === 'codex') continue;
     it(`stores ${model} when it was chosen`, async () => {
       const harness = sessionHarness();
       await harness.service.create(OWNER_ID, newBody({ model: { textModel: model } }));

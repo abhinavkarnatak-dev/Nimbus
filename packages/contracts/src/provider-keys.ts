@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { IsoTimestampSchema } from './ids.js';
-import { LLM_PROVIDERS, LlmProviderSchema, type LlmProviderName } from './llm.js';
+import { KEY_PROVIDERS, type KeyProviderName } from './llm.js';
 
 export const PROVIDER_KEY_MIN_CHARS = 20;
 export const PROVIDER_KEY_MAX_CHARS = 200;
@@ -16,7 +16,7 @@ export interface ProviderKeyShape {
   models: string;
 }
 
-export const PROVIDER_KEY_SHAPES: Readonly<Record<LlmProviderName, ProviderKeyShape>> = {
+export const PROVIDER_KEY_SHAPES: Readonly<Record<(typeof KEY_PROVIDERS)[number], ProviderKeyShape>> = {
   gemini: {
     label: 'Google Gemini',
     example: 'AIza... or AQ.Ab8...',
@@ -33,7 +33,7 @@ export const ProviderApiKeySchema = z
   .max(PROVIDER_KEY_MAX_CHARS)
   .regex(/^[A-Za-z0-9._~+/=-]+$/, { error: 'Invalid API key' });
 
-export function providerKeyProblem(provider: LlmProviderName, apiKey: string): string | null {
+export function providerKeyProblem(provider: KeyProviderName, apiKey: string): string | null {
   const shape = PROVIDER_KEY_SHAPES[provider];
   const trimmed = apiKey.trim();
 
@@ -56,18 +56,18 @@ export function providerKeyHint(apiKey: string): string {
 }
 
 export const ProviderKeySummarySchema = z.strictObject({
-  provider: LlmProviderSchema,
+  provider: z.enum(KEY_PROVIDERS),
   hint: z.string().min(1).max(PROVIDER_KEY_HINT_CHARS),
   addedAt: IsoTimestampSchema,
   lastVerifiedAt: IsoTimestampSchema.nullable(),
 });
 
 export const ProviderKeysResponseSchema = z.strictObject({
-  keys: z.array(ProviderKeySummarySchema).max(LLM_PROVIDERS.length),
+  keys: z.array(ProviderKeySummarySchema).max(KEY_PROVIDERS.length),
 });
 
 export const SaveProviderKeyBodySchema = z.strictObject({
-  provider: LlmProviderSchema,
+  provider: z.enum(KEY_PROVIDERS),
   apiKey: ProviderApiKeySchema,
 });
 

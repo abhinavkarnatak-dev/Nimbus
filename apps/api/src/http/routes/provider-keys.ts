@@ -1,11 +1,12 @@
 import {
-  LlmProviderSchema,
+  KEY_PROVIDERS,
   ProviderKeysResponseSchema,
   SaveProviderKeyBodySchema,
-  type LlmProviderName,
+  type KeyProviderName,
   type ProviderKeysResponse,
 } from '@nimbus/contracts';
 import { Router } from 'express';
+import { z } from 'zod';
 
 import type { CsrfChecker } from '../../auth/session-service.js';
 import { ApiError } from '../api-error.js';
@@ -17,11 +18,11 @@ export interface ProviderKeyStore {
   list(userId: string): Promise<ProviderKeysResponse>;
   save(input: {
     userId: string;
-    provider: LlmProviderName;
+    provider: KeyProviderName;
     apiKey: string;
     ip: string;
   }): Promise<ProviderKeysResponse>;
-  remove(userId: string, provider: LlmProviderName, ip: string): Promise<ProviderKeysResponse>;
+  remove(userId: string, provider: KeyProviderName, ip: string): Promise<ProviderKeysResponse>;
 }
 
 export interface ProviderKeysRouterOptions {
@@ -29,8 +30,8 @@ export interface ProviderKeysRouterOptions {
   sessions: CsrfChecker;
 }
 
-function readProvider(value: unknown): LlmProviderName {
-  const parsed = LlmProviderSchema.safeParse(value);
+function readProvider(value: unknown): KeyProviderName {
+  const parsed = z.enum(KEY_PROVIDERS).safeParse(value);
 
   if (!parsed.success) {
     throw new ApiError('NOT_FOUND', 'Nimbus does not know that provider.');

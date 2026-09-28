@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { LLM_PROVIDERS } from './llm.js';
+import { KEY_PROVIDERS } from './llm.js';
 import {
   PROVIDER_KEY_HINT_CHARS,
   PROVIDER_KEY_SHAPES,
@@ -16,7 +16,7 @@ const ALTERNATE_SHAPE_KEY = `AQ.Ab8${'k'.repeat(50)}`;
 
 describe('what a provider key has to look like', () => {
   it('describes every provider Nimbus can talk to', () => {
-    for (const provider of LLM_PROVIDERS) {
+    for (const provider of KEY_PROVIDERS) {
       expect(PROVIDER_KEY_SHAPES[provider].example).not.toBe('');
       expect(PROVIDER_KEY_SHAPES[provider].consoleUrl.startsWith('https://')).toBe(true);
     }

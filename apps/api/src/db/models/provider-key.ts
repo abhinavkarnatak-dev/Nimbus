@@ -1,8 +1,8 @@
 import {
-  LLM_PROVIDERS,
+  KEY_PROVIDERS,
   PROVIDER_KEY_HINT_CHARS,
   ProviderKeySummarySchema,
-  type LlmProviderName,
+  type KeyProviderName,
   type ProviderKeySummary,
 } from '@nimbus/contracts';
 import type { Collection, Db } from 'mongodb';
@@ -24,7 +24,7 @@ export const SEALED_SECRET_MAX_CHARS = 512;
 export interface ProviderKeyDocument {
   providerKeyId: string;
   userId: string;
-  provider: LlmProviderName;
+  provider: KeyProviderName;
   hint: string;
   sealed: SealedSecret;
   createdAt: Date;
@@ -45,7 +45,7 @@ export function toProviderKeySummary(document: ProviderKeyDocument): ProviderKey
   });
 }
 
-export function sealedBinding(userId: string, provider: LlmProviderName): string {
+export function sealedBinding(userId: string, provider: KeyProviderName): string {
   return `${COLLECTIONS.providerKeys}:${userId}:${provider}`;
 }
 
@@ -69,7 +69,7 @@ export const providerKeyModel: ModelDefinition = {
         _id: OBJECT_ID_PROPERTY,
         providerKeyId: { bsonType: 'string', pattern: publicIdPattern(PROVIDER_KEY_ID_PREFIX) },
         userId: { bsonType: 'string', pattern: publicIdPattern('usr') },
-        provider: { enum: [...LLM_PROVIDERS] },
+        provider: { enum: [...KEY_PROVIDERS] },
         hint: { bsonType: 'string', minLength: 1, maxLength: PROVIDER_KEY_HINT_CHARS },
         sealed: {
           bsonType: 'object',

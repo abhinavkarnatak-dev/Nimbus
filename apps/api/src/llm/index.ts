@@ -9,6 +9,7 @@ export * from './http.js';
 export * from './json.js';
 export * from './gemini.js';
 export * from './gemini-text.js';
+export * from './codex-text.js';
 export * from './fake-text.js';
 export * from './routed-text.js';
 export * from './fake-vision.js';

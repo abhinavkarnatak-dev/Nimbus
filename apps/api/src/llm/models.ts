@@ -18,8 +18,20 @@ export const DEFAULT_LIGHT_MODEL = 'gemini-3.5-flash-lite';
 export const DEFAULT_REASONING_MODEL = 'gemini-3.6-flash';
 
 export const DEFAULT_GEMINI_TEXT_MODEL = 'gemini-3.6-flash';
+export const DEFAULT_CODEX_TEXT_MODEL = 'gpt-5.3-codex';
 
 export const KNOWN_MODELS: readonly ModelFacts[] = [
+  {
+    id: 'gpt-5.3-codex',
+    provider: 'codex',
+    contextTokens: 400_000,
+    inputMicroCentsPerToken: 0,
+    outputMicroCentsPerToken: 0,
+    structuredOutput: 'json_schema',
+    vision: false,
+    thinks: true,
+    selectable: true,
+  },
   {
     id: 'gemini-3.6-flash',
     provider: 'gemini',
@@ -51,7 +63,7 @@ export function findModel(id: string): ModelFacts | null {
 }
 
 export function defaultTextModelFor(_providers: readonly LlmProviderName[]): string {
-  return DEFAULT_GEMINI_TEXT_MODEL;
+  return _providers.includes('codex') ? DEFAULT_CODEX_TEXT_MODEL : DEFAULT_GEMINI_TEXT_MODEL;
 }
 
 export function highestInputRate(): number {
