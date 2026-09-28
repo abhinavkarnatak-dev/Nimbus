@@ -400,15 +400,23 @@ export const gitDiffTool = defineTool({
     const lines = patch.patch.split('\n');
     const start = (input.startLine ?? 1) - 1;
     const count = input.lineCount ?? 1_000;
-    const page = lines.slice(start, start + count).join('\n');
-    const clipped = clip(page);
+    const pageLines: string[] = [];
+    let chars = 0;
+    for (const line of lines.slice(start, start + count)) {
+      if (chars > 0 && chars + line.length + 1 > REGISTRY_LIMITS.outputMaxChars) {
+        break;
+      }
+      pageLines.push(line);
+      chars += line.length + 1;
+    }
+    const endLine = start + pageLines.length;
     return {
       summary: shorten(
-        `diff: ${String(patch.files.length)} files, +${String(patch.addedLines)} -${String(patch.removedLines)}`,
+        `diff: ${String(patch.files.length)} files, +${String(patch.addedLines)} -${String(patch.removedLines)}; lines ${String(start + 1)}-${String(endLine)} of ${String(lines.length)}${endLine < lines.length ? `; request startLine ${String(endLine + 1)} for the next page` : ''}`,
       ),
       paths: patch.files.slice(0, REGISTRY_LIMITS.pathsPerRecordMax).map((file) => file.path),
-      text: clipped.text,
-      truncated: clipped.truncated || start + count < lines.length,
+      text: pageLines.join('\n'),
+      truncated: endLine < lines.length || start + count < lines.length,
     };
   },
 });

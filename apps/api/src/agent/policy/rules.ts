@@ -222,11 +222,10 @@ export function classifyAction(tool: string, input: unknown): Classification {
     if (!canBeApproved(from) || !canBeApproved(to)) {
       return denied('those paths cannot be written to', [from, to]);
     }
-    return (
-      classifyPath(from) ??
-      classifyPath(to) ??
-      needsApproval('file_rename', 'medium', 'that action moves or renames a file', [from, to])
-    );
+    const protectedPath = classifyPath(from) ?? classifyPath(to);
+    return protectedPath === null
+      ? needsApproval('file_rename', 'medium', 'that action moves or renames a file', [from, to])
+      : { ...protectedPath, paths: [from, to] };
   }
 
   if (tool === 'apply_patch') {
