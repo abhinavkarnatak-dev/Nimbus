@@ -79,6 +79,35 @@ export interface CreateFileResult {
   isProtected: boolean;
 }
 
+export interface EditFileInput {
+  path: string;
+  oldText: string;
+  newText: string;
+}
+
+export interface EditFileResult {
+  path: string;
+  replacements: number;
+  addedLines: number;
+  removedLines: number;
+  isProtected: boolean;
+}
+
+export interface DeleteFileInput {
+  path: string;
+}
+
+export interface MoveFileInput {
+  from: string;
+  to: string;
+}
+
+export interface WorkspaceChangeResult {
+  path: string;
+  previousPath: string | null;
+  isProtected: boolean;
+}
+
 export interface ApplyPatchInput {
   patch: string;
 }
@@ -344,6 +373,108 @@ export async function createFile(
 
   await sandbox.writeFile(resolved.path, input.contents);
   return { path: resolved.path, bytes, isProtected: resolved.protected };
+}
+
+export async function editFile(sandbox: Sandbox, input: EditFileInput): Promise<EditFileResult> {
+  if (input.oldText === '') {
+    throw new ToolError('EDIT_INVALID', 'The text to replace cannot be empty.', {
+      path: input.path,
+    });
+  }
+
+  const index = await buildIndex(sandbox);
+  const resolved = index.resolve(input.path);
+  assertReadable(resolved);
+  assertRegularFile(resolved);
+  const original = await sandbox.readFile(resolved.path);
+
+  if (!isProbablyText(original)) {
+    throw new ToolError('FILE_NOT_TEXT', 'Only text files can be edited.', { path: input.path });
+  }
+  if (
+    Buffer.byteLength(input.oldText, 'utf8') > TOOL_LIMITS.editMaxBytes ||
+    Buffer.byteLength(input.newText, 'utf8') > TOOL_LIMITS.editMaxBytes
+  ) {
+    throw new ToolError('EDIT_TOO_LARGE', 'That replacement is too large.', { path: input.path });
+  }
+
+  const first = original.indexOf(input.oldText);
+  if (first < 0) {
+    throw new ToolError('EDIT_NOT_FOUND', 'The exact text to replace was not found.', {
+      path: input.path,
+    });
+  }
+  if (original.includes(input.oldText, first + 1)) {
+    throw new ToolError(
+      'EDIT_NOT_UNIQUE',
+      'The exact text appears more than once; use a larger context.',
+      { path: input.path },
+    );
+  }
+
+  await sandbox.writeFile(
+    resolved.path,
+    `${original.slice(0, first)}${input.newText}${original.slice(first + input.oldText.length)}`,
+  );
+  return {
+    path: resolved.path,
+    replacements: 1,
+    addedLines: input.newText.split('\n').length - 1,
+    removedLines: input.oldText.split('\n').length - 1,
+    isProtected: resolved.protected,
+  };
+}
+
+export async function deleteFile(
+  sandbox: Sandbox,
+  input: DeleteFileInput,
+): Promise<WorkspaceChangeResult> {
+  const index = await buildIndex(sandbox);
+  const resolved = index.resolve(input.path);
+  assertReadable(resolved);
+  assertRegularFile(resolved);
+  await sandbox.removeFile(resolved.path);
+  return { path: resolved.path, previousPath: null, isProtected: resolved.protected };
+}
+
+export async function moveFile(
+  sandbox: Sandbox,
+  input: MoveFileInput,
+): Promise<WorkspaceChangeResult> {
+  const index = await buildIndex(sandbox);
+  const from = index.resolve(input.from);
+  const to = index.resolve(input.to);
+  assertReadable(from);
+  assertRegularFile(from);
+  assertReadable(to);
+  if (to.kind !== 'missing') {
+    throw new ToolError('FILE_EXISTS', 'The destination file already exists.', { path: input.to });
+  }
+  const contents = await sandbox.readFile(from.path);
+  if (!isProbablyText(contents)) {
+    throw new ToolError('FILE_NOT_TEXT', 'Binary files cannot be moved by this tool.', {
+      path: input.from,
+    });
+  }
+  await sandbox.writeFile(to.path, contents);
+  try {
+    await sandbox.removeFile(from.path);
+  } catch (error) {
+    try {
+      await sandbox.removeFile(to.path);
+    } catch {
+      // Preserve the original failure; the workspace provider may be unavailable for cleanup.
+    }
+    throw new ToolError('MOVE_FAILED', 'The source could not be removed after copying.', {
+      path: input.from,
+      cause: error,
+    });
+  }
+  return {
+    path: to.path,
+    previousPath: from.path,
+    isProtected: from.protected || to.protected,
+  };
 }
 
 function checkedPatchPath(index: WorkspaceIndex, path: string): ResolvedPath {

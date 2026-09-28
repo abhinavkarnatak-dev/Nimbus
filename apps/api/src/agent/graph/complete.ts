@@ -23,7 +23,9 @@ function hasCheckSinceLastEdit(state: AgentState): boolean {
   let lastCheck = -1;
 
   state.toolEvents.forEach((event, index) => {
-    if (event.tool === 'create_file' || event.tool === 'apply_patch') {
+    if (
+      ['create_file', 'edit_file', 'delete_file', 'move_file', 'apply_patch'].includes(event.tool)
+    ) {
       lastEdit = index;
     }
     if (event.tool === 'run_checks') {

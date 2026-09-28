@@ -13,6 +13,7 @@ export const TOOL_LIMITS = {
   readMaxLines: 2_000,
 
   createMaxBytes: 131_072,
+  editMaxBytes: 131_072,
 
   patchMaxFiles: LIMITS.maxChangedFiles,
   patchMaxLines: LIMITS.maxDiffLines,

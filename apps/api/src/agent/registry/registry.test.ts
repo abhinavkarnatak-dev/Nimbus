@@ -16,10 +16,10 @@ describe('the tools that are offered', () => {
     }
   });
 
-  it('offers twelve tools, because semantic search is not built', async () => {
+  it('offers sixteen tools, because semantic search is not built', async () => {
     const { registry } = await harness();
 
-    expect(registry.names()).toHaveLength(12);
+    expect(registry.names()).toHaveLength(16);
     expect(registry.has('semantic_search')).toBe(false);
   });
 
@@ -93,6 +93,7 @@ describe('what every tool must have', () => {
     ['list_tree', 'read_file'],
     ['search_code', 'read_file'],
     ['create_file', 'apply_patch'],
+    ['edit_file', 'apply_patch'],
     ['apply_patch', 'create_file'],
     ['run_command', 'run_checks'],
     ['run_checks', 'run_command'],

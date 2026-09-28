@@ -378,6 +378,8 @@ export function describeInvocation(
   arguments_: Record<string, unknown>,
 ): InvocationDescription {
   const path = stringArgument(arguments_, 'path');
+  const from = stringArgument(arguments_, 'from');
+  const to = stringArgument(arguments_, 'to');
   const pathPrefix = stringArgument(arguments_, 'pathPrefix');
   const command = commandArgument(arguments_);
 
@@ -402,6 +404,15 @@ export function describeInvocation(
       return { summary: `Reading ${path ?? 'a file'}`, paths: path === null ? [] : [path] };
     case 'create_file':
       return { summary: `Creating ${path ?? 'a file'}`, paths: path === null ? [] : [path] };
+    case 'edit_file':
+      return { summary: `Editing ${path ?? 'a file'}`, paths: path === null ? [] : [path] };
+    case 'delete_file':
+      return { summary: `Deleting ${path ?? 'a file'}`, paths: path === null ? [] : [path] };
+    case 'move_file':
+      return {
+        summary: `Moving ${from ?? 'a file'}${to === null ? '' : ` to ${to}`}`,
+        paths: [from, to].filter((one): one is string => one !== null),
+      };
     case 'apply_patch': {
       const paths = patchPaths(arguments_);
       return {
@@ -420,6 +431,8 @@ export function describeInvocation(
     }
     case 'git_status':
       return { summary: 'Inspecting workspace changes', paths: [] };
+    case 'git_diff':
+      return { summary: 'Reviewing the current diff', paths: [] };
     case 'prepare_commit':
       return { summary: 'Preparing the completed changes for review', paths: [] };
     default:

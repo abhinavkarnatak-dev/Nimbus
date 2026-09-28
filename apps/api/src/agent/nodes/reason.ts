@@ -42,7 +42,7 @@ export const REASON_SYSTEM = [
   'or keep reading after answering an informational request. When a requested file or change is already',
   'present, use finish_task once to say so. When the answer contains code, put it in a fenced Markdown',
   'code block with the language after the opening fence. Never repeat a final answer.',
-  'Only use create_file or apply_patch when the person explicitly asks to add, change, fix, remove, or refactor code.',
+  'Only use create_file, edit_file, apply_patch, delete_file, or move_file when the person explicitly asks to add, change, fix, remove, or refactor code.',
   'Write those arguments as a JSON object inside a string, matching that tool schema exactly,',
   'using its real parameter names and nothing else.',
   'There are no tools attached to this request, so do not try to invoke one. Any tool name you may',
