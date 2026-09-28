@@ -1,15 +1,16 @@
 import { SessionDetailResponseSchema, type SessionDetail, type SessionId } from '@nimbus/contracts';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ApiClient } from '../api/client.js';
 import { ApiError, NetworkError } from '../api/errors.js';
 import { SOCKET_URL } from '../config.js';
 import { SessionSocket, type SocketLike, type SocketState } from '../events/socket.js';
-import { applyEvents, liveFrom, type LiveSession } from './live.js';
+import { applySessionEvents, liveFrom, type LiveSession } from './live.js';
 
 export const SOCKET_PATH = '/events';
 
 export const FROM_THE_START = 0;
+export const MAX_CACHED_SESSIONS = 8;
 
 const TERMINAL_STATUSES = new Set(['completed', 'pr_created', 'failed', 'cancelled', 'ready']);
 
@@ -19,6 +20,12 @@ interface Loaded {
   sessionId: SessionId;
   detail: SessionDetail;
   from: number;
+  snapshotSequence: number;
+}
+
+interface CachedSession {
+  live: LiveSession;
+  lastEventSequence: number;
 }
 
 export interface LiveSessionHandle {
@@ -34,36 +41,92 @@ function openSocket(url: string): SocketLike {
   return new WebSocket(url) as unknown as SocketLike;
 }
 
-function retainLiveHistory(next: LiveSession, current: LiveSession | null): LiveSession {
+function rememberSession(
+  cache: Map<SessionId, CachedSession>,
+  sessionId: SessionId,
+  value: CachedSession,
+): void {
+  cache.delete(sessionId);
+  cache.set(sessionId, value);
+
+  while (cache.size > MAX_CACHED_SESSIONS) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) return;
+    cache.delete(oldest);
+  }
+}
+
+function mergeSnapshot(
+  next: LiveSession,
+  current: CachedSession | null,
+  snapshotSequence: number,
+): LiveSession {
   if (current === null) return next;
+
+  // The HTTP snapshot may have been read before an event that the socket has
+  // already applied. In that case the cached state is newer in its entirety;
+  // replacing any of it would advance the cursor while losing that event.
+  if (current.lastEventSequence > snapshotSequence) return current.live;
 
   return {
     ...next,
     // Tool output is intentionally delivered by the event stream and is not part
     // of the session-detail response. A status refresh must never erase it.
-    tools: current.tools,
-    files: next.files.length === 0 ? current.files : next.files,
-    checks: next.checks.length === 0 ? current.checks : next.checks,
+    tools: current.live.tools,
+    files: next.files.length === 0 ? current.live.files : next.files,
+    checks: next.checks.length === 0 ? current.live.checks : next.checks,
   };
 }
 
 export function useLiveSession(api: ApiClient, sessionId: SessionId | null): LiveSessionHandle {
   const [load, setLoad] = useState<LoadState>('loading');
+  const [loadSessionId, setLoadSessionId] = useState<SessionId | null>(sessionId);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [live, setLive] = useState<LiveSession | null>(null);
   const [connection, setConnection] = useState<SocketState>('idle');
+  const activeSessionId = useRef<SessionId | null>(sessionId);
+  const refreshGeneration = useRef(0);
+  const cache = useRef(new Map<SessionId, CachedSession>());
 
   const refresh = useCallback(async (): Promise<void> => {
     if (sessionId === null) {
       return;
     }
 
+    const requestedSessionId = sessionId;
+    const generation = ++refreshGeneration.current;
+
     try {
-      const found = await api.get(`/sessions/${sessionId}`, SessionDetailResponseSchema);
-      setLoaded({ sessionId, detail: found.session, from: found.lastEventSequence });
-      setLive((current) => retainLiveHistory(liveFrom(found.session), current));
+      const found = await api.get(`/sessions/${requestedSessionId}`, SessionDetailResponseSchema);
+
+      if (
+        activeSessionId.current !== requestedSessionId ||
+        generation !== refreshGeneration.current
+      ) {
+        return;
+      }
+
+      const cached = cache.current.get(requestedSessionId) ?? null;
+      const next = mergeSnapshot(liveFrom(found.session), cached, found.lastEventSequence);
+      const from = cached?.lastEventSequence ?? FROM_THE_START;
+
+      rememberSession(cache.current, requestedSessionId, { live: next, lastEventSequence: from });
+      setLoaded({
+        sessionId: requestedSessionId,
+        detail: found.session,
+        from,
+        snapshotSequence: found.lastEventSequence,
+      });
+      setLive(next);
       setLoad('ready');
     } catch (error) {
+      if (
+        activeSessionId.current !== requestedSessionId ||
+        generation !== refreshGeneration.current
+      ) {
+        return;
+      }
+
       setLoad(error instanceof ApiError && error.code === 'NOT_FOUND' ? 'missing' : 'unreachable');
 
       if (!(error instanceof NetworkError) && !(error instanceof ApiError)) {
@@ -73,7 +136,13 @@ export function useLiveSession(api: ApiClient, sessionId: SessionId | null): Liv
   }, [api, sessionId]);
 
   useEffect(() => {
+    activeSessionId.current = sessionId;
+    refreshGeneration.current += 1;
     setConnection('idle');
+    setLoadSessionId(sessionId);
+    setLoad('loading');
+    setLoaded(null);
+    setLive(null);
 
     if (sessionId === null) {
       return;
@@ -83,9 +152,15 @@ export function useLiveSession(api: ApiClient, sessionId: SessionId | null): Liv
   }, [refresh, sessionId]);
 
   const from = loaded?.from;
+  const snapshotSequence = loaded?.snapshotSequence;
 
   useEffect(() => {
-    if (from === undefined || sessionId === null || loaded?.sessionId !== sessionId) {
+    if (
+      from === undefined ||
+      snapshotSequence === undefined ||
+      sessionId === null ||
+      loaded?.sessionId !== sessionId
+    ) {
       return;
     }
 
@@ -95,16 +170,21 @@ export function useLiveSession(api: ApiClient, sessionId: SessionId | null): Liv
       lastEventSequence: from,
       open: openSocket,
       onEvents: (envelopes) => {
-        setLive((current) =>
-          current === null
-            ? current
-            : applyEvents(
-                current,
-                envelopes.map((one) => one.event),
-              ),
-        );
+        if (activeSessionId.current !== sessionId) return;
+
+        setLive((current) => {
+          if (current === null) return current;
+
+          const next = applySessionEvents(current, envelopes, snapshotSequence);
+          const lastEventSequence =
+            envelopes.at(-1)?.sequence ?? cache.current.get(sessionId)?.lastEventSequence ?? from;
+          rememberSession(cache.current, sessionId, { live: next, lastEventSequence });
+          return next;
+        });
       },
-      onState: setConnection,
+      onState: (state) => {
+        if (activeSessionId.current === sessionId) setConnection(state);
+      },
     });
 
     held.start();
@@ -112,7 +192,7 @@ export function useLiveSession(api: ApiClient, sessionId: SessionId | null): Liv
     return (): void => {
       held.stop();
     };
-  }, [from, sessionId]);
+  }, [from, loaded?.sessionId, sessionId, snapshotSequence]);
 
   useEffect(() => {
     if (sessionId === null || live === null || TERMINAL_STATUSES.has(live.status)) {
@@ -127,12 +207,19 @@ export function useLiveSession(api: ApiClient, sessionId: SessionId | null): Liv
           return;
         }
 
+        if (activeSessionId.current !== sessionId) return;
+
+        const cached = cache.current.get(sessionId) ?? null;
+        const next = mergeSnapshot(liveFrom(found.session), cached, found.lastEventSequence);
+        const from = cached?.lastEventSequence ?? FROM_THE_START;
+        rememberSession(cache.current, sessionId, { live: next, lastEventSequence: from });
         setLoaded(() => ({
           sessionId,
           detail: found.session,
-          from: found.lastEventSequence,
+          from,
+          snapshotSequence: found.lastEventSequence,
         }));
-        setLive((current) => retainLiveHistory(liveFrom(found.session), current));
+        setLive(next);
       } catch {
         return;
       }
@@ -147,9 +234,28 @@ export function useLiveSession(api: ApiClient, sessionId: SessionId | null): Liv
     };
   }, [api, live, sessionId]);
 
-  const change = useCallback((next: (held: LiveSession) => LiveSession): void => {
-    setLive((current) => (current === null ? current : next(current)));
-  }, []);
+  const change = useCallback(
+    (next: (held: LiveSession) => LiveSession): void => {
+      if (sessionId === null || activeSessionId.current !== sessionId) return;
 
-  return { load, detail: loaded?.detail ?? null, live, connection, refresh, change };
+      setLive((current) => {
+        if (current === null) return current;
+        const changed = next(current);
+        const lastEventSequence = cache.current.get(sessionId)?.lastEventSequence ?? FROM_THE_START;
+        rememberSession(cache.current, sessionId, { live: changed, lastEventSequence });
+        return changed;
+      });
+    },
+    [sessionId],
+  );
+
+  const current = loaded?.sessionId === sessionId;
+  return {
+    load: loadSessionId === sessionId ? load : 'loading',
+    detail: current ? loaded.detail : null,
+    live: current ? live : null,
+    connection: current ? connection : 'idle',
+    refresh,
+    change,
+  };
 }
