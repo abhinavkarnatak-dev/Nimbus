@@ -1,6 +1,7 @@
 import { attachmentModel } from './attachment.js';
 import { auditEventModel } from './audit-event.js';
 import { checkpointModel } from './checkpoint.js';
+import { codexCredentialModel } from './codex-credential.js';
 import { githubInstallationModel } from './github-installation.js';
 import { providerKeyModel } from './provider-key.js';
 import { repoIndexModel } from './repo-index.js';
@@ -19,6 +20,7 @@ export * from './attachment.js';
 export * from './audit-event.js';
 export * from './checkpoint.js';
 export * from './provider-key.js';
+export * from './codex-credential.js';
 
 export const ALL_MODELS: readonly ModelDefinition[] = [
   userModel,
@@ -30,4 +32,5 @@ export const ALL_MODELS: readonly ModelDefinition[] = [
   auditEventModel,
   checkpointModel,
   providerKeyModel,
+  codexCredentialModel,
 ];

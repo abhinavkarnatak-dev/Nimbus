@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rm } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { Logger } from '../logging/logger.js';
 import { CodexTextProvider } from './codex-text.js';
 import type { CodexProviderSource } from './sources.js';
+import type { CodexCredentialStore } from './codex-credential-store.js';
 
 export interface DeviceAuthChallenge {
   url: string;
@@ -18,6 +19,7 @@ export interface CodexAuthOptions {
   logger: Logger;
   codexPath?: string;
   spawnProcess?: typeof spawn;
+  credentialStore?: CodexCredentialStore;
 }
 
 interface ActiveLogin {
@@ -56,12 +58,15 @@ export class CodexAuthService implements CodexProviderSource {
   readonly #spawn: typeof spawn;
   readonly #active = new Map<string, ActiveLogin>();
   readonly #pending = new Map<string, PendingLogin>();
+  readonly #credentialStore: CodexCredentialStore | null;
+  readonly #persisted = new Map<string, string>();
 
   constructor(options: CodexAuthOptions) {
     this.#root = options.rootDirectory;
     this.#logger = options.logger;
     this.#codexPath = options.codexPath ?? defaultCodexPath();
     this.#spawn = options.spawnProcess ?? spawn;
+    this.#credentialStore = options.credentialStore ?? null;
   }
 
   async start(userId: string): Promise<DeviceAuthChallenge> {
@@ -120,18 +125,35 @@ export class CodexAuthService implements CodexProviderSource {
   }
 
   async connected(userId: string): Promise<boolean> {
+    const home = await this.#home(userId);
     try {
-      const contents = await readFile(join(await this.#home(userId), 'auth.json'), 'utf8');
-      const auth = JSON.parse(contents) as unknown;
-      if (typeof auth !== 'object' || auth === null) {
-        this.#logger.warn({ userId }, 'Codex auth file is not a JSON object');
-        return false;
+      const local = await readFile(join(home, 'auth.json'), 'utf8');
+      if (!validAuthFile(local)) {
+        this.#logger.warn({ userId }, 'Codex auth file is invalid JSON');
+      } else {
+        await this.#persist(userId, local);
+        this.#logger.debug({ userId }, 'Codex credentials found on the trusted worker');
+        return true;
       }
-      return true;
     } catch (error) {
-      this.#logger.debug({ userId, error: String(error) }, 'Codex credentials are not connected');
-      return false;
+      this.#logger.debug({ userId, error: String(error) }, 'Codex auth file is not on this worker');
     }
+
+    const restored = await this.#credentialStore?.load(userId);
+    if (restored !== null && restored !== undefined && validAuthFile(restored)) {
+      try {
+        await writeFile(join(home, 'auth.json'), restored, { encoding: 'utf8', mode: 0o600 });
+        await chmod(join(home, 'auth.json'), 0o600);
+        this.#persisted.set(userId, restored);
+        this.#logger.info({ userId }, 'restored Codex credentials from durable storage');
+        return true;
+      } catch (error) {
+        this.#logger.error({ userId, error: String(error) }, 'could not restore Codex credentials');
+      }
+    }
+
+    this.#logger.info({ userId }, 'Codex credentials are not connected');
+    return false;
   }
 
   async disconnect(userId: string): Promise<void> {
@@ -149,6 +171,8 @@ export class CodexAuthService implements CodexProviderSource {
       this.#pending.delete(userId);
     }
     this.#active.delete(userId);
+    this.#persisted.delete(userId);
+    await this.#credentialStore?.remove(userId);
     await rm(await this.#home(userId), { recursive: true, force: true });
   }
 
@@ -166,6 +190,37 @@ export class CodexAuthService implements CodexProviderSource {
     await chmod(home, 0o700);
     return home;
   }
+
+  async #persist(userId: string, contents: string): Promise<void> {
+    if (this.#persisted.get(userId) === contents) return;
+    try {
+      await persistCredential(this.#credentialStore, userId, contents);
+    } catch (error) {
+      this.#logger.error({ userId, error: String(error) }, 'could not persist Codex credentials');
+      return;
+    }
+    this.#persisted.set(userId, contents);
+    if (this.#credentialStore !== null) {
+      this.#logger.info({ userId }, 'persisted Codex credentials durably');
+    }
+  }
+}
+
+function validAuthFile(contents: string): boolean {
+  try {
+    const auth = JSON.parse(contents) as unknown;
+    return typeof auth === 'object' && auth !== null && !Array.isArray(auth);
+  } catch {
+    return false;
+  }
+}
+
+async function persistCredential(
+  store: CodexCredentialStore | null,
+  userId: string,
+  contents: string,
+): Promise<void> {
+  await store?.save(userId, contents);
 }
 
 function defaultCodexPath(): string {

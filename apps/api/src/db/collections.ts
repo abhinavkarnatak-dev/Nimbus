@@ -8,6 +8,7 @@ export const COLLECTIONS = {
   auditEvents: 'audit_events',
   checkpoints: 'checkpoints',
   providerKeys: 'provider_keys',
+  codexCredentials: 'codex_credentials',
 } as const;
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];

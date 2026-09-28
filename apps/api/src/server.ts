@@ -33,10 +33,11 @@ import { UserProviders, UserVisionProviders } from './llm/user-providers.js';
 import { UserProviderDirectory } from './llm/sources.js';
 import { LiveProviderKeyVerifier } from './llm/verify.js';
 import { SecretBox } from './lib/secret-box.js';
-import { PROVIDER_KEY_INFO, deriveKey } from './auth/csrf.js';
+import { CODEX_CREDENTIAL_INFO, PROVIDER_KEY_INFO, deriveKey } from './auth/csrf.js';
 import { createProviderKeysRouter } from './http/routes/provider-keys.js';
 import { createCodexAuthRouter } from './http/routes/codex-auth.js';
 import { CodexAuthService } from './llm/codex-auth.js';
+import { MongoCodexCredentialStore } from './llm/codex-credential-store.js';
 import { SessionAttachments } from './routing/attached.js';
 import { UserImageDescribers } from './routing/describe.js';
 import { providersForPlan } from './routing/requirements.js';
@@ -254,6 +255,10 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   const codexAuth = new CodexAuthService({
     rootDirectory: process.env['NIMBUS_CODEX_HOME'] ?? '.nimbus-codex',
     logger,
+    credentialStore: new MongoCodexCredentialStore({
+      db: handle.db,
+      box: new SecretBox(deriveKey(config.session.secret, CODEX_CREDENTIAL_INFO)),
+    }),
   });
   const userProviders = new UserProviders({ keys: providerKeys, codex: codexAuth, logger });
   const modelProviders = new UserProviderDirectory(providerKeys, codexAuth);
@@ -261,7 +266,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   const routers = [
     authRouter,
     createProviderKeysRouter({ keys: providerKeys, sessions }),
-    createCodexAuthRouter({ auth: codexAuth, sessions }),
+    createCodexAuthRouter({ auth: codexAuth, sessions, logger }),
   ];
   let repositories: InstallationService | null = null;
   let githubTokens: GitHubAppTokenProvider | null = null;

@@ -4,6 +4,7 @@ export const CSRF_HEADER = 'x-csrf-token';
 export const CSRF_KEY_INFO = 'nimbus:csrf:v1';
 export const SESSION_KEY_INFO = 'nimbus:session:v1';
 export const PROVIDER_KEY_INFO = 'nimbus:provider-key:v1';
+export const CODEX_CREDENTIAL_INFO = 'nimbus:codex-credential:v1';
 
 export function deriveKey(sessionSecret: string, info: string): Buffer {
   return createHmac('sha256', sessionSecret).update(info).digest();
