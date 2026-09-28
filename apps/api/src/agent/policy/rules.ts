@@ -204,9 +204,13 @@ export function classifyAction(tool: string, input: unknown): Classification {
 
   if (tool === 'delete_file') {
     const path = (input as { path?: unknown }).path;
-    return typeof path === 'string'
-      ? needsApproval('file_deletion', 'medium', 'that action deletes a file', [path])
-      : needsApproval('uncategorized_action', 'high', 'that path could not be read');
+    if (typeof path !== 'string') {
+      return needsApproval('uncategorized_action', 'high', 'that path could not be read');
+    }
+    return (
+      classifyPath(path) ??
+      needsApproval('file_deletion', 'medium', 'that action deletes a file', [path])
+    );
   }
 
   if (tool === 'move_file') {
@@ -218,10 +222,11 @@ export function classifyAction(tool: string, input: unknown): Classification {
     if (!canBeApproved(from) || !canBeApproved(to)) {
       return denied('those paths cannot be written to', [from, to]);
     }
-    return needsApproval('file_rename', 'medium', 'that action moves or renames a file', [
-      from,
-      to,
-    ]);
+    return (
+      classifyPath(from) ??
+      classifyPath(to) ??
+      needsApproval('file_rename', 'medium', 'that action moves or renames a file', [from, to])
+    );
   }
 
   if (tool === 'apply_patch') {

@@ -116,7 +116,7 @@ function automaticExampleCheck(
   const path = state.filesChanged.at(-1);
   if (
     last === undefined ||
-    !['create_file', 'edit_file', 'delete_file', 'move_file', 'apply_patch'].includes(last.tool) ||
+    !['create_file', 'edit_file', 'move_file', 'apply_patch'].includes(last.tool) ||
     path === undefined ||
     checkedSinceLastEdit(state) ||
     !/\b(simple|basic|example)\b/i.test(state.task)

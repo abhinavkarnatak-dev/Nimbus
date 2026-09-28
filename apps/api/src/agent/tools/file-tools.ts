@@ -404,7 +404,7 @@ export async function editFile(sandbox: Sandbox, input: EditFileInput): Promise<
       path: input.path,
     });
   }
-  if (original.includes(input.oldText, first + input.oldText.length)) {
+  if (original.includes(input.oldText, first + 1)) {
     throw new ToolError(
       'EDIT_NOT_UNIQUE',
       'The exact text appears more than once; use a larger context.',
@@ -450,8 +450,26 @@ export async function moveFile(
   if (to.kind !== 'missing') {
     throw new ToolError('FILE_EXISTS', 'The destination file already exists.', { path: input.to });
   }
-  await sandbox.writeFile(to.path, await sandbox.readFile(from.path));
-  await sandbox.removeFile(from.path);
+  const contents = await sandbox.readFile(from.path);
+  if (!isProbablyText(contents)) {
+    throw new ToolError('FILE_NOT_TEXT', 'Binary files cannot be moved by this tool.', {
+      path: input.from,
+    });
+  }
+  await sandbox.writeFile(to.path, contents);
+  try {
+    await sandbox.removeFile(from.path);
+  } catch (error) {
+    try {
+      await sandbox.removeFile(to.path);
+    } catch {
+      // Preserve the original failure; the workspace provider may be unavailable for cleanup.
+    }
+    throw new ToolError('MOVE_FAILED', 'The source could not be removed after copying.', {
+      path: input.from,
+      cause: error,
+    });
+  }
   return {
     path: to.path,
     previousPath: from.path,

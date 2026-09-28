@@ -251,7 +251,7 @@ export const moveFileTool = defineTool({
     const result = await moveFile(context.sandbox, input);
     return {
       summary: shorten(`moved ${result.previousPath ?? input.from} to ${result.path}`),
-      paths: [result.path, ...(result.previousPath === null ? [] : [result.previousPath])],
+      paths: [...(result.previousPath === null ? [] : [result.previousPath]), result.path],
     };
   },
 });
@@ -385,17 +385,30 @@ export const gitDiffTool = defineTool({
   description:
     'Show the exact patch currently produced by the workspace, including added, modified and deleted files. Use this when reviewing your own changes or explaining code in the chat; it does not change anything.',
   timeoutMs: REGISTRY_LIMITS.readTimeoutMs,
-  input: z.strictObject({}),
-  run: async (_input, context) => {
+  input: z.strictObject({
+    startLine: z
+      .int()
+      .positive()
+      .optional()
+      .describe('the first diff line to return; defaults to one'),
+    lineCount: boundedCount
+      .optional()
+      .describe('how many diff lines to return; request another page when truncated'),
+  }),
+  run: async (input, context) => {
     const patch = await context.sandbox.exportPatch();
-    const clipped = clip(patch.patch);
+    const lines = patch.patch.split('\n');
+    const start = (input.startLine ?? 1) - 1;
+    const count = input.lineCount ?? 1_000;
+    const page = lines.slice(start, start + count).join('\n');
+    const clipped = clip(page);
     return {
       summary: shorten(
         `diff: ${String(patch.files.length)} files, +${String(patch.addedLines)} -${String(patch.removedLines)}`,
       ),
       paths: patch.files.slice(0, REGISTRY_LIMITS.pathsPerRecordMax).map((file) => file.path),
       text: clipped.text,
-      truncated: clipped.truncated,
+      truncated: clipped.truncated || start + count < lines.length,
     };
   },
 });
