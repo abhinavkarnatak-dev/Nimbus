@@ -40,11 +40,16 @@ export class UserProviders implements TextProviderSource {
     const keys = await this.#keys.keysFor(userId);
     const providers: TextProvider[] = [];
     const providerNames: LlmProviderName[] = [];
+    const modelProviders = new Map<string, LlmProviderName>();
+    const codexModels = (await this.#codex?.models?.(userId)) ?? [];
 
     const codex = await this.#codex?.for(userId);
     if (codex !== null && codex !== undefined) {
       providers.push(codex);
       providerNames.push(codex.name);
+      for (const model of codexModels) {
+        modelProviders.set(model.id, 'codex');
+      }
     }
 
     for (const [provider, apiKey] of keys) {
@@ -63,7 +68,8 @@ export class UserProviders implements TextProviderSource {
 
     return new RoutedTextProvider({
       providers,
-      defaultModel: defaultTextModelFor(providerNames),
+      defaultModel: codexModels[0]?.id ?? defaultTextModelFor(providerNames),
+      modelProviders,
     });
   }
 

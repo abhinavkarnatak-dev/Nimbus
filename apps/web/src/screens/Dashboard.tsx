@@ -394,7 +394,7 @@ export function Dashboard({
                     <option value="">Auto</option>
                     {sessions.models.map((one: SelectableModel) => (
                       <option key={one.id} value={one.id}>
-                        {one.id}
+                        {one.label ?? one.id}
                       </option>
                     ))}
                   </select>

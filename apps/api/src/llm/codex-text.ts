@@ -1,9 +1,14 @@
-import { Codex, type CodexOptions, type Thread, type ThreadOptions, type Usage } from '@openai/codex-sdk';
+import {
+  Codex,
+  type CodexOptions,
+  type Thread,
+  type ThreadOptions,
+  type Usage,
+} from '@openai/codex-sdk';
 import type { CallReport } from '@nimbus/contracts';
 
 import type { Logger } from '../logging/logger.js';
 import { LlmError } from './errors.js';
-import { DEFAULT_CODEX_TEXT_MODEL } from './models.js';
 import {
   buildReport,
   type CompleteRequest,
@@ -59,7 +64,7 @@ export class CodexTextProvider implements TextProvider {
 
   constructor(options: CodexTextOptions) {
     this.#logger = options.logger;
-    this.defaultModel = options.model ?? DEFAULT_CODEX_TEXT_MODEL;
+    this.defaultModel = options.model ?? '';
     this.#workingDirectory = options.workingDirectory;
     if (options.client !== undefined) {
       this.#client = options.client;
@@ -119,7 +124,9 @@ export class CodexTextProvider implements TextProvider {
     try {
       const thread = this.#client.startThread({
         model,
-        ...(this.#workingDirectory === undefined ? {} : { workingDirectory: this.#workingDirectory }),
+        ...(this.#workingDirectory === undefined
+          ? {}
+          : { workingDirectory: this.#workingDirectory }),
         skipGitRepoCheck: true,
         sandboxMode: 'read-only',
         approvalPolicy: 'never',

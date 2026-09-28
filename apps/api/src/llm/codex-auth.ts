@@ -7,6 +7,7 @@ import type { Logger } from '../logging/logger.js';
 import { CodexTextProvider } from './codex-text.js';
 import type { CodexProviderSource } from './sources.js';
 import type { CodexCredentialStore } from './codex-credential-store.js';
+import type { SelectableModel } from '@nimbus/contracts';
 
 export interface DeviceAuthChallenge {
   url: string;
@@ -34,6 +35,8 @@ interface PendingLogin {
   reject: (error: Error) => void;
 }
 
+export type CodexDiscoveredModel = SelectableModel;
+
 const DEVICE_URL = /https:\/\/auth\.openai\.com\/codex\/device\b/i;
 const DEVICE_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/i;
 const ANSI_ESCAPE = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, 'g');
@@ -60,6 +63,7 @@ export class CodexAuthService implements CodexProviderSource {
   readonly #pending = new Map<string, PendingLogin>();
   readonly #credentialStore: CodexCredentialStore | null;
   readonly #persisted = new Map<string, string>();
+  readonly #modelCache = new Map<string, { at: number; models: readonly CodexDiscoveredModel[] }>();
 
   constructor(options: CodexAuthOptions) {
     this.#root = options.rootDirectory;
@@ -107,7 +111,10 @@ export class CodexAuthService implements CodexProviderSource {
       child.once('error', reject);
       child.once('exit', (code) => {
         if (!lifecycle.value && !this.#active.has(userId) && code !== 0) {
-          this.#logger.warn({ userId, exitCode: code }, 'Codex device authentication exited before completion');
+          this.#logger.warn(
+            { userId, exitCode: code },
+            'Codex device authentication exited before completion',
+          );
           reject(new Error('Codex device login failed.'));
         }
         if (this.#active.get(userId)?.cancelled === lifecycle) this.#active.delete(userId);
@@ -172,6 +179,7 @@ export class CodexAuthService implements CodexProviderSource {
     }
     this.#active.delete(userId);
     this.#persisted.delete(userId);
+    this.#modelCache.delete(userId);
     await this.#credentialStore?.remove(userId);
     await rm(await this.#home(userId), { recursive: true, force: true });
   }
@@ -181,6 +189,28 @@ export class CodexAuthService implements CodexProviderSource {
     const home = await this.#home(userId);
     this.#logger.debug({ userId, home: '[redacted]' }, 'building Codex provider');
     return new CodexTextProvider({ logger: this.#logger, codexHome: home });
+  }
+
+  async models(userId: string): Promise<readonly CodexDiscoveredModel[]> {
+    if (!(await this.connected(userId))) return [];
+    const cached = this.#modelCache.get(userId);
+    if (cached !== undefined && Date.now() - cached.at < 30_000) return cached.models;
+
+    const home = await this.#home(userId);
+    const child = this.#spawn(this.#codexPath, ['app-server', '--stdio'], {
+      env: { ...process.env, CODEX_HOME: home },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const models = await readCodexModels(child, this.#logger, userId);
+    this.#modelCache.set(userId, { at: Date.now(), models });
+    this.#logger.info(
+      { userId, modelCount: models.length, modelIds: models.map((model) => model.id) },
+      'discovered models from the connected Codex account',
+    );
+    if (models.length === 0) {
+      this.#logger.warn({ userId }, 'connected Codex account returned no selectable models');
+    }
+    return models;
   }
 
   async #home(userId: string): Promise<string> {
@@ -203,6 +233,92 @@ export class CodexAuthService implements CodexProviderSource {
     if (this.#credentialStore !== null) {
       this.#logger.info({ userId }, 'persisted Codex credentials durably');
     }
+  }
+}
+
+async function readCodexModels(
+  child: ChildProcess,
+  logger: Logger,
+  userId: string,
+): Promise<readonly CodexDiscoveredModel[]> {
+  const result = new Promise<readonly CodexDiscoveredModel[]>((resolve, reject) => {
+    let buffer = '';
+    let initialized = false;
+    const timer = setTimeout(() => reject(new Error('Codex model discovery timed out.')), 10_000);
+    timer.unref();
+    const send = (value: object): void => {
+      child.stdin?.write(`${JSON.stringify(value)}\n`);
+    };
+    const consume = (line: string): void => {
+      try {
+        const value = JSON.parse(line) as {
+          id?: number;
+          result?: { data?: unknown[] };
+          error?: unknown;
+        };
+        if (value.error !== undefined) throw new Error(JSON.stringify(value.error));
+        if (value.id === 1) {
+          initialized = true;
+          send({ method: 'initialized', params: {} });
+          send({ id: 2, method: 'model/list', params: { includeHidden: false } });
+          return;
+        }
+        if (value.id !== 2 || !initialized) return;
+        clearTimeout(timer);
+        const models = (value.result?.data ?? []).flatMap((entry) => {
+          if (typeof entry !== 'object' || entry === null) return [];
+          const model = entry as Record<string, unknown>;
+          const id =
+            typeof model['model'] === 'string'
+              ? model['model']
+              : typeof model['id'] === 'string'
+                ? model['id']
+                : '';
+          if (id === '' || model['hidden'] === true) return [];
+          const label = typeof model['displayName'] === 'string' ? model['displayName'] : id;
+          const modalities = Array.isArray(model['inputModalities'])
+            ? model['inputModalities']
+            : [];
+          const efforts = Array.isArray(model['supportedReasoningEfforts'])
+            ? model['supportedReasoningEfforts']
+            : [];
+          return [
+            {
+              id,
+              label,
+              provider: 'codex' as const,
+              vision: modalities.includes('image'),
+              reasoning: efforts.length > 0,
+            },
+          ];
+        });
+        resolve(models);
+        child.kill();
+      } catch (error) {
+        clearTimeout(timer);
+        reject(error);
+      }
+    };
+    child.stdout?.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString('utf8');
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? '';
+      for (const line of lines) if (line.trim() !== '') consume(line);
+    });
+    child.stderr?.on('data', () => undefined);
+    child.once('error', reject);
+    send({
+      id: 1,
+      method: 'initialize',
+      params: { clientInfo: { name: 'nimbus', version: '1.0.0' } },
+    });
+  });
+  try {
+    return await result;
+  } catch (error) {
+    logger.error({ userId, error: String(error) }, 'Codex model discovery failed');
+    child.kill();
+    return [];
   }
 }
 

@@ -109,7 +109,10 @@ export class LiveSessionWorkshop implements SessionWorkshop {
     },
   ): Promise<PreparedRun> {
     const stage = async (name: PreparationStage): Promise<void> => {
-      this.#options.logger.info({ sessionId: session.sessionId, stage: name }, 'run preparation stage');
+      this.#options.logger.info(
+        { sessionId: session.sessionId, stage: name },
+        'run preparation stage',
+      );
       await options.onStage?.(name);
     };
 
@@ -147,7 +150,11 @@ export class LiveSessionWorkshop implements SessionWorkshop {
       if (held.length === 0) {
         throw new WorkshopError('models', NO_KEYS_FOR_RUN);
       }
-      plan = this.#plan(session, held);
+      const available =
+        this.#options.providerKeys.modelsFor === undefined
+          ? undefined
+          : await this.#options.providerKeys.modelsFor(session.userId);
+      plan = this.#plan(session, held, available);
       text = await this.#options.text.for(session.userId);
     } catch (error) {
       await this.#revoke(session, readToken);
@@ -462,11 +469,23 @@ export class LiveSessionWorkshop implements SessionWorkshop {
     }
   }
 
-  #plan(session: SessionDocument, providers: readonly LlmProviderName[]): ModelPlan {
+  #plan(
+    session: SessionDocument,
+    providers: readonly LlmProviderName[],
+    available?: readonly import('@nimbus/contracts').SelectableModel[],
+  ): ModelPlan {
     const chosen = session.model ?? null;
 
     try {
-      return planFor(chosen === null ? { providers } : { textModel: chosen.textModel, providers });
+      return planFor(
+        chosen === null
+          ? { providers, ...(available === undefined ? {} : { models: available }) }
+          : {
+              textModel: chosen.textModel,
+              providers,
+              ...(available === undefined ? {} : { models: available }),
+            },
+      );
     } catch (error) {
       throw new WorkshopError(
         'models',

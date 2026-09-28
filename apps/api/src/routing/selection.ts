@@ -12,7 +12,6 @@ import {
 import { LlmError } from '../llm/errors.js';
 import {
   DEFAULT_LIGHT_MODEL,
-  DEFAULT_CODEX_TEXT_MODEL,
   DEFAULT_REASONING_MODEL,
   DEFAULT_TEXT_MODEL,
   DEFAULT_VISION_MODEL,
@@ -25,9 +24,9 @@ export const SELECTABLE_TEXT_MODELS: readonly string[] = KNOWN_MODELS.filter(
 ).map((model) => model.id);
 
 export const ROLE_CANDIDATES: Readonly<Record<ModelRole, readonly string[]>> = {
-  primary: [DEFAULT_TEXT_MODEL, DEFAULT_CODEX_TEXT_MODEL, DEFAULT_LIGHT_MODEL],
-  light: [DEFAULT_LIGHT_MODEL, DEFAULT_TEXT_MODEL, DEFAULT_CODEX_TEXT_MODEL],
-  reasoning: [DEFAULT_REASONING_MODEL, DEFAULT_TEXT_MODEL, DEFAULT_CODEX_TEXT_MODEL],
+  primary: [DEFAULT_TEXT_MODEL, DEFAULT_LIGHT_MODEL],
+  light: [DEFAULT_LIGHT_MODEL, DEFAULT_TEXT_MODEL],
+  reasoning: [DEFAULT_REASONING_MODEL, DEFAULT_TEXT_MODEL],
   vision: [DEFAULT_VISION_MODEL],
 };
 
@@ -83,7 +82,15 @@ export class SelectableModelCatalogue {
   }
 
   assertAvailable(id: string): string {
-    const selected = assertSelectableModel(id);
+    const selected = id.trim();
+    if (selected === '') {
+      throw new LlmError('LLM_MODEL_UNKNOWN', 'No model was named.');
+    }
+    if (findModel(selected) === null && !this.#models.some((model) => model.id === selected)) {
+      throw new LlmError('LLM_MODEL_UNKNOWN', 'That model is not one Nimbus knows about.', {
+        detail: selected,
+      });
+    }
 
     if (!this.#models.some((model) => model.id === selected)) {
       throw new LlmError(
@@ -106,36 +113,50 @@ export function catalogueFor(providers: readonly LlmProviderName[]): SelectableM
 export interface PlanSelection {
   textModel?: string;
   providers?: readonly LlmProviderName[];
+  models?: readonly SelectableModel[];
 }
 
-function servedBy(model: string, providers: readonly LlmProviderName[]): boolean {
+function servedBy(
+  model: string,
+  providers: readonly LlmProviderName[],
+  available: readonly SelectableModel[],
+): boolean {
   const facts = findModel(model);
-  return facts !== null && providers.includes(facts.provider);
+  if (facts !== null) return providers.includes(facts.provider);
+  return available.some((one) => one.id === model && providers.includes(one.provider));
 }
 
-function modelForCandidates(role: ModelRole, providers: readonly LlmProviderName[]): string {
-  const served = ROLE_CANDIDATES[role].find((model) => servedBy(model, providers));
+function modelForCandidates(
+  role: ModelRole,
+  providers: readonly LlmProviderName[],
+  available: readonly SelectableModel[],
+): string {
+  const served = ROLE_CANDIDATES[role].find((model) => servedBy(model, providers, available));
+  const dynamic = available.find((model) => providers.includes(model.provider));
 
-  if (served === undefined) {
+  if (served === undefined && dynamic === undefined) {
     throw new LlmError(
       'LLM_NOT_CONFIGURED',
       'No model Nimbus can use for this run is covered by the API keys on this account.',
       { detail: role },
     );
   }
-  return served;
+  return served ?? dynamic?.id ?? '';
 }
 
 export function planFor(selection?: PlanSelection): ModelPlan {
   const providers = selection?.providers ?? KEY_PROVIDERS;
+  const available = selection?.models ?? selectableModels();
   const asked = selection?.textModel;
   const chosenByUser = asked !== undefined && asked.trim() !== '';
 
   const primary = chosenByUser
-    ? assertSelectableModel(asked)
-    : modelForCandidates('primary', providers);
+    ? available.some((model) => model.id === asked.trim())
+      ? asked.trim()
+      : assertSelectableModel(asked)
+    : modelForCandidates('primary', providers, available);
 
-  if (!servedBy(primary, providers)) {
+  if (!servedBy(primary, providers, available)) {
     throw new LlmError(
       'LLM_NOT_CONFIGURED',
       'That model needs an API key this account has not added.',
@@ -145,8 +166,8 @@ export function planFor(selection?: PlanSelection): ModelPlan {
 
   return {
     primary,
-    light: modelForCandidates('light', providers),
-    reasoning: modelForCandidates('reasoning', providers),
+    light: modelForCandidates('light', providers, available),
+    reasoning: modelForCandidates('reasoning', providers, available),
     vision: DEFAULT_VISION_MODEL,
     chosenByUser,
   };

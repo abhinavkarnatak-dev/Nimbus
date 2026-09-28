@@ -209,6 +209,9 @@ export class AgentSessionService {
   }
 
   async #catalogue(userId: string): Promise<SelectableModelCatalogue> {
+    if (this.#providerKeys.modelsFor !== undefined) {
+      return new SelectableModelCatalogue(await this.#providerKeys.modelsFor(userId));
+    }
     return catalogueFor(await this.#providerKeys.providersFor(userId));
   }
 

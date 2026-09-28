@@ -29,7 +29,7 @@ describe('SELECTABLE_TEXT_MODELS', () => {
 
   it('offers models from every provider Nimbus talks to', () => {
     const providers = new Set(selectableModels().map((model) => model.provider));
-    expect(providers).toEqual(new Set(LLM_PROVIDERS));
+    expect(providers).toEqual(new Set(['gemini']));
   });
 
   it('includes the default, so the default is always a legal choice', () => {
@@ -187,13 +187,23 @@ describe('planFor', () => {
   });
 
   it('fills every role from one provider alone when that is the only key on the account', () => {
-    for (const provider of LLM_PROVIDERS) {
-      const plan = planFor({ providers: [provider] });
+    const plan = planFor({ providers: ['gemini'] });
 
-      for (const role of ['primary', 'light', 'reasoning'] as const) {
-        expect(findModel(plan[role])?.provider).toBe(provider);
-      }
+    for (const role of ['primary', 'light', 'reasoning'] as const) {
+      expect(findModel(plan[role])?.provider).toBe('gemini');
     }
+  });
+
+  it('plans with a model discovered from Codex instead of a static registry entry', () => {
+    const plan = planFor({
+      providers: ['codex'],
+      models: [{ id: 'luna', label: 'Luna', provider: 'codex', vision: false, reasoning: true }],
+      textModel: 'luna',
+    });
+
+    expect(plan.primary).toBe('luna');
+    expect(plan.light).toBe('luna');
+    expect(plan.reasoning).toBe('luna');
   });
 
   it('fills every text role from Gemini alone when that is the only key on the account', () => {

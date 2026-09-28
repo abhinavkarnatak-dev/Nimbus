@@ -13,6 +13,7 @@ import type {
 export interface RoutedTextOptions {
   providers: readonly TextProvider[];
   defaultModel?: string;
+  modelProviders?: ReadonlyMap<string, LlmProviderName>;
 }
 
 export class RoutedTextProvider implements TextProvider {
@@ -23,6 +24,7 @@ export class RoutedTextProvider implements TextProvider {
   readonly defaultModel: string;
 
   readonly #byProvider = new Map<LlmProviderName, TextProvider>();
+  readonly #modelProviders: ReadonlyMap<string, LlmProviderName>;
 
   constructor(options: RoutedTextOptions) {
     if (options.providers.length === 0) {
@@ -32,6 +34,7 @@ export class RoutedTextProvider implements TextProvider {
     for (const provider of options.providers) {
       this.#byProvider.set(provider.name, provider);
     }
+    this.#modelProviders = options.modelProviders ?? new Map();
 
     const first = options.providers[0];
 
@@ -56,17 +59,18 @@ export class RoutedTextProvider implements TextProvider {
     const wanted = model ?? this.defaultModel;
     const facts = findModel(wanted);
 
-    if (facts === null) {
+    const providerName = facts?.provider ?? this.#modelProviders.get(wanted);
+    if (providerName === undefined) {
       throw new LlmError('LLM_UNAVAILABLE', 'That model is not one this build knows about.', {
         detail: wanted,
       });
     }
 
-    const provider = this.#byProvider.get(facts.provider);
+    const provider = this.#byProvider.get(providerName);
 
     if (provider === undefined) {
       throw new LlmError('LLM_UNAVAILABLE', 'No provider is configured for that model.', {
-        detail: `${wanted} needs ${facts.provider}`,
+        detail: `${wanted} needs ${providerName}`,
       });
     }
     return provider;

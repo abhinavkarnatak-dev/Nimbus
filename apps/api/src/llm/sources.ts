@@ -1,10 +1,17 @@
-import { KEY_PROVIDERS, type KeyProviderName, type LlmProviderName } from '@nimbus/contracts';
+import {
+  KEY_PROVIDERS,
+  type KeyProviderName,
+  type LlmProviderName,
+  type SelectableModel,
+} from '@nimbus/contracts';
 
 import type { TextProvider, VisionProvider } from './provider.js';
+import { selectableModels } from '../routing/selection.js';
 
 export interface ProviderKeyDirectory {
   keysFor(userId: string): Promise<Map<KeyProviderName, string>>;
   providersFor(userId: string): Promise<LlmProviderName[]>;
+  modelsFor?(userId: string): Promise<readonly SelectableModel[]>;
 }
 
 export interface TextProviderSource {
@@ -14,6 +21,7 @@ export interface TextProviderSource {
 /** Resolves an already-authenticated Codex account into a Nimbus text provider. */
 export interface CodexProviderSource {
   for(userId: string): Promise<TextProvider | null>;
+  models?(userId: string): Promise<readonly SelectableModel[]>;
 }
 
 export class UserProviderDirectory implements ProviderKeyDirectory {
@@ -35,6 +43,15 @@ export class UserProviderDirectory implements ProviderKeyDirectory {
       providers.push('codex');
     }
     return providers;
+  }
+
+  async modelsFor(userId: string): Promise<readonly SelectableModel[]> {
+    const providers = await this.providersFor(userId);
+    const codex = await this.#codex.models?.(userId);
+    const gemini = providers.includes('gemini')
+      ? selectableModels().filter((model) => model.provider === 'gemini')
+      : [];
+    return [...gemini, ...(codex ?? [])];
   }
 }
 

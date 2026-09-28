@@ -4,6 +4,7 @@ import { LlmProviderSchema, ModelIdSchema } from './llm.js';
 
 export const SelectableModelSchema = z.strictObject({
   id: ModelIdSchema,
+  label: z.string().min(1).max(120).optional(),
   provider: LlmProviderSchema,
   vision: z.boolean(),
   reasoning: z.boolean(),
