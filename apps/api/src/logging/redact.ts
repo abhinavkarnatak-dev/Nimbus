@@ -47,6 +47,11 @@ const STRING_PATTERNS: readonly { pattern: RegExp; replacement: string }[] = [
       /\b(password|passwd|secret|token|api[_-]?key|authorization|otp|passcode)\s*[=:]\s*("[^"]{4,}"|'[^']{4,}'|[^\s,;&})\]]{4,})/gi,
     replacement: `$1=${REDACTED}`,
   },
+  {
+    pattern:
+      /(\B--?(?:password|passwd|secret|token|api[_-]?key|authorization|otp|passcode)\s+)("[^"]+"|'[^']+'|\S+)/gi,
+    replacement: `$1${REDACTED}`,
+  },
 ];
 
 function normalizeKey(key: string): string {

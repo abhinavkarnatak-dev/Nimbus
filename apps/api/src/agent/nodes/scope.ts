@@ -51,9 +51,7 @@ export interface ScopeOptions {
 }
 
 export function isDiscoverableQuestion(question: string): boolean {
-  return /\b(which|what|where)\s+(?:file|folder|directory|path|module|package|service|command|script)\b/i.test(
-    question,
-  );
+  return /\b(which|what|where)\s+(?:file|folder|directory|path|command|script)\b/i.test(question);
 }
 
 function isRepositoryQuestion(task: string): boolean {

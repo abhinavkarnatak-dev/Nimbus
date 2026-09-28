@@ -51,6 +51,18 @@ describe('a person watching the run while it happens', () => {
     });
   });
 
+  it('redacts secrets from search terms and separate command arguments', async () => {
+    const harness = await executeHarness();
+    await harness.executor.execute(actionFor('search_code', { query: 'api_key=abcd1234efgh' }));
+
+    expect(harness.reporter.starts[0]?.summary).not.toContain('abcd1234efgh');
+    expect(
+      describeInvocation('run_command', {
+        argv: ['deploy', '--api-key', 'abcd1234efgh', '--region', 'us-east-1'],
+      }).summary,
+    ).not.toContain('abcd1234efgh');
+  });
+
   it('names the same call on all three, so a view can join them up', async () => {
     const harness = await executeHarness();
     await harness.executor.execute(READ);

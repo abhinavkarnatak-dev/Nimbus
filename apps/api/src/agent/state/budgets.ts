@@ -30,9 +30,7 @@ export function newBudgets(options: NewBudgetOptions = {}): AgentBudgets {
 }
 
 export function shortfall(budgets: AgentBudgets, nowMs: number): BudgetShortfall | null {
-  // Small explicit budgets are useful for controlled runs and tests. Normal sessions use an
-  // expanding step window instead of treating the initial estimate as a hard task limit.
-  if (budgets.maxSteps < STATE_LIMITS.expandingStepWindow && budgets.steps >= budgets.maxSteps) {
+  if (budgets.steps >= budgets.maxSteps) {
     return {
       reason: 'step_budget',
       detail: `${String(budgets.steps)} of ${String(budgets.maxSteps)} steps`,
@@ -78,13 +76,7 @@ export function assertRoom(budgets: AgentBudgets, nowMs: number = Date.now()): v
 }
 
 export function takeStep(budgets: AgentBudgets): AgentBudgets {
-  const steps = budgets.steps + 1;
-  const expands = budgets.maxSteps >= STATE_LIMITS.expandingStepWindow && steps >= budgets.maxSteps;
-  return {
-    ...budgets,
-    steps,
-    maxSteps: expands ? budgets.maxSteps + STATE_LIMITS.expandingStepWindow : budgets.maxSteps,
-  };
+  return { ...budgets, steps: budgets.steps + 1 };
 }
 
 export function takeRetry(budgets: AgentBudgets): AgentBudgets {

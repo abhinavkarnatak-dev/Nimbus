@@ -190,13 +190,17 @@ export function applyEvent(live: LiveSession, event: ServerEvent): LiveSession {
         tools: withTool(
           live.tools,
           event.toolCallId,
-          (one) => ({
-            ...one,
-            tool: event.tool,
-            outcome: event.outcome,
-            durationMs: event.durationMs,
-            resultSummary: event.summary,
-          }),
+          (one) => {
+            const started = one.summary !== '';
+            return {
+              ...one,
+              tool: event.tool,
+              outcome: event.outcome,
+              durationMs: event.durationMs,
+              summary: started ? one.summary : event.summary,
+              resultSummary: started ? event.summary : '',
+            };
+          },
           () => blankTool(event.toolCallId),
         ),
       };

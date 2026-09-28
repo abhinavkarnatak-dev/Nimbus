@@ -1,6 +1,5 @@
 export const STATE_LIMITS = {
   maxSteps: 40,
-  expandingStepWindow: 30,
   maxRetries: 6,
   maxDurationMs: 1_800_000,
 

@@ -425,7 +425,9 @@ export function resumedState(
     // reasoning node as conversation, so the agent does not lose the original context.
     task: session.clarificationAnswer === null && followUp !== null ? followUp : input.task,
   });
-  const spent = Math.min(Math.max(session.step, 0), fresh.budgets.maxSteps);
+  // Preserve the monotonic persisted count. An over-budget resume stops at the guard instead of
+  // pretending earlier work never happened and reusing its step-derived identity.
+  const spent = Math.max(session.step, 0);
 
   if (session.clarificationAnswer !== null) {
     return parseState({

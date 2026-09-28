@@ -24,22 +24,52 @@ type MessageBlock = TextBlock | CodeBlock;
 export function messageBlocks(text: string): MessageBlock[] {
   const safe = stripEscapes(text);
   const blocks: MessageBlock[] = [];
-  const fence = /```([^\n`]*)\n([\s\S]*?)(?:```|$)/g;
   let cursor = 0;
 
-  for (const match of safe.matchAll(fence)) {
-    const index = match.index;
-    if (index > cursor) blocks.push({ kind: 'text', text: safe.slice(cursor, index) });
+  while (cursor < safe.length) {
+    const opening = /^```([^\r\n`]*)\r?\n/gm;
+    opening.lastIndex = cursor;
+    const start = opening.exec(safe);
+    if (start === null) break;
+
+    if (start.index > cursor) blocks.push({ kind: 'text', text: safe.slice(cursor, start.index) });
+    const contentStart = start.index + start[0].length;
+    const closing = /^```[ \t]*(?:\r?\n|$)/gm;
+    closing.lastIndex = contentStart;
+    const end = closing.exec(safe);
+    const contentEnd = end?.index ?? safe.length;
     blocks.push({
       kind: 'code',
-      language: (match[1] ?? '').trim(),
-      text: (match[2] ?? '').replace(/\n$/, ''),
+      language: (start[1] ?? '').trim(),
+      text: safe.slice(contentStart, contentEnd).replace(/\r?\n$/, ''),
     });
-    cursor = index + match[0].length;
+    cursor = end === null ? safe.length : end.index + end[0].length;
   }
 
   if (cursor < safe.length) blocks.push({ kind: 'text', text: safe.slice(cursor) });
   return blocks.length === 0 ? [{ kind: 'text', text: safe }] : blocks;
+}
+
+export interface ActivitySlices {
+  before: readonly (readonly ToolRun[])[];
+  after: readonly ToolRun[];
+}
+
+export function sliceActivityByMessage(
+  messages: readonly { sentAt: string }[],
+  tools: readonly ToolRun[],
+): ActivitySlices {
+  const before: ToolRun[][] = messages.map(() => []);
+  const after: ToolRun[] = [];
+
+  for (const tool of tools) {
+    const startedAt = Date.parse(tool.startedAt);
+    const messageIndex = messages.findIndex((message) => Date.parse(message.sentAt) > startedAt);
+    if (messageIndex === -1) after.push(tool);
+    else before[messageIndex]?.push(tool);
+  }
+
+  return { before, after };
 }
 
 function InlineText({ text }: { text: string }): React.JSX.Element {

@@ -98,6 +98,10 @@ describe('validateScope', () => {
     expect(result.question).toBeNull();
   });
 
+  it('keeps a service choice for the person because it can change requested behavior', () => {
+    expect(isDiscoverableQuestion('Which service should receive this change?')).toBe(false);
+  });
+
   it('asks a generic question when it never needed a model to tell', async () => {
     const harness = await nodeHarness({ task: VAGUE_TASK, answers: { answers: [UNCLEAR] } });
     const result = await validateScope(harness.state, { router: harness.router });

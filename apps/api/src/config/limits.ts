@@ -21,7 +21,9 @@ export const HARD_LIMITS: EffectiveLimits = {
 export const DEFAULT_LIMITS: EffectiveLimits = {
   maxAttachmentBytes: LIMITS.maxAttachmentBytes,
   maxToolOutputBytes: LIMITS.toolOutputTotalMaxBytes,
-  maxAgentSteps: 30,
+  // The UI is event-driven rather than progress-to-N, so normal runs get the full safety ceiling.
+  // Operators can still tighten this explicitly with MAX_AGENT_STEPS.
+  maxAgentSteps: LIMITS.maxAgentSteps,
   maxChangedFiles: LIMITS.maxChangedFiles,
   maxDiffLines: LIMITS.maxDiffLines,
   maxSandboxSeconds: 1800,

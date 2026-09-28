@@ -194,7 +194,7 @@ export class ActionExecutor {
     const described = describeInvocation(request.tool, request.toolArguments);
     const intent = shorten(redactSecrets(request.intent));
     const summary = shorten(
-      [described.summary, intent === '' ? null : intent].filter(Boolean).join(' — '),
+      redactSecrets([described.summary, intent === '' ? null : intent].filter(Boolean).join(' — ')),
     );
 
     const invocation = ToolInvocationSchema.parse({

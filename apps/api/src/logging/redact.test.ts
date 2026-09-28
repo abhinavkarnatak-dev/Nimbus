@@ -137,6 +137,13 @@ describe('secret patterns inside text', () => {
     expect(redactString('otp: 12345678')).not.toContain('12345678');
   });
 
+  it('removes values passed after command-line secret flags', () => {
+    expect(redactString('deploy --api-key abcd1234efgh --region us-east-1')).toBe(
+      `deploy --api-key ${REDACTED} --region us-east-1`,
+    );
+    expect(redactString('login -password "hunter2 secret"')).not.toContain('hunter2 secret');
+  });
+
   it('leaves ordinary sentences untouched', () => {
     for (const message of [
       'incoming request',

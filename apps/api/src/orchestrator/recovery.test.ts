@@ -273,10 +273,11 @@ describe('what a recovered run is told about the one before it', () => {
     expect(state.budgets.maxSteps).toBe(30);
   });
 
-  it('never claims more steps were spent than the session allows', () => {
+  it('preserves an over-budget persisted step instead of reusing earlier activity identity', () => {
     const state = stateFor(sessionDocument({ status: 'working', step: 99, maxSteps: 30 }));
 
-    expect(state.budgets.steps).toBe(30);
+    expect(state.budgets.steps).toBe(99);
+    expect(state.budgets.maxSteps).toBe(30);
   });
 
   it('is told nothing about files in a machine that no longer exists', () => {

@@ -16,7 +16,7 @@ import { ApiError, NetworkError } from '../api/errors.js';
 import { newPrefixedId } from '../lib/id.js';
 import { plainText } from '../render/safe.js';
 import { answered, decided, type LiveSession } from '../sessions/live.js';
-import { ActivityFeed, MessageContent } from '../sessions/Conversation.js';
+import { ActivityFeed, MessageContent, sliceActivityByMessage } from '../sessions/Conversation.js';
 import type { ManualPrState } from '../sessions/Panels.js';
 import {
   ChangesPane,
@@ -102,10 +102,7 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
     live?.tools.at(-1)?.summary ??
     live?.progress.currentActivity ??
     'Working';
-  const activityAnchor = running
-    ? null
-    : ([...(live?.messages ?? [])].reverse().find((message) => message.role === 'agent')
-        ?.messageId ?? null);
+  const activityTimeline = sliceActivityByMessage(live?.messages ?? [], live?.tools ?? []);
   const composerDisabled = busy || (running && live.question === null);
   const refreshSessions = sessions.refresh;
 
@@ -440,8 +437,13 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
               <div className="thread__inner">
                 <AnimatePresence initial={false}>
                   {live.messages.flatMap((one, index) => [
-                    ...(one.messageId === activityAnchor
-                      ? [<ActivityFeed tools={live.tools} key="activity-history" />]
+                    ...(activityTimeline.before[index]?.length
+                      ? [
+                          <ActivityFeed
+                            tools={activityTimeline.before[index] ?? []}
+                            key={`activity-before-${one.messageId}`}
+                          />,
+                        ]
                       : []),
                     <motion.div
                       key={one.messageId}
@@ -509,7 +511,7 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
                     </motion.div>,
                   ])}
 
-                  {activityAnchor === null ? <ActivityFeed tools={live.tools} /> : null}
+                  <ActivityFeed tools={activityTimeline.after} />
 
                   {running && live.status !== 'awaiting_user' && live.question === null ? (
                     <motion.div
