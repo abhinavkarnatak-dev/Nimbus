@@ -12,7 +12,13 @@ import {
 import type { ExecutionResult } from './executor.js';
 import { EXECUTE_LIMITS } from './limits.js';
 
-const WRITING_TOOLS: ReadonlySet<string> = new Set(['apply_patch', 'create_file']);
+const WRITING_TOOLS: ReadonlySet<string> = new Set([
+  'apply_patch',
+  'create_file',
+  'edit_file',
+  'delete_file',
+  'move_file',
+]);
 
 export interface StopVerdict {
   stop: boolean;

@@ -7,7 +7,16 @@ import {
 } from '@nimbus/contracts';
 import { z } from 'zod';
 
-import { applyPatch, createFile, listTree, readFile, searchCode } from '../tools/file-tools.js';
+import {
+  applyPatch,
+  createFile,
+  deleteFile,
+  editFile,
+  listTree,
+  moveFile,
+  readFile,
+  searchCode,
+} from '../tools/file-tools.js';
 import { defineTool, type ToolDefinition } from './definition.js';
 import { REGISTRY_LIMITS } from './limits.js';
 
@@ -190,6 +199,63 @@ export const applyPatchTool = defineTool({
   },
 });
 
+export const editFileTool = defineTool({
+  name: 'edit_file',
+  description:
+    'Replace one exact, unique piece of text in an existing text file. Read the file first and include enough surrounding context that oldText occurs exactly once. Use this for a focused edit; use apply_patch for edits across multiple files or structural diffs. Protected and dependency paths still need approval.',
+  timeoutMs: REGISTRY_LIMITS.writeTimeoutMs,
+  input: z.strictObject({
+    path: WorkspacePathSchema.describe('the existing file to edit, such as src/server.ts'),
+    oldText: z
+      .string()
+      .min(1)
+      .max(131_072)
+      .describe('the exact text currently in the file, including whitespace'),
+    newText: z.string().max(131_072).describe('the replacement text, including whitespace'),
+  }),
+  run: async (input, context) => {
+    const result = await editFile(context.sandbox, input);
+    return {
+      summary: shorten(
+        `edited ${result.path}: replaced ${String(result.replacements)} exact match`,
+      ),
+      paths: [result.path],
+    };
+  },
+});
+
+export const deleteFileTool = defineTool({
+  name: 'delete_file',
+  description:
+    'Delete one existing workspace file. This is destructive and always requires human approval, including for ordinary files. Do not use it to remove generated check output; use run_checks for that.',
+  timeoutMs: REGISTRY_LIMITS.writeTimeoutMs,
+  input: z.strictObject({
+    path: WorkspacePathSchema.describe('the file to delete, such as src/obsolete.ts'),
+  }),
+  run: async (input, context) => {
+    const result = await deleteFile(context.sandbox, input);
+    return { summary: shorten(`deleted ${result.path}`), paths: [result.path] };
+  },
+});
+
+export const moveFileTool = defineTool({
+  name: 'move_file',
+  description:
+    'Move or rename one existing workspace file to a new path. This is destructive and always requires human approval. The destination must not already exist; use edit_file for content changes.',
+  timeoutMs: REGISTRY_LIMITS.writeTimeoutMs,
+  input: z.strictObject({
+    from: WorkspacePathSchema.describe('the existing source file'),
+    to: WorkspacePathSchema.describe('the new destination path'),
+  }),
+  run: async (input, context) => {
+    const result = await moveFile(context.sandbox, input);
+    return {
+      summary: shorten(`moved ${result.previousPath ?? input.from} to ${result.path}`),
+      paths: [result.path, ...(result.previousPath === null ? [] : [result.previousPath])],
+    };
+  },
+});
+
 export const runCommandTool = defineTool({
   name: 'run_command',
   description:
@@ -314,6 +380,26 @@ export const gitStatusTool = defineTool({
   },
 });
 
+export const gitDiffTool = defineTool({
+  name: 'git_diff',
+  description:
+    'Show the exact patch currently produced by the workspace, including added, modified and deleted files. Use this when reviewing your own changes or explaining code in the chat; it does not change anything.',
+  timeoutMs: REGISTRY_LIMITS.readTimeoutMs,
+  input: z.strictObject({}),
+  run: async (_input, context) => {
+    const patch = await context.sandbox.exportPatch();
+    const clipped = clip(patch.patch);
+    return {
+      summary: shorten(
+        `diff: ${String(patch.files.length)} files, +${String(patch.addedLines)} -${String(patch.removedLines)}`,
+      ),
+      paths: patch.files.slice(0, REGISTRY_LIMITS.pathsPerRecordMax).map((file) => file.path),
+      text: clipped.text,
+      truncated: clipped.truncated,
+    };
+  },
+});
+
 export const prepareCommitTool = defineTool({
   name: 'prepare_commit',
   description:
@@ -411,10 +497,14 @@ export const BUILT_IN_TOOLS: readonly ToolDefinition[] = [
   searchCodeTool,
   readFileTool,
   createFileTool,
+  editFileTool,
+  deleteFileTool,
+  moveFileTool,
   applyPatchTool,
   runCommandTool,
   runChecksTool,
   gitStatusTool,
+  gitDiffTool,
   prepareCommitTool,
   messageUserTool,
   finishTaskTool,

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { FakeSandboxProvider, type Sandbox } from '../../sandbox/index.js';
 import { testSpec } from '../../sandbox/sandbox.fixtures.js';
 import { ToolError } from './errors.js';
-import { applyPatch, createFile, listTree, readFile, searchCode } from './file-tools.js';
+import { applyPatch, createFile, editFile, listTree, readFile, searchCode } from './file-tools.js';
 import { TOOL_LIMITS } from './limits.js';
 
 const FILES: Record<string, string> = {
@@ -312,6 +312,36 @@ describe('create_file', () => {
 
     expect(await codeOf(async () => createFile(sandbox, { path: 'bin.txt', contents }))).toBe(
       'FILE_NOT_TEXT',
+    );
+  });
+});
+
+describe('edit_file', () => {
+  it('replaces one exact match in an existing file', async () => {
+    const { sandbox } = await workspace({ 'one.txt': 'before\nkeep\n' });
+    const result = await editFile(sandbox, {
+      path: 'one.txt',
+      oldText: 'before',
+      newText: 'after',
+    });
+
+    expect(await sandbox.readFile('one.txt')).toBe('after\nkeep\n');
+    expect(result).toMatchObject({
+      path: 'one.txt',
+      replacements: 1,
+      addedLines: 0,
+      removedLines: 0,
+    });
+  });
+
+  it.each([
+    ['missing text', 'nope', 'after', 'EDIT_NOT_FOUND'],
+    ['ambiguous text', 'a', 'b', 'EDIT_NOT_UNIQUE'],
+    ['empty old text', '', 'after', 'EDIT_INVALID'],
+  ])('refuses %s', async (_label, oldText, newText, expected) => {
+    const { sandbox } = await workspace({ 'one.txt': oldText === 'a' ? 'a\na\n' : 'before\n' });
+    expect(await codeOf(async () => editFile(sandbox, { path: 'one.txt', oldText, newText }))).toBe(
+      expected,
     );
   });
 });

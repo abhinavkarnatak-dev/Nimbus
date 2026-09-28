@@ -40,6 +40,7 @@ export const READ_ONLY_TOOLS: readonly ToolName[] = [
   'search_code',
   'read_file',
   'git_status',
+  'git_diff',
   'message_user',
   'finish_task',
   'wait_for_user',
@@ -188,6 +189,39 @@ export function classifyAction(tool: string, input: unknown): Classification {
       return needsApproval('uncategorized_action', 'medium', 'that path could not be read');
     }
     return classifyPath(path) ?? allowed('a new ordinary file', [path]);
+  }
+
+  if (tool === 'edit_file') {
+    const path = (input as { path?: unknown }).path;
+
+    if (typeof path !== 'string') {
+      return needsApproval('uncategorized_action', 'medium', 'that path could not be read');
+    }
+    return (
+      classifyPath(path) ?? allowed('a focused edit inside an ordinary workspace file', [path])
+    );
+  }
+
+  if (tool === 'delete_file') {
+    const path = (input as { path?: unknown }).path;
+    return typeof path === 'string'
+      ? needsApproval('file_deletion', 'medium', 'that action deletes a file', [path])
+      : needsApproval('uncategorized_action', 'high', 'that path could not be read');
+  }
+
+  if (tool === 'move_file') {
+    const from = (input as { from?: unknown }).from;
+    const to = (input as { to?: unknown }).to;
+    if (typeof from !== 'string' || typeof to !== 'string') {
+      return needsApproval('uncategorized_action', 'high', 'those paths could not be read');
+    }
+    if (!canBeApproved(from) || !canBeApproved(to)) {
+      return denied('those paths cannot be written to', [from, to]);
+    }
+    return needsApproval('file_rename', 'medium', 'that action moves or renames a file', [
+      from,
+      to,
+    ]);
   }
 
   if (tool === 'apply_patch') {
