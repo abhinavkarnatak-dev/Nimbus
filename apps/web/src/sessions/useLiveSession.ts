@@ -10,6 +10,7 @@ import { applySessionEvents, liveFrom, type LiveSession } from './live.js';
 export const SOCKET_PATH = '/events';
 
 export const FROM_THE_START = 0;
+export const MAX_CACHED_SESSIONS = 8;
 
 const TERMINAL_STATUSES = new Set(['completed', 'pr_created', 'failed', 'cancelled', 'ready']);
 
@@ -40,16 +41,40 @@ function openSocket(url: string): SocketLike {
   return new WebSocket(url) as unknown as SocketLike;
 }
 
-function retainLiveHistory(next: LiveSession, current: LiveSession | null): LiveSession {
+function rememberSession(
+  cache: Map<SessionId, CachedSession>,
+  sessionId: SessionId,
+  value: CachedSession,
+): void {
+  cache.delete(sessionId);
+  cache.set(sessionId, value);
+
+  while (cache.size > MAX_CACHED_SESSIONS) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) return;
+    cache.delete(oldest);
+  }
+}
+
+function mergeSnapshot(
+  next: LiveSession,
+  current: CachedSession | null,
+  snapshotSequence: number,
+): LiveSession {
   if (current === null) return next;
+
+  // The HTTP snapshot may have been read before an event that the socket has
+  // already applied. In that case the cached state is newer in its entirety;
+  // replacing any of it would advance the cursor while losing that event.
+  if (current.lastEventSequence > snapshotSequence) return current.live;
 
   return {
     ...next,
     // Tool output is intentionally delivered by the event stream and is not part
     // of the session-detail response. A status refresh must never erase it.
-    tools: current.tools,
-    files: next.files.length === 0 ? current.files : next.files,
-    checks: next.checks.length === 0 ? current.checks : next.checks,
+    tools: current.live.tools,
+    files: next.files.length === 0 ? current.live.files : next.files,
+    checks: next.checks.length === 0 ? current.live.checks : next.checks,
   };
 }
 
@@ -82,10 +107,10 @@ export function useLiveSession(api: ApiClient, sessionId: SessionId | null): Liv
       }
 
       const cached = cache.current.get(requestedSessionId) ?? null;
-      const next = retainLiveHistory(liveFrom(found.session), cached?.live ?? null);
+      const next = mergeSnapshot(liveFrom(found.session), cached, found.lastEventSequence);
       const from = cached?.lastEventSequence ?? FROM_THE_START;
 
-      cache.current.set(requestedSessionId, { live: next, lastEventSequence: from });
+      rememberSession(cache.current, requestedSessionId, { live: next, lastEventSequence: from });
       setLoaded({
         sessionId: requestedSessionId,
         detail: found.session,
@@ -153,7 +178,7 @@ export function useLiveSession(api: ApiClient, sessionId: SessionId | null): Liv
           const next = applySessionEvents(current, envelopes, snapshotSequence);
           const lastEventSequence =
             envelopes.at(-1)?.sequence ?? cache.current.get(sessionId)?.lastEventSequence ?? from;
-          cache.current.set(sessionId, { live: next, lastEventSequence });
+          rememberSession(cache.current, sessionId, { live: next, lastEventSequence });
           return next;
         });
       },
@@ -185,9 +210,9 @@ export function useLiveSession(api: ApiClient, sessionId: SessionId | null): Liv
         if (activeSessionId.current !== sessionId) return;
 
         const cached = cache.current.get(sessionId) ?? null;
-        const next = retainLiveHistory(liveFrom(found.session), cached?.live ?? null);
+        const next = mergeSnapshot(liveFrom(found.session), cached, found.lastEventSequence);
         const from = cached?.lastEventSequence ?? FROM_THE_START;
-        cache.current.set(sessionId, { live: next, lastEventSequence: from });
+        rememberSession(cache.current, sessionId, { live: next, lastEventSequence: from });
         setLoaded(() => ({
           sessionId,
           detail: found.session,
@@ -217,7 +242,7 @@ export function useLiveSession(api: ApiClient, sessionId: SessionId | null): Liv
         if (current === null) return current;
         const changed = next(current);
         const lastEventSequence = cache.current.get(sessionId)?.lastEventSequence ?? FROM_THE_START;
-        cache.current.set(sessionId, { live: changed, lastEventSequence });
+        rememberSession(cache.current, sessionId, { live: changed, lastEventSequence });
         return changed;
       });
     },
