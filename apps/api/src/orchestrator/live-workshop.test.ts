@@ -401,6 +401,30 @@ describe('the limits a run is prepared with', () => {
     await prepared.finish();
   });
 
+  it('moves sessions carrying the former 30-step default to the current normal ceiling', async () => {
+    const held = await workshopFor([]);
+
+    const prepared = await held.workshop.prepare(
+      { ...held.session, maxSteps: 30 },
+      { signal: new AbortController().signal },
+    );
+
+    expect(prepared.input.state.budgets.maxSteps).toBe(DEFAULT_LIMITS.maxAgentSteps);
+    await prepared.finish();
+  });
+
+  it('does not widen the former default when configuration is currently tighter', async () => {
+    const held = await workshopFor([], { env: { MAX_AGENT_STEPS: '9' } });
+
+    const prepared = await held.workshop.prepare(
+      { ...held.session, maxSteps: 30 },
+      { signal: new AbortController().signal },
+    );
+
+    expect(prepared.input.state.budgets.maxSteps).toBe(30);
+    await prepared.finish();
+  });
+
   it('hands the sandbox the same numbers it hands the trusted validator', async () => {
     const held = await workshopFor([], { env: { MAX_CHANGED_FILES: '3', MAX_DIFF_LINES: '40' } });
     const sandboxes = new FakeSandboxProvider({ files: {} });

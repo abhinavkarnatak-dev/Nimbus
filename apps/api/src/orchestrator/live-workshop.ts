@@ -61,6 +61,21 @@ export interface LiveWorkshopOptions {
   maxSteps?: number;
 }
 
+export const LEGACY_DEFAULT_MAX_STEPS = 30;
+
+export function maxStepsForSession(persisted: number, configured: number): number {
+  if (persisted <= 0) return configured;
+
+  // Sessions written before event-driven progress shipped carry 30 because that was the product
+  // default, not a user choice. Move only that legacy default forward; all other persisted values
+  // remain strict per-session ceilings. A currently tightened configuration also stays strict.
+  if (persisted === LEGACY_DEFAULT_MAX_STEPS && configured > LEGACY_DEFAULT_MAX_STEPS) {
+    return configured;
+  }
+
+  return persisted;
+}
+
 export class LiveSessionWorkshop implements SessionWorkshop {
   readonly name = 'live';
 
@@ -112,6 +127,7 @@ export class LiveSessionWorkshop implements SessionWorkshop {
     }
 
     const limits = this.#options.config.limits;
+    const configuredMaxSteps = this.#options.maxSteps ?? limits.maxAgentSteps;
 
     const sandbox = await this.#rent(session);
     const registry = new ToolRegistry({
@@ -133,7 +149,7 @@ export class LiveSessionWorkshop implements SessionWorkshop {
         baseCommitSha: base,
         defaultBranch: session.repository.defaultBranch,
         models: plan,
-        budgets: { maxSteps: session.maxSteps || (this.#options.maxSteps ?? limits.maxAgentSteps) },
+        budgets: { maxSteps: maxStepsForSession(session.maxSteps, configuredMaxSteps) },
       },
       session,
     );
