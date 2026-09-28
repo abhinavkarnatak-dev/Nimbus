@@ -108,11 +108,22 @@ export const sessionDetailFixture = () => ({
   baseCommitSha: VALID_COMMIT_SHA,
   attachments: [attachmentFixture()],
   messages: [sessionMessageFixture()],
-  progress: { step: 4, maxSteps: 30, currentActivity: 'Reading src/utils/format-date.ts' },
+  progress: {
+    step: 4,
+    maxSteps: 30,
+    currentActivity: 'Reading src/utils/format-date.ts',
+    phase: null,
+    completedPhases: [],
+    remainingPhases: [],
+  },
   filesChanged: [fileChangeFixture()],
   checks: [checkResultFixture()],
   approvals: [approvalRecordFixture()],
   failure: null,
+  toolRuns: [],
+  workspaceRevision: null,
+  review: null,
+  deliveryStage: 'not_started' as const,
 });
 
 export const toolInvocationFixture = () => ({

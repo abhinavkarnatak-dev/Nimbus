@@ -36,7 +36,7 @@ describe('createState', () => {
     const state = createState(stateInput());
 
     expect(state.version).toBe(AGENT_STATE_VERSION);
-    expect(state.phase).toBe('starting');
+    expect(state.phase).toBe('scoping');
     expect(state.stopReason).toBeNull();
     expect(state.budgets.steps).toBe(0);
     expect(state.filesRead).toEqual([]);
@@ -121,7 +121,7 @@ describe('serialize and read back', () => {
 
   it('survives a state that has done some work', () => {
     let state = sampleState();
-    state = withPhase(state, 'executing');
+    state = withPhase(state, 'investigating');
     state = recordFileRead(state, 'src/auth/login.ts');
     state = recordFileChanged(state, 'src/auth/redirect.ts');
     state = recordToolEvent(state, event(1));
@@ -180,13 +180,13 @@ describe('serialize and read back', () => {
 
 describe('moving through the run', () => {
   it('changes phase', () => {
-    expect(withPhase(sampleState(), 'reasoning').phase).toBe('reasoning');
+    expect(withPhase(sampleState(), 'investigating').phase).toBe('investigating');
   });
 
   it('finishes cleanly when it completed', () => {
     const state = stopped(sampleState(), 'completed');
 
-    expect(state.phase).toBe('finished');
+    expect(state.phase).toBe('completed');
     expect(state.stopReason).toBe('completed');
   });
 
@@ -203,7 +203,7 @@ describe('moving through the run', () => {
       proposedAction: {
         tool: 'apply_patch',
         reason: 'fix the redirect',
-        argumentsJson: '{}',
+        arguments: {},
         actionHash: 'a'.repeat(64),
       },
     });

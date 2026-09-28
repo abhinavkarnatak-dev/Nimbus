@@ -3,6 +3,7 @@ import {
   SessionMessageSchema,
   type ServerEvent,
   type ToolInvocation,
+  type AgentPhase,
 } from '@nimbus/contracts';
 
 import type {
@@ -75,6 +76,20 @@ export class LiveActionReporter implements ActionReporter {
     });
   }
 
+  async phase(phase: AgentPhase, activity: string | null): Promise<void> {
+    const order: readonly AgentPhase[] = [
+      'scoping', 'investigating', 'planning', 'implementing', 'verifying', 'reviewing', 'packaging', 'completed',
+    ];
+    const at = order.indexOf(phase);
+    await this.#say({
+      type: 'agent.phase',
+      phase,
+      activity,
+      completedPhases: at <= 0 ? [] : order.slice(0, at),
+      remainingPhases: at < 0 ? [] : order.slice(at + 1),
+    });
+  }
+
   async #say(event: ServerEvent): Promise<void> {
     try {
       await this.#options.events.publish(this.#options.sessionId, this.#options.userId, event);
@@ -119,6 +134,7 @@ export class DurableProgressReporter implements ActionReporter {
   }
 
   async started(invocation: ToolInvocation): Promise<void> {
+    await this.#options.records.recordToolStarted(this.#options.sessionId, invocation, this.#now());
     await this.#write(0, invocation.summary);
   }
 
@@ -127,6 +143,14 @@ export class DurableProgressReporter implements ActionReporter {
   }
 
   async completed(completion: ReportedCompletion): Promise<void> {
+    await this.#options.records.recordToolCompleted(
+      this.#options.sessionId,
+      completion.toolCallId,
+      completion.outcome,
+      completion.summary,
+      completion.durationMs,
+      this.#now(),
+    );
     await this.#write(completion.step, completion.summary);
   }
 
@@ -142,6 +166,21 @@ export class DurableProgressReporter implements ActionReporter {
       this.#options.logger.warn(
         { sessionId: this.#options.sessionId, error: String(error) },
         'a note from the agent could not be kept, the person still saw it live',
+      );
+    }
+  }
+
+  async phase(phase: AgentPhase, activity: string | null, step: number): Promise<void> {
+    try {
+      await this.#options.records.recordProgress(
+        this.#options.sessionId,
+        { step, currentActivity: activity, phase },
+        this.#now(),
+      );
+    } catch (error) {
+      this.#options.logger.warn(
+        { sessionId: this.#options.sessionId, phase, error: String(error) },
+        'an agent phase could not be written, the run carries on',
       );
     }
   }
@@ -190,6 +229,12 @@ export class EveryReporter implements ActionReporter {
   async said(message: SaidMessage): Promise<void> {
     for (const reporter of this.#reporters) {
       await reporter.said(message);
+    }
+  }
+
+  async phase(phase: AgentPhase, activity: string | null, step: number): Promise<void> {
+    for (const reporter of this.#reporters) {
+      await reporter.phase?.(phase, activity, step);
     }
   }
 }

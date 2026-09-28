@@ -39,6 +39,7 @@ export interface RunCommandInput {
   timeoutMs?: number;
   signal?: AbortSignal;
   check?: boolean;
+  cwd?: string;
 }
 
 export interface RunCommandResult {
@@ -158,6 +159,7 @@ export class CommandRunner {
 
     const result = await this.sandbox.execute({
       argv,
+      ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
       timeoutMs: input.timeoutMs ?? COMMAND_LIMITS.defaultTimeoutMs,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });

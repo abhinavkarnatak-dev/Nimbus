@@ -199,7 +199,14 @@ export function classifyAction(tool: string, input: unknown): Classification {
     return classifyPatch(patch);
   }
 
-  if (tool === 'run_command' || tool === 'run_checks') {
+  if (tool === 'run_checks') {
+    const checkId = (input as { checkId?: unknown }).checkId;
+    return typeof checkId === 'string' && checkId.trim() !== ''
+      ? allowed('the backend resolves this trusted verification check')
+      : needsApproval('uncategorized_action', 'high', 'that verification check could not be read');
+  }
+
+  if (tool === 'run_command') {
     return classifyCommandTool(input);
   }
 

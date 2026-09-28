@@ -34,13 +34,13 @@ const WORKFLOW_ACTION = {
 };
 
 function answer(action: { intent: string; tool: string; toolArguments: Record<string, unknown> }): {
-  value: { intent: string; tool: string; toolArgumentsJson: string };
+  value: { intent: string; tool: string; toolArguments: Record<string, unknown> };
 } {
   return {
     value: {
       intent: action.intent,
       tool: action.tool,
-      toolArgumentsJson: JSON.stringify(action.toolArguments),
+      toolArguments: action.toolArguments,
     },
   };
 }
@@ -66,36 +66,43 @@ describe('what the model is told', () => {
   it('offers no tool that is not registered', async () => {
     const harness = await nodeHarness();
     const schema = nextActionJsonSchema(harness.registry) as {
-      properties: { tool: { enum: string[] } };
+      oneOf: Array<{ properties: { tool: { const: string } } }>;
     };
 
-    expect(schema.properties.tool.enum).toEqual(harness.registry.names());
-    expect(schema.properties.tool.enum).not.toContain('semantic_search');
+    const tools = schema.oneOf.map((branch) => branch.properties.tool.const).sort();
+    expect(tools).toEqual(harness.registry.names());
+    expect(tools).not.toContain('semantic_search');
   });
 
-  it('asks for the arguments as a string, because an open object is not describable', async () => {
+  it('asks for direct arguments matching the selected tool schema', async () => {
     const harness = await nodeHarness();
     const schema = nextActionJsonSchema(harness.registry) as {
-      properties: Record<string, { type: string }>;
-      additionalProperties: boolean;
+      oneOf: Array<{ properties: Record<string, { type: string }>; additionalProperties: boolean }>;
     };
 
-    expect(schema.properties['toolArgumentsJson']?.type).toBe('string');
-    expect(schema.additionalProperties).toBe(false);
-    expect(JSON.stringify(schema)).not.toContain('"toolArguments"');
+    expect(
+      schema.oneOf.every((branch) => branch.properties['toolArguments']?.type === 'object'),
+    ).toBe(true);
+    expect(schema.oneOf.every((branch) => branch.additionalProperties === false)).toBe(true);
   });
 
-  it('shows the model what a written out argument object looks like', async () => {
+  it('shows the model the selected tool fields', async () => {
     const harness = await nodeHarness();
     const schema = nextActionJsonSchema(harness.registry) as {
-      properties: Record<string, { description: string }>;
+      oneOf: Array<{
+        properties: {
+          tool: { const: string };
+          toolArguments: { properties?: Record<string, unknown> };
+        };
+      }>;
     };
 
-    expect(schema.properties['toolArgumentsJson']?.description).toContain('{"path"');
+    const read = schema.oneOf.find((branch) => branch.properties.tool.const === 'read_file');
+    expect(read?.properties.toolArguments.properties).toHaveProperty('path');
   });
 
-  it('tells the model in words to write the arguments as a JSON object in a string', () => {
-    expect(REASON_SYSTEM).toContain('as a JSON object inside a string');
+  it('tells the model to provide direct structured arguments', () => {
+    expect(REASON_SYSTEM).toContain('directly in toolArguments as an object');
   });
 
   it('never asks the model to call anything, because it only names what it wants', () => {
@@ -121,7 +128,7 @@ describe('what the model is told', () => {
 
     const sent = harness.text.calls[0]?.messages.map((one) => one.content).join('\n') ?? '';
 
-    expect(sent).toContain('The tools you may name');
+    expect(sent).toContain('Currently eligible actions');
     expect(sent).not.toContain('you may call');
   });
 
@@ -274,7 +281,7 @@ describe('chooseNextAction', () => {
     expect(last?.content).toContain('materially different next action');
   });
 
-  it('reads the arguments back out of the string the model wrote', async () => {
+  it('returns the structured arguments the model wrote', async () => {
     const harness = await nodeHarness({ answers: { answers: [answer(READ_ACTION)] } });
 
     const result = await chooseNextAction({
@@ -287,7 +294,7 @@ describe('chooseNextAction', () => {
     expect(result.action.toolArguments).toEqual({ path: 'src/auth/redirect.ts' });
   });
 
-  it('refuses when the arguments are not JSON at all, and says how to write them', async () => {
+  it('refuses arguments that do not match the selected tool schema', async () => {
     const harness = await nodeHarness({
       answers: {
         answers: [
@@ -295,7 +302,7 @@ describe('chooseNextAction', () => {
             value: {
               intent: 'read the redirect helper',
               tool: 'read_file',
-              toolArgumentsJson: 'path: src/auth/redirect.ts',
+              toolArguments: { wrong: 'src/auth/redirect.ts' },
             },
           },
         ],
@@ -310,11 +317,10 @@ describe('chooseNextAction', () => {
     });
 
     expect(result.accepted).toBe(false);
-    expect(result.refusal).toContain('JSON object');
-    expect(result.refusal).toContain('{"path"');
+    expect(result.refusal).toContain('read_file');
   });
 
-  it('refuses JSON that is not an object, because arguments are named', async () => {
+  it('rejects non-object arguments at the provider schema boundary', async () => {
     const harness = await nodeHarness({
       answers: {
         answers: [
@@ -322,22 +328,21 @@ describe('chooseNextAction', () => {
             value: {
               intent: 'read the redirect helper',
               tool: 'read_file',
-              toolArgumentsJson: '["src/auth/redirect.ts"]',
+              toolArguments: ['src/auth/redirect.ts'],
             },
           },
         ],
       },
     });
 
-    const result = await chooseNextAction({
-      state: harness.state,
-      context: 'the task',
-      registry: harness.registry,
-      router: harness.router,
-    });
-
-    expect(result.accepted).toBe(false);
-    expect(result.action.toolArguments).toEqual({});
+    await expect(
+      chooseNextAction({
+        state: harness.state,
+        context: 'the task',
+        registry: harness.registry,
+        router: harness.router,
+      }),
+    ).rejects.toMatchObject({ code: 'LLM_SCHEMA_REFUSED' });
   });
 
   it('still refuses arguments the tool would reject, once they are read back', async () => {

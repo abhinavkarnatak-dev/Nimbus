@@ -5,7 +5,9 @@ import type {
   PatchValidationReport,
   PullRequestResult,
   PushResult,
+  ReliableAgentPhase,
   ServerEvent,
+  SessionProgress,
 } from '@nimbus/contracts';
 
 import { describeFailure, runAgent } from '../agent/graph/run.js';
@@ -25,6 +27,34 @@ import { WorkshopError, type SessionWorkshop } from './workshop.js';
 import { newPrefixedId } from '../lib/id.js';
 
 export const PAUSE_EXPIRY_MS = WAIT_LIMITS.clarificationMs;
+
+const PHASE_ORDER: readonly ReliableAgentPhase[] = [
+  'scoping',
+  'investigating',
+  'planning',
+  'implementing',
+  'verifying',
+  'reviewing',
+  'packaging',
+  'completed',
+];
+
+function statusProgress(
+  step: number,
+  maxSteps: number,
+  currentActivity: string | null,
+  phase: ReliableAgentPhase | null = null,
+): SessionProgress {
+  const at = phase === null ? -1 : PHASE_ORDER.indexOf(phase);
+  return {
+    step,
+    maxSteps,
+    currentActivity,
+    phase,
+    completedPhases: at <= 0 ? [] : PHASE_ORDER.slice(0, at),
+    remainingPhases: at < 0 ? [] : PHASE_ORDER.slice(at + 1),
+  };
+}
 
 export function changedFiles(report: PatchValidationReport | null): FileChange[] {
   if (report === null) {
@@ -120,7 +150,7 @@ export class SessionRunner {
       await this.#say(session, {
         type: 'session.status',
         status: 'provisioning',
-        progress: { step: 0, maxSteps: session.maxSteps, currentActivity: 'starting a machine' },
+        progress: statusProgress(0, session.maxSteps, 'starting a machine'),
       });
       await this.#narrate(
         session,
@@ -143,20 +173,25 @@ export class SessionRunner {
       await this.#say(session, {
         type: 'session.status',
         status: 'working',
-        progress: {
-          step: session.step,
-          maxSteps: session.maxSteps,
-          currentActivity: resuming ? 'continuing from your answer' : 'reading the code',
-        },
+        progress: statusProgress(
+          session.step,
+          session.maxSteps,
+          resuming ? 'continuing from your answer' : 'reading the code',
+        ),
       });
 
       const result = await runAgent(prepared.input);
       const progress = {
         step: result.state.budgets.steps,
+        currentActivity: result.state.activity,
+        phase: result.state.phase,
         filesChanged: changedFiles(result.report),
         checks: [...result.state.checks],
         sandboxId: result.state.sandboxId,
         baseCommitSha: result.state.baseCommitSha,
+        workspaceRevision: result.state.workspaceRevision,
+        review: result.state.review,
+        deliveryStage: result.state.deliveryStage,
       };
 
       await this.#sayProgress(session, progress);
@@ -169,7 +204,7 @@ export class SessionRunner {
 
       if (isPaused(result.state)) {
         await this.#sayPaused(session, result);
-        return { status: 'awaiting_user', currentActivity: null, ...progress };
+        return { status: 'awaiting_user', ...progress, currentActivity: null };
       }
 
       if (
@@ -180,13 +215,14 @@ export class SessionRunner {
         await this.#say(session, {
           type: 'session.status',
           status: 'completed',
-          progress: {
-            step: result.state.budgets.steps,
-            maxSteps: result.state.budgets.maxSteps,
-            currentActivity: null,
-          },
+          progress: statusProgress(
+            result.state.budgets.steps,
+            result.state.budgets.maxSteps,
+            null,
+            result.state.phase,
+          ),
         });
-        return { status: 'completed', currentActivity: null, ...progress };
+        return { status: 'completed', ...progress, currentActivity: null };
       }
 
       if (result.patch === null || result.report === null) {
@@ -215,8 +251,8 @@ export class SessionRunner {
           failure: result.state.checks.some((check) => check.status === 'failed')
             ? failureOf('CHECKS_FAILED')
             : failureForRun(result.state.stopReason, result.threw),
-          currentActivity: null,
           ...progress,
+          currentActivity: null,
         };
 
         await this.#sayFailed(session, failed);
@@ -245,8 +281,8 @@ export class SessionRunner {
         const failed = {
           status: 'failed' as const,
           failure: failureOf('PATCH_REJECTED'),
-          currentActivity: null,
           ...progress,
+          currentActivity: null,
         };
 
         await this.#sayFailed(session, failed);
@@ -259,8 +295,8 @@ export class SessionRunner {
         const failed = {
           status: 'failed' as const,
           failure: failureOf('CHECKS_FAILED'),
-          currentActivity: null,
           ...progress,
+          currentActivity: null,
           deliveryStatus: 'checks_failed' as const,
         };
         await this.#sayFailed(session, failed);
@@ -297,6 +333,12 @@ export class SessionRunner {
       return { status: 'failed', failure: failureOf('INTERNAL_ERROR'), ...progress };
     }
 
+    await this.#deliveryStage(
+      session,
+      'patch_validated',
+      'The trusted backend validated the patch.',
+    );
+
     const baseCommitSha = result.state.baseCommitSha;
 
     const latestRequest =
@@ -310,6 +352,11 @@ export class SessionRunner {
     let pushed: PushResult;
 
     try {
+      await this.#deliveryStage(
+        session,
+        'branch_pushing',
+        'Pushing the validated patch to a feature branch.',
+      );
       pushed = await this.#push.push({
         installationId,
         repositoryId: session.repository.repositoryId,
@@ -322,6 +369,11 @@ export class SessionRunner {
         patch: patch.patch,
         report,
       });
+      await this.#deliveryStage(
+        session,
+        'branch_pushed',
+        `Feature branch ${pushed.branch} is confirmed at ${pushed.commitSha.slice(0, 12)}.`,
+      );
     } catch (error) {
       this.#logger.error(
         { sessionId: session.sessionId, error: String(error) },
@@ -347,6 +399,7 @@ export class SessionRunner {
     let opened: PullRequestResult;
 
     try {
+      await this.#deliveryStage(session, 'pr_opening', 'Reconciling or opening the pull request.');
       opened = await this.#pullRequests.open({
         installationId,
         repositoryId: session.repository.repositoryId,
@@ -360,6 +413,11 @@ export class SessionRunner {
         report,
         checks: result.state.checks,
       });
+      await this.#deliveryStage(
+        session,
+        'pr_created',
+        `Pull request #${String(opened.number)} is confirmed by GitHub.`,
+      );
     } catch (error) {
       this.#logger.error(
         { sessionId: session.sessionId, branch: pushed.branch, error: String(error) },
@@ -409,6 +467,24 @@ export class SessionRunner {
       baseCommitSha: pushed.commitSha,
       deliveryStatus: session.pullRequest === null ? 'pr_created' : 'pr_updated',
     };
+  }
+
+  async #deliveryStage(
+    session: SessionDocument,
+    stage: NonNullable<RunOutcome['deliveryStage']>,
+    summary: string,
+  ): Promise<void> {
+    await this.#records?.recordProgress(
+      session.sessionId,
+      {
+        step: session.step,
+        currentActivity: summary,
+        phase: 'packaging',
+        deliveryStage: stage,
+      },
+      new Date(),
+    );
+    await this.#say(session, { type: 'delivery.updated', stage, summary });
   }
 
   async #verdict(
@@ -464,12 +540,39 @@ export class SessionRunner {
     session: SessionDocument,
     progress: Omit<RunOutcome, 'status'>,
   ): Promise<void> {
+    if (progress.phase !== undefined && progress.phase !== null) {
+      const at = PHASE_ORDER.indexOf(progress.phase);
+      await this.#say(session, {
+        type: 'agent.phase',
+        phase: progress.phase,
+        activity: progress.currentActivity ?? null,
+        completedPhases: at <= 0 ? [] : PHASE_ORDER.slice(0, at),
+        remainingPhases: at < 0 ? [] : PHASE_ORDER.slice(at + 1),
+      });
+    }
+
     if ((progress.filesChanged ?? []).length > 0) {
       await this.#say(session, { type: 'files.changed', files: progress.filesChanged ?? [] });
     }
 
     if ((progress.checks ?? []).length > 0) {
       await this.#say(session, { type: 'checks.updated', checks: progress.checks ?? [] });
+    }
+
+    if (progress.review !== undefined && progress.review !== null) {
+      await this.#say(session, {
+        type: 'review.updated',
+        verdict: progress.review.verdict,
+        summary: progress.review.summary,
+      });
+    }
+
+    if (progress.deliveryStage !== undefined) {
+      await this.#say(session, {
+        type: 'delivery.updated',
+        stage: progress.deliveryStage,
+        summary: `Delivery stage: ${progress.deliveryStage.split('_').join(' ')}`,
+      });
     }
   }
 
@@ -486,8 +589,17 @@ export class SessionRunner {
       await this.#records?.askQuestion(session.sessionId, question, new Date());
 
       await this.#say(session, {
-        type: 'agent.question',
+        type: 'clarification.required',
+        clarificationId: newPrefixedId('clr'),
         question,
+        context:
+          result.state.taskSpec.blockingAmbiguity ??
+          'This answer materially changes the implementation outcome.',
+        options: [],
+        allowFreeText: true,
+        blockingCriterionIds: result.state.taskSpec.acceptanceCriteria
+          .filter((criterion) => criterion.status === 'blocked')
+          .map((criterion) => criterion.criterionId),
         expiresAt: new Date(Date.now() + PAUSE_EXPIRY_MS).toISOString(),
       });
       return;
@@ -500,15 +612,16 @@ export class SessionRunner {
       return;
     }
 
-    if (result.state.phase === 'clarifying' && question === null) {
+    if (result.state.phase === 'awaiting_clarification' && question === null) {
       await this.#say(session, {
         type: 'session.status',
         status: 'awaiting_user',
-        progress: {
-          step: result.state.budgets.steps,
-          maxSteps: result.state.budgets.maxSteps,
-          currentActivity: null,
-        },
+        progress: statusProgress(
+          result.state.budgets.steps,
+          result.state.budgets.maxSteps,
+          null,
+          result.state.phase,
+        ),
       });
       return;
     }

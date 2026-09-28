@@ -11,6 +11,7 @@ import {
 } from '../state/state.js';
 import type { ExecutionResult } from './executor.js';
 import { EXECUTE_LIMITS } from './limits.js';
+import { classifyProgress } from '../reliability/progress.js';
 
 const WRITING_TOOLS: ReadonlySet<string> = new Set(['apply_patch', 'create_file']);
 
@@ -135,6 +136,7 @@ export function countsAsFailure(result: ExecutionResult): boolean {
 }
 
 export function applyExecution(state: AgentState, result: ExecutionResult): AgentState {
+  const progress = classifyProgress(state, result);
   let next = recordToolEvent(state, result.event);
 
   next = parseState({
@@ -142,6 +144,27 @@ export function applyExecution(state: AgentState, result: ExecutionResult): Agen
     policy: result.policy,
     proposedAction: null,
     budgets: budgetsAfter(next.budgets, result),
+    phaseBudget: {
+      ...state.phaseBudget,
+      toolCalls: state.phaseBudget.toolCalls + 1,
+      retries: state.phaseBudget.retries + (countsAsFailure(result) ? 1 : 0),
+      noProgressActions:
+        state.phaseBudget.noProgressActions + (progress.producedProgress ? 0 : 1),
+    },
+    actions: [
+      ...state.actions,
+      {
+        actionId: result.invocation?.toolCallId ?? `action_${String(state.budgets.steps)}`,
+        actionHash: result.actionHash,
+        semanticId: result.semanticId,
+        tool: result.event.tool,
+        revision: state.workspaceRevision,
+        outcome: progress.failure,
+        progress: progress.kind,
+        evidenceIds: [],
+        at: new Date(result.event.atMs).toISOString(),
+      },
+    ].slice(-200),
   });
 
   if (result.check !== null) {
@@ -181,11 +204,11 @@ function phaseAfter(result: ExecutionResult): AgentState['phase'] {
   }
 
   if (result.pause === 'clarification' || result.pause === 'approval') {
-    return 'clarifying';
+    return 'awaiting_clarification';
   }
 
   if (result.check !== null) {
-    return 'validating';
+    return 'verifying';
   }
-  return 'reasoning';
+  return 'implementing';
 }

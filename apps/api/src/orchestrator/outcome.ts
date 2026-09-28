@@ -57,7 +57,7 @@ export function failureOf(code: FailureCode): SessionFailure {
 }
 
 export function isPaused(state: AgentState): boolean {
-  return state.phase === 'awaiting_approval' || state.phase === 'clarifying';
+  return state.phase === 'awaiting_approval' || state.phase === 'awaiting_clarification';
 }
 
 export function failureForStop(stopReason: AgentStopReason | null): SessionFailure {

@@ -10,7 +10,26 @@ function check(name: string, status: CheckResult['status']): CheckResult {
 }
 
 function stateWith(parts: Partial<AgentState>): AgentState {
-  return parseState({ ...sampleState(), ...parts });
+  const base = sampleState();
+  return parseState({
+    ...base,
+    taskSpec: {
+      ...base.taskSpec,
+      acceptanceCriteria: base.taskSpec.acceptanceCriteria.map((criterion) => ({
+        ...criterion,
+        status: 'satisfied' as const,
+      })),
+    },
+    review: {
+      verdict: 'accepted',
+      summary: 'review passed',
+      findings: [],
+      evidenceIds: [],
+      revision: base.workspaceRevision,
+      reviewedAt: new Date().toISOString(),
+    },
+    ...parts,
+  });
 }
 
 describe('judgeCompletion', () => {
@@ -86,7 +105,7 @@ describe('judgeCompletion', () => {
       stateWith({ filesChanged: ['src/a.ts'], checks: [check('unit', 'not_run')] }),
     );
 
-    expect(verdict.finished).toBe(true);
+    expect(verdict.finished).toBe(false);
   });
 
   it('says how much changed when it is finished', () => {
@@ -115,7 +134,7 @@ describe('failingChecks', () => {
       check('d', 'not_run'),
     ]);
 
-    expect(found.map((one) => one.name)).toEqual(['b', 'c']);
+    expect(found.map((one) => one.name)).toEqual(['b', 'c', 'd']);
   });
 
   it('finds nothing when everything passed', () => {

@@ -326,6 +326,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
   const sessionRecords = new MongoSessionRecords(handle.db);
   const eventStore = new MongoEventStore(handle.db);
   const events = new LiveEventPublisher({ store: eventStore, redis, logger });
+  await events.recover();
   const cancelAnnouncer = new RedisCancelAnnouncer({ redis, logger });
   const cancelWatcher = new RedisCancelWatcher({ redis, logger });
 

@@ -31,6 +31,7 @@ import {
   type AttachmentMetadata,
   type AttachmentMimeType,
   type CheckResult,
+  type CommandDescriptor,
   type FileChange,
   type MessageRole,
   type ModelSelection,
@@ -45,6 +46,10 @@ import {
   type SessionSummary,
   type ToolName,
   type ToolOutcome,
+  type ReliableAgentPhase,
+  type WorkspaceRevision,
+  type PatchReview,
+  type DeliveryStage,
 } from '@nimbus/contracts';
 import type { Collection, Db } from 'mongodb';
 
@@ -162,6 +167,7 @@ export interface SessionToolEventDocument {
   paths: string[];
   startedAt: Date;
   durationMs?: number;
+  command?: CommandDescriptor;
 }
 
 export interface SessionPullRequestDocument {
@@ -199,6 +205,10 @@ export interface SessionDocument {
   step: number;
   maxSteps: number;
   currentActivity: string | null;
+  agentPhase?: ReliableAgentPhase | null;
+  workspaceRevision?: WorkspaceRevision | null;
+  patchReview?: PatchReview | null;
+  deliveryStage?: DeliveryStage;
   retryCount: number;
   filesRead: string[];
   filesChanged: FileChange[];
@@ -286,6 +296,20 @@ export function toSessionSummary(document: SessionDocument): SessionSummary {
 }
 
 export function toSessionDetail(document: SessionDocument): SessionDetail {
+  const phaseOrder: readonly ReliableAgentPhase[] = [
+    'scoping',
+    'investigating',
+    'planning',
+    'implementing',
+    'verifying',
+    'reviewing',
+    'packaging',
+    'completed',
+  ];
+  const phaseAt =
+    document.agentPhase === null || document.agentPhase === undefined
+      ? -1
+      : phaseOrder.indexOf(document.agentPhase);
   return SessionDetailSchema.parse({
     ...toSessionSummary(document),
     model: document.model ?? null,
@@ -298,11 +322,24 @@ export function toSessionDetail(document: SessionDocument): SessionDetail {
       step: document.step,
       maxSteps: document.maxSteps,
       currentActivity: document.currentActivity,
+      phase: document.agentPhase ?? null,
+      completedPhases: phaseAt <= 0 ? [] : phaseOrder.slice(0, phaseAt),
+      remainingPhases: phaseAt < 0 ? phaseOrder : phaseOrder.slice(phaseAt + 1),
     },
     filesChanged: document.filesChanged,
     checks: document.checks,
+    toolRuns: document.toolEvents.map((event) => ({
+      ...event,
+      startedAt: event.startedAt.toISOString(),
+      outcome: event.durationMs === undefined ? null : event.outcome,
+      durationMs: event.durationMs ?? null,
+      command: event.command ?? null,
+    })),
     approvals: document.approvals.map(toApprovalRecord),
     failure: document.failure,
+    workspaceRevision: document.workspaceRevision ?? null,
+    review: document.patchReview ?? null,
+    deliveryStage: document.deliveryStage ?? 'not_started',
   });
 }
 
@@ -321,6 +358,17 @@ const approvalEffectSchema = {
     commandCategory: { bsonType: 'string', minLength: 1, maxLength: 120 },
     reason: { bsonType: 'string', minLength: 1, maxLength: LIMITS.reasonMaxChars },
     risk: { enum: [...RiskLevelSchema.options] },
+    operation: { bsonType: 'string', minLength: 1, maxLength: 120 },
+    command: { bsonType: 'string', minLength: 1, maxLength: 2000 },
+    purpose: { bsonType: 'string', minLength: 1, maxLength: LIMITS.reasonMaxChars },
+    expectedEffect: { bsonType: 'string', minLength: 1, maxLength: LIMITS.reasonMaxChars },
+    requestedPermissions: {
+      bsonType: 'array',
+      maxItems: 20,
+      items: { bsonType: 'string', maxLength: 120 },
+    },
+    reversible: { bsonType: 'bool' },
+    workspaceRevision: { bsonType: 'number', minimum: 0 },
   },
 } as const;
 
@@ -484,6 +532,18 @@ export const sessionModel: ModelDefinition = {
         step: { bsonType: 'number', minimum: 0 },
         maxSteps: { bsonType: 'number', minimum: 1 },
         currentActivity: { bsonType: ['string', 'null'], maxLength: LIMITS.summaryMaxChars },
+        agentPhase: { bsonType: ['string', 'null'] },
+        workspaceRevision: {
+          bsonType: ['object', 'null'],
+          additionalProperties: false,
+          required: ['number', 'treeHash'],
+          properties: {
+            number: { bsonType: 'number', minimum: 0 },
+            treeHash: { bsonType: 'string', pattern: '^[0-9a-f]{64}$' },
+          },
+        },
+        patchReview: { bsonType: ['object', 'null'] },
+        deliveryStage: { bsonType: 'string' },
         retryCount: { bsonType: 'number', minimum: 0 },
         filesRead: {
           bsonType: 'array',
@@ -521,6 +581,28 @@ export const sessionModel: ModelDefinition = {
               status: { enum: [...CheckStatusSchema.options] },
               summary: { bsonType: 'string', maxLength: LIMITS.summaryMaxChars },
               durationMs: { bsonType: 'number', minimum: 0 },
+              checkId: { bsonType: 'string', minLength: 1, maxLength: 120 },
+              reason: { bsonType: 'string' },
+              command: { bsonType: 'object' },
+              scope: {
+                bsonType: 'array',
+                items: { bsonType: 'string', maxLength: LIMITS.pathMaxChars },
+              },
+              revision: {
+                bsonType: 'object',
+                additionalProperties: false,
+                required: ['number', 'treeHash'],
+                properties: {
+                  number: { bsonType: 'number', minimum: 0 },
+                  treeHash: { bsonType: 'string', pattern: '^[0-9a-f]{64}$' },
+                },
+              },
+              exitCode: { bsonType: ['number', 'null'] },
+              output: { bsonType: 'string', maxLength: LIMITS.toolOutputChunkMaxChars },
+              outputTruncated: { bsonType: 'bool' },
+              required: { bsonType: 'bool' },
+              fallbackAvailable: { bsonType: 'bool' },
+              baselineStatus: { bsonType: 'string' },
             },
           },
         },

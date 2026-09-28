@@ -15,6 +15,8 @@ export interface EventStore {
   append(sessionId: string, userId: string, event: ServerEvent): Promise<SessionEventEnvelope>;
   since(sessionId: string, sequence: number, limit?: number): Promise<SessionEventEnvelope[]>;
   lastSequence(sessionId: string): Promise<number>;
+  pending(limit?: number): Promise<SessionEventEnvelope[]>;
+  markPublished(eventId: string): Promise<void>;
 }
 
 export class MongoEventStore implements EventStore {
@@ -43,7 +45,9 @@ export class MongoEventStore implements EventStore {
     }
 
     const at = this.#now();
+    const eventId = `evt_${sessionId}_${String(claimed.lastEventSequence)}`;
     const document: SessionEventDocument = {
+      eventId,
       sessionId,
       userId,
       sequence: claimed.lastEventSequence,
@@ -51,6 +55,8 @@ export class MongoEventStore implements EventStore {
       event,
       emittedAt: at,
       expiresAt: new Date(at.getTime() + EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1_000),
+      publishedAt: null,
+      publishAttempts: 0,
     };
 
     await sessionEventsCollection(this.#db).insertOne({ ...document });
@@ -79,6 +85,22 @@ export class MongoEventStore implements EventStore {
 
     return found?.lastEventSequence ?? 0;
   }
+
+  async pending(limit = REPLAY_PAGE_SIZE): Promise<SessionEventEnvelope[]> {
+    const documents = await sessionEventsCollection(this.#db)
+      .find({ publishedAt: null, eventId: { $exists: true } })
+      .sort({ sessionId: 1, sequence: 1 })
+      .limit(limit)
+      .toArray();
+    return documents.map(toEventEnvelope);
+  }
+
+  async markPublished(eventId: string): Promise<void> {
+    await sessionEventsCollection(this.#db).updateOne(
+      { eventId, publishedAt: null },
+      { $set: { publishedAt: this.#now() }, $inc: { publishAttempts: 1 } },
+    );
+  }
 }
 
 export class InMemoryEventStore implements EventStore {
@@ -101,7 +123,9 @@ export class InMemoryEventStore implements EventStore {
     this.#sequences.set(sessionId, sequence);
 
     const at = this.#now();
+    const eventId = `evt_${sessionId}_${String(sequence)}`;
     const document: SessionEventDocument = {
+      eventId,
       sessionId,
       userId,
       sequence,
@@ -109,6 +133,8 @@ export class InMemoryEventStore implements EventStore {
       event,
       emittedAt: at,
       expiresAt: new Date(at.getTime() + EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1_000),
+      publishedAt: null,
+      publishAttempts: 0,
     };
 
     this.documents.push(document);
@@ -131,5 +157,25 @@ export class InMemoryEventStore implements EventStore {
 
   async lastSequence(sessionId: string): Promise<number> {
     return Promise.resolve(this.#sequences.get(sessionId) ?? 0);
+  }
+
+  async pending(limit = REPLAY_PAGE_SIZE): Promise<SessionEventEnvelope[]> {
+    return this.documents
+      .filter((one) => one.publishedAt == null)
+      .sort((left, right) => left.sessionId.localeCompare(right.sessionId) || left.sequence - right.sequence)
+      .slice(0, limit)
+      .map(toEventEnvelope);
+  }
+
+  async markPublished(eventId: string): Promise<void> {
+    const envelope = (await this.pending(this.documents.length)).find((one) => one.eventId === eventId);
+    if (envelope === undefined) return;
+    const document = this.documents.find(
+      (one) => one.sessionId === envelope.sessionId && one.sequence === envelope.sequence,
+    );
+    if (document !== undefined) {
+      document.publishedAt = this.#now();
+      document.publishAttempts = (document.publishAttempts ?? 0) + 1;
+    }
   }
 }

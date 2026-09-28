@@ -4,6 +4,7 @@ import {
   type ToolInvocation,
   type ToolName,
   type ToolOutcome,
+  type AgentPhase,
 } from '@nimbus/contracts';
 
 import { EXECUTE_LIMITS } from './limits.js';
@@ -36,6 +37,7 @@ export interface ActionReporter {
   output(chunk: ReportedChunk): Promise<void>;
   completed(completion: ReportedCompletion): Promise<void>;
   said(message: SaidMessage): Promise<void>;
+  phase?(phase: AgentPhase, activity: string | null, step: number): Promise<void>;
 }
 
 export function chunkOutput(

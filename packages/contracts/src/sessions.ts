@@ -13,7 +13,20 @@ import {
 } from './ids.js';
 import { LIMITS } from './limits.js';
 import { PullRequestResultSchema } from './pull-request.js';
-import { CheckResultSchema, FileChangeSchema } from './tools.js';
+import {
+  CheckResultSchema,
+  CommandDescriptorSchema,
+  FileChangeSchema,
+  ToolNameSchema,
+  ToolOutcomeSchema,
+  WorkspacePathSchema,
+} from './tools.js';
+import {
+  DeliveryStageSchema,
+  PatchReviewSchema,
+  ReliableAgentPhaseSchema,
+  WorkspaceRevisionSchema,
+} from './reliability.js';
 
 export const SESSION_STATUSES = [
   'ready',
@@ -153,6 +166,20 @@ export const SessionProgressSchema = z.strictObject({
   step: z.int().nonnegative(),
   maxSteps: z.int().positive(),
   currentActivity: z.string().max(LIMITS.summaryMaxChars).nullable(),
+  phase: ReliableAgentPhaseSchema.nullable().default(null),
+  completedPhases: z.array(ReliableAgentPhaseSchema).max(12).default([]),
+  remainingPhases: z.array(ReliableAgentPhaseSchema).max(12).default([]),
+});
+
+export const SessionToolRunSchema = z.strictObject({
+  toolCallId: z.string().min(1).max(64),
+  tool: ToolNameSchema,
+  outcome: ToolOutcomeSchema.nullable(),
+  summary: z.string().min(1).max(LIMITS.summaryMaxChars),
+  paths: z.array(WorkspacePathSchema).max(LIMITS.maxFilesListed),
+  startedAt: IsoTimestampSchema,
+  durationMs: z.int().nonnegative().nullable(),
+  command: CommandDescriptorSchema.nullable(),
 });
 
 export const SessionDetailSchema = SessionSummarySchema.extend({
@@ -163,8 +190,12 @@ export const SessionDetailSchema = SessionSummarySchema.extend({
   progress: SessionProgressSchema,
   filesChanged: z.array(FileChangeSchema).max(LIMITS.maxChangedFiles),
   checks: z.array(CheckResultSchema).max(LIMITS.maxChecksPerSession),
+  toolRuns: z.array(SessionToolRunSchema).max(200).default([]),
   approvals: z.array(ApprovalRecordSchema).max(50),
   failure: SessionFailureSchema.nullable(),
+  workspaceRevision: WorkspaceRevisionSchema.nullable().default(null),
+  review: PatchReviewSchema.nullable().default(null),
+  deliveryStage: DeliveryStageSchema.default('not_started'),
 });
 
 export const SessionListResponseSchema = z.strictObject({
@@ -206,6 +237,7 @@ export type RunStatus = z.infer<typeof RunStatusSchema>;
 export type DeliveryStatus = z.infer<typeof DeliveryStatusSchema>;
 export type ManualPrState = z.infer<typeof ManualPrStateSchema>;
 export type SetPullRequestStateBody = z.infer<typeof SetPullRequestStateBodySchema>;
+export type SessionToolRun = z.infer<typeof SessionToolRunSchema>;
 export type FailureCode = z.infer<typeof FailureCodeSchema>;
 export type SessionFailure = z.infer<typeof SessionFailureSchema>;
 export type ModelSelection = z.infer<typeof ModelSelectionSchema>;

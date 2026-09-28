@@ -93,13 +93,13 @@ describe('file changes', () => {
 
 describe('check results', () => {
   it('accepts each defined status', () => {
-    for (const status of ['passed', 'failed', 'errored', 'not_run']) {
+    for (const status of ['passed', 'failed', 'errored', 'not_run', 'skipped']) {
       expect(CheckResultSchema.safeParse({ ...checkResultFixture(), status }).success).toBe(true);
     }
   });
 
   it('rejects a status invented to look successful', () => {
-    for (const status of ['skipped', 'ok', 'green', 'ignored']) {
+    for (const status of ['ok', 'green', 'ignored']) {
       expect(CheckResultSchema.safeParse({ ...checkResultFixture(), status }).success).toBe(false);
     }
   });

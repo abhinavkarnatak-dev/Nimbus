@@ -138,7 +138,8 @@ describe('assertWithinSize', () => {
 
 describe('assertStorable', () => {
   it('returns the bytes for a state it accepts', () => {
-    expect(JSON.parse(assertStorable(sampleState()))).toEqual(sampleState());
+    const state = sampleState();
+    expect(JSON.parse(assertStorable(state))).toEqual(state);
   });
 
   it('refuses a forbidden field before it looks at anything else', () => {

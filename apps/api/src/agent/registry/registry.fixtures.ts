@@ -63,7 +63,7 @@ export const VALID_INPUT: Readonly<Record<string, unknown>> = {
   create_file: { path: 'src/new.ts', contents: 'export const a = 1;\n' },
   apply_patch: { patch: 'diff --git a/x b/x\n' },
   run_command: { argv: ['git', 'status'] },
-  run_checks: { name: 'tests', kind: 'test', argv: ['vitest', 'run'] },
+  run_checks: { checkId: 'syntax:typescript:src/greet.ts' },
   git_status: {},
   prepare_commit: { summary: 'made a change' },
   message_user: { text: 'looking at the login code' },

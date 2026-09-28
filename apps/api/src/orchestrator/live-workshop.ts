@@ -146,6 +146,7 @@ export class LiveSessionWorkshop implements SessionWorkshop {
 
     const attached = await this.#attached(session, router);
     const reviewComments = await this.#reviewComments(session, readToken);
+    const reporting = this.#reporting(session);
 
     return {
       installationId,
@@ -166,7 +167,7 @@ export class LiveSessionWorkshop implements SessionWorkshop {
             logger: this.#options.logger,
           }),
           logger: this.#options.logger,
-          ...this.#reporting(session),
+          ...reporting,
         }),
         source: new GitHubRepositorySource({ logger: this.#options.logger }),
         reference: {
@@ -178,6 +179,7 @@ export class LiveSessionWorkshop implements SessionWorkshop {
         logger: this.#options.logger,
         limits,
         signal: options.signal,
+        ...reporting,
         ...(reviewComments === null ? {} : { reviewComments }),
         ...this.#conversation(session),
         ...(this.#options.checkpointer === undefined
@@ -251,22 +253,23 @@ export class LiveSessionWorkshop implements SessionWorkshop {
   #reporting(session: SessionDocument): { reporter?: ActionReporter } {
     const reporters: ActionReporter[] = [];
 
+    // Durable state is always written before its corresponding live outbox event.
+    if (this.#options.records !== undefined) {
+      reporters.push(
+        new DurableProgressReporter({
+          records: this.#options.records,
+          sessionId: session.sessionId,
+          logger: this.#options.logger,
+        }),
+      );
+    }
+
     if (this.#options.events !== undefined) {
       reporters.push(
         new LiveActionReporter({
           events: this.#options.events,
           sessionId: session.sessionId,
           userId: session.userId,
-          logger: this.#options.logger,
-        }),
-      );
-    }
-
-    if (this.#options.records !== undefined) {
-      reporters.push(
-        new DurableProgressReporter({
-          records: this.#options.records,
-          sessionId: session.sessionId,
           logger: this.#options.logger,
         }),
       );

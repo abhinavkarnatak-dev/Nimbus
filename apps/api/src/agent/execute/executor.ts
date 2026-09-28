@@ -2,6 +2,7 @@ import {
   PolicyRecordSchema,
   ToolEventSummarySchema,
   ToolInvocationSchema,
+  type AgentState,
   type CheckResult,
   type OutputStream,
   type PolicyRecord,
@@ -19,6 +20,8 @@ import type { PolicyGate } from '../policy/policy.js';
 import type { ToolOutput } from '../registry/definition.js';
 import type { ToolRegistry } from '../registry/registry.js';
 import { EXECUTE_LIMITS } from './limits.js';
+import { semanticActionId } from '../reliability/semantic.js';
+import { resolvePlannedCheck } from '../verification/planner.js';
 import { chunkOutput, type ActionReporter } from './reporter.js';
 import {
   observeApprovalPause,
@@ -42,11 +45,13 @@ export interface ExecutionRequest {
   toolArguments: Record<string, unknown>;
   intent: string;
   signal?: AbortSignal;
+  state?: AgentState;
 }
 
 export interface ExecutionResult {
   status: ExecutionStatus;
   actionHash: string;
+  semanticId: string;
   durationMs: number;
   policy: PolicyRecord | null;
   observation: Observation;
@@ -101,9 +106,18 @@ export class ActionExecutor {
   }
 
   async execute(request: ExecutionRequest): Promise<ExecutionResult> {
-    const action = { tool: request.tool, input: request.toolArguments };
+    const action = {
+      tool: request.tool,
+      input: request.toolArguments,
+      ...(request.state === undefined
+        ? {}
+        : { workspaceRevision: request.state.workspaceRevision.number }),
+    };
     const hash = this.#policy.hashOf(action);
-    const checked = this.#registry.check(request.tool, request.toolArguments);
+    const checked =
+      request.state === undefined
+        ? this.#registry.check(request.tool, request.toolArguments)
+        : this.#registry.checkEligible(request.state, request.tool, request.toolArguments);
 
     if (!checked.ok) {
       return await this.#finish(request, hash, {
@@ -149,6 +163,7 @@ export class ActionExecutor {
       toolCallId: request.toolCallId,
       tool: request.tool,
       input: request.toolArguments,
+      ...(request.state === undefined ? {} : { state: request.state }),
       ...(request.signal === undefined ? {} : { signal: request.signal }),
     });
 
@@ -192,12 +207,47 @@ export class ActionExecutor {
 
     const summary = shorten(redactSecrets(request.intent));
 
+    const directArgv = Array.isArray(request.toolArguments['argv'])
+      ? request.toolArguments['argv'].filter((one): one is string => typeof one === 'string')
+      : [];
+    const planned =
+      request.tool === 'run_checks' &&
+      request.state !== undefined &&
+      typeof request.toolArguments['checkId'] === 'string'
+        ? resolvePlannedCheck(
+            request.state.repositoryProfile,
+            request.toolArguments['checkId'],
+            request.state.filesChanged,
+          )
+        : null;
+    const argv = planned?.argv ?? directArgv;
+    const display = argv
+      .map((part) => (/^[A-Za-z0-9_./:@+-]+$/.test(part) ? part : JSON.stringify(part)))
+      .join(' ');
     const invocation = ToolInvocationSchema.parse({
       toolCallId: request.toolCallId,
       tool: request.tool,
       summary: summary === '' ? `${request.tool} is running` : summary,
       paths: [],
       startedAt: new Date(this.#now()).toISOString(),
+      ...(request.state === undefined
+        ? {}
+        : {
+            phase: request.state.phase,
+            workspaceRevision: request.state.workspaceRevision.number,
+          }),
+      ...(argv.length === 0
+        ? {}
+        : {
+            command: {
+              executable: argv[0],
+              args: argv.slice(1),
+              workingDirectory: planned?.cwd ?? '.',
+              purpose: planned?.name ?? summary,
+              source: 'repository',
+              display,
+            },
+          }),
     });
 
     await this.#safely(async () => {
@@ -324,6 +374,10 @@ export class ActionExecutor {
     return {
       status: parts.status,
       actionHash,
+      semanticId:
+        request.state === undefined
+          ? actionHash
+          : semanticActionId(request.tool, request.toolArguments, request.state.workspaceRevision),
       durationMs,
       policy: parts.policy,
       observation: parts.observation,

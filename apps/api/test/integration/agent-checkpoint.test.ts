@@ -51,7 +51,7 @@ function buildGraph(checkpointer: MongoCheckpointSaver) {
   return new StateGraph(AgentAnnotation)
     .addNode('work', (current) => ({
       state: recordFileRead(
-        withPhase(current.state, 'executing'),
+        withPhase(current.state, 'investigating'),
         `src/step${String(current.state.filesRead.length)}.ts`,
       ),
     }))

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 import type { BaseCheckpointSaver } from '@langchain/langgraph';
 import type {
@@ -13,6 +15,7 @@ import type { SessionRouter } from '../../routing/router.js';
 import type { Sandbox } from '../../sandbox/index.js';
 import type { RepositoryReference, RepositorySource } from '../clone/index.js';
 import { actionFingerprint, type ActionExecutor } from '../execute/executor.js';
+import { EXECUTE_LIMITS } from '../execute/limits.js';
 import {
   RunGuard,
   applyExecution,
@@ -29,6 +32,13 @@ import type { PatchCaps } from '../../config/limits.js';
 import { judgeCompletion } from './complete.js';
 import { GRAPH_LIMITS } from './limits.js';
 import { preparePatch, type PreparedPatch } from './patch.js';
+import { buildRepositoryProfile } from '../profile/repository-profile.js';
+import { discoverSandboxCapabilities } from '../../sandbox/capabilities.js';
+import { createChangePlan } from '../planning/plan.js';
+import { currentWorkspaceRevision } from '../reliability/workspace.js';
+import { plannedChecks } from '../verification/planner.js';
+import { independentReview } from '../review/review.js';
+import type { ActionReporter } from '../execute/reporter.js';
 
 export interface ConversationSource {
   latest(): Promise<readonly SessionMessage[]>;
@@ -50,6 +60,7 @@ export interface RunInput {
   checkpointer?: BaseCheckpointSaver;
   limits?: PatchCaps;
   signal?: AbortSignal;
+  reporter?: ActionReporter;
 }
 
 export interface RunResult {
@@ -98,39 +109,31 @@ function checkedSinceLastEdit(state: AgentState): boolean {
   return lastCheck > lastEdit;
 }
 
-function automaticExampleCheck(
-  state: AgentState,
-): { argv: string[]; name: string; kind: 'test' | 'typecheck' } | null {
-  const last = state.toolEvents.at(-1);
+function fallbackCheckId(state: AgentState): string | null {
   const path = state.filesChanged.at(-1);
-  if (
-    last === undefined ||
-    !['create_file', 'apply_patch'].includes(last.tool) ||
-    path === undefined ||
-    checkedSinceLastEdit(state) ||
-    !/\b(simple|basic|example)\b/i.test(state.task)
-  )
-    return null;
-
-  if (/\.(?:c|cc|cpp|cxx)$/i.test(path)) {
-    return {
-      name: 'C++ syntax check',
-      kind: 'test',
-      argv: ['g++', '-std=c++17', '-fsyntax-only', path],
-    };
-  }
-  if (/\.py$/i.test(path)) {
-    return {
-      name: 'Python syntax check',
-      kind: 'typecheck',
-      argv: ['python', '-B', '-m', 'py_compile', path],
-    };
-  }
+  if (path === undefined) return null;
+  if (/\.tsx?$/i.test(path)) return `syntax:typescript:${path}`;
+  if (/\.jsx?$/i.test(path)) return `syntax:javascript:${path}`;
+  if (/\.py$/i.test(path)) return `syntax:python:${path}`;
+  if (/\.c$/i.test(path)) return `syntax:c:${path}`;
+  if (/\.(?:cc|cpp|cxx)$/i.test(path)) return `syntax:cpp:${path}`;
+  if (/\.go$/i.test(path)) return `syntax:go:${path}`;
+  if (/\.rs$/i.test(path)) return `syntax:rust:${path}`;
+  if (/\.java$/i.test(path)) return `syntax:java:${path}`;
+  if (/\.cs$/i.test(path)) return `syntax:csharp:${path}`;
   return null;
 }
 
 export function buildAgentGraph(input: RunInput) {
   const guard = new RunGuard();
+  let lastPhase = '';
+  let lastActivity: string | null = null;
+  const announce = async (state: AgentState): Promise<void> => {
+    if (state.phase === lastPhase && state.activity === lastActivity) return;
+    lastPhase = state.phase;
+    lastActivity = state.activity;
+    await input.reporter?.phase?.(state.phase, state.activity, state.budgets.steps);
+  };
 
   const spent = (state: AgentState): AgentState =>
     parseState({
@@ -139,39 +142,67 @@ export function buildAgentGraph(input: RunInput) {
     });
 
   const clone = async (current: Carried): Promise<Partial<Carried>> => {
+    await announce(current.state);
     if (current.cloned > 0) {
       return {};
     }
 
     const result = await input.source.cloneInto(input.sandbox, input.reference);
+    const repositoryProfile = await buildRepositoryProfile(
+      input.sandbox,
+      current.state.baseCommitSha,
+    );
+    const sandboxCapabilities = await discoverSandboxCapabilities(input.sandbox);
+    const workspaceRevision = await currentWorkspaceRevision(
+      input.sandbox,
+      current.state.baseCommitSha,
+      current.state.workspaceRevision.number,
+    );
 
     return {
       cloned: result.paths.length,
       state: parseState({
         ...current.state,
         sandboxId: input.sandbox.sandboxId,
-        phase: 'clarifying',
+        phase: 'scoping',
+        activity: 'Scoping the request against the cloned repository',
+        repositoryProfile,
+        sandboxCapabilities,
+        workspaceRevision,
       }),
     };
   };
 
   const scope = async (current: Carried): Promise<Partial<Carried>> => {
+    await announce(current.state);
     if (current.state.clarificationAnswer !== null) {
       return {
         state: spent(
           parseState({
             ...current.state,
             clarificationQuestion: null,
-            phase: 'retrieving',
+            phase: 'planning',
+            activity: 'Building a typed plan from repository evidence',
           }),
         ),
       };
     }
 
-    const verdict = await validateScope(current.state, { router: input.router });
+    const verdict = await validateScope(current.state, {
+      router: input.router,
+      context: current.context,
+    });
 
     if (verdict.outcome !== 'needs_clarification') {
-      return { state: spent(withPhase(current.state, 'retrieving')) };
+      return {
+        state: spent(
+          parseState({
+            ...current.state,
+            phase: 'planning',
+            activity: 'Building a typed plan from repository evidence',
+          }),
+        ),
+      };
     }
 
     return {
@@ -179,7 +210,7 @@ export function buildAgentGraph(input: RunInput) {
       state: spent(
         parseState({
           ...current.state,
-          phase: 'clarifying',
+          phase: 'awaiting_clarification',
           clarificationQuestion: verdict.question,
         }),
       ),
@@ -187,6 +218,7 @@ export function buildAgentGraph(input: RunInput) {
   };
 
   const retrieve = async (current: Carried): Promise<Partial<Carried>> => {
+    await announce(current.state);
     const gathered = await gatherContext({
       state: current.state,
       source: input.sandbox,
@@ -197,50 +229,124 @@ export function buildAgentGraph(input: RunInput) {
     return {
       context: gathered.context,
       state: parseState({
-        ...withPhase(current.state, 'reasoning'),
+        ...withPhase(current.state, 'investigating'),
         retrieved: gathered.retrieved.slice(0, 20),
+        activity: 'Inspecting repository structure and relevant code before deciding what to ask',
+        evidence: [
+          ...current.state.evidence,
+          ...gathered.retrieved.slice(0, 20).map((file) => {
+            const contentHash = createHash('sha256').update(file.snippet).digest('hex');
+            return {
+              evidenceId: `ev_${contentHash.slice(0, 24)}`,
+              kind: 'file_content' as const,
+              title: `${file.path}:${String(file.startLine)}-${String(file.endLine)}`,
+              summary: 'Retrieved repository content relevant to the task.',
+              paths: [file.path],
+              revision: current.state.workspaceRevision,
+              contentHash,
+              createdAt: new Date().toISOString(),
+              current: true,
+            };
+          }),
+        ].slice(-300),
       }),
     };
   };
 
   const reason = async (current: Carried): Promise<Partial<Carried>> => {
+    await announce(current.state);
     const before = guard.beforeStep(current.state, Date.now(), input.signal?.aborted === true);
 
     if (before.stop) {
       return { done: true, verdict: before, state: stopWith(current.state, before) };
     }
 
-    const completion = judgeCompletion(current.state);
-
-    if (completion.finished) {
+    if (current.state.taskSpec.mode === 'code_change' && current.state.plan === null) {
       return {
-        state: spent(
+        state: withPhase(
           parseState({
             ...current.state,
-            proposedAction: {
-              tool: 'prepare_commit',
-              reason:
-                'The requested files are changed and the recorded checks passed, so I am packaging the patch for review.',
-              argumentsJson: JSON.stringify({ summary: current.state.task.slice(0, 400) }),
-              actionHash: '0'.repeat(64),
-            },
+            plan: createChangePlan(current.state),
+            activity: 'Implementing the approved change plan',
           }),
+          'implementing',
         ),
       };
     }
 
-    const check = automaticExampleCheck(current.state);
-    if (check !== null) {
+    if (
+      current.state.taskSpec.mode === 'code_change' &&
+      current.state.filesChanged.length > 0 &&
+      !checkedSinceLastEdit(current.state)
+    ) {
+      const checkId =
+        (current.state.repositoryProfile === null
+          ? undefined
+          : plannedChecks(current.state.repositoryProfile, current.state.filesChanged)[0]
+              ?.checkId) ?? fallbackCheckId(current.state);
+
+      if (checkId === null) {
+        return {
+          done: true,
+          verdict: {
+            stop: true,
+            reason: 'failed',
+            detail: 'no trusted verification fallback exists',
+          },
+          state: stopped(current.state, 'failed'),
+        };
+      }
       return {
         state: parseState({
-          ...current.state,
+          ...withPhase(current.state, 'verifying'),
+          activity: 'Running trusted verification for the current revision',
           proposedAction: {
             tool: 'run_checks',
-            reason:
-              'The requested example was created. Running its syntax check before packaging the change.',
-            argumentsJson: JSON.stringify(check),
+            reason: 'Running a trusted repository or language check for the current revision.',
+            arguments: { checkId },
             actionHash: '0'.repeat(64),
           },
+        }),
+      };
+    }
+
+    if (
+      current.state.taskSpec.mode === 'code_change' &&
+      current.state.filesChanged.length > 0 &&
+      checkedSinceLastEdit(current.state) &&
+      current.state.checks.every(
+        (check) => !['failed', 'errored', 'blocked', 'timed_out'].includes(check.status),
+      )
+    ) {
+      const criterionEvidence = current.state.checks
+        .map((check) => check.checkId)
+        .filter((one): one is string => one !== undefined);
+      return {
+        state: parseState({
+          ...withPhase(current.state, 'reviewing'),
+          activity: 'Reviewing the final diff independently',
+          taskSpec: {
+            ...current.state.taskSpec,
+            acceptanceCriteria: current.state.taskSpec.acceptanceCriteria.map((criterion) => ({
+              ...criterion,
+              status: 'satisfied' as const,
+              evidenceIds: [...new Set([...criterion.evidenceIds, ...criterionEvidence])],
+            })),
+          },
+        }),
+      };
+    }
+
+    if (
+      current.state.phase === 'verifying' &&
+      current.state.checks.some((check) =>
+        ['failed', 'errored', 'blocked', 'timed_out'].includes(check.status),
+      )
+    ) {
+      return {
+        state: parseState({
+          ...withPhase(current.state, 'implementing'),
+          activity: 'Diagnosing the classified verification failure',
         }),
       };
     }
@@ -256,6 +362,8 @@ export function buildAgentGraph(input: RunInput) {
     });
 
     if (!chosen.accepted) {
+      const blockedHash = actionFingerprint(chosen.action.tool, chosen.action.toolArguments);
+      const blockedSeen = guard.blockRepeat(blockedHash);
       const refused = recordToolEvent(current.state, {
         step: current.state.budgets.steps,
         tool: 'message_user',
@@ -266,6 +374,15 @@ export function buildAgentGraph(input: RunInput) {
         ),
         atMs: Date.now(),
       });
+
+      if (blockedSeen >= EXECUTE_LIMITS.sameActionFailuresMax) {
+        const verdict: StopVerdict = {
+          stop: true,
+          reason: 'repeated_action',
+          detail: `${chosen.action.tool} remained ineligible after ${String(blockedSeen)} attempts`,
+        };
+        return { done: true, verdict, state: stopWith(refused, verdict) };
+      }
 
       return {
         state: spent(refused),
@@ -280,8 +397,13 @@ export function buildAgentGraph(input: RunInput) {
           proposedAction: {
             tool: chosen.action.tool,
             reason: chosen.action.intent,
-            argumentsJson: JSON.stringify(chosen.action.toolArguments),
+            arguments: chosen.action.toolArguments,
             actionHash: '0'.repeat(64),
+          },
+          activity: chosen.action.intent,
+          phaseBudget: {
+            ...current.state.phaseBudget,
+            modelCalls: current.state.phaseBudget.modelCalls + 1,
           },
         }),
       ),
@@ -289,13 +411,14 @@ export function buildAgentGraph(input: RunInput) {
   };
 
   const execute = async (current: Carried): Promise<Partial<Carried>> => {
+    await announce(current.state);
     const proposed = current.state.proposedAction;
 
     if (proposed === null) {
       return {};
     }
 
-    const toolArguments = JSON.parse(proposed.argumentsJson) as Record<string, unknown>;
+    const toolArguments = proposed.arguments;
     const actionHash = actionFingerprint(proposed.tool, toolArguments);
 
     if (proposed.tool === 'run_checks' && checkedSinceLastEdit(current.state)) {
@@ -304,7 +427,7 @@ export function buildAgentGraph(input: RunInput) {
           ...current.history,
           'Blocked before running: a check has already run since the last edit. Read and fix a failed check, or package the patch when the recorded check passed. Do not run another check without a new edit.',
         ],
-        state: parseState({ ...current.state, proposedAction: null, phase: 'reasoning' }),
+        state: parseState({ ...current.state, proposedAction: null, phase: 'implementing' }),
       };
     }
 
@@ -317,7 +440,7 @@ export function buildAgentGraph(input: RunInput) {
             ...current.history,
             `Blocked before running: prepare_commit is only allowed after the requested files are changed and every recorded check has passed. ${completion.reason}`,
           ],
-          state: parseState({ ...current.state, proposedAction: null, phase: 'reasoning' }),
+          state: parseState({ ...current.state, proposedAction: null, phase: 'implementing' }),
         };
       }
     }
@@ -330,7 +453,7 @@ export function buildAgentGraph(input: RunInput) {
             ...current.history,
             `Blocked before finishing: a changed repository cannot be reported as successful yet. ${completion.reason}`,
           ],
-          state: parseState({ ...current.state, proposedAction: null, phase: 'reasoning' }),
+          state: parseState({ ...current.state, proposedAction: null, phase: 'implementing' }),
         };
       }
     }
@@ -352,7 +475,7 @@ export function buildAgentGraph(input: RunInput) {
 
       return {
         history,
-        state: parseState({ ...current.state, proposedAction: null, phase: 'reasoning' }),
+        state: parseState({ ...current.state, proposedAction: null, phase: 'implementing' }),
       };
     }
 
@@ -362,10 +485,90 @@ export function buildAgentGraph(input: RunInput) {
       tool: proposed.tool,
       toolArguments,
       intent: proposed.reason,
+      state: current.state,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
 
     let next = applyExecution(current.state, result);
+
+    if (
+      result.status === 'executed' &&
+      result.event.outcome === 'ok' &&
+      (proposed.tool === 'apply_patch' || proposed.tool === 'create_file')
+    ) {
+      const candidate = await currentWorkspaceRevision(
+        input.sandbox,
+        current.state.baseCommitSha,
+        current.state.workspaceRevision.number + 1,
+      );
+      if (candidate.treeHash !== current.state.workspaceRevision.treeHash) {
+        const evidenceId = `ev_${candidate.treeHash.slice(0, 24)}`;
+        next = parseState({
+          ...next,
+          workspaceRevision: candidate,
+          checks: next.checks,
+          review: null,
+          evidence: [
+            ...next.evidence.map((one) => ({ ...one, current: false })),
+            {
+              evidenceId,
+              kind: 'edit',
+              title: `Workspace revision ${String(candidate.number)}`,
+              summary: result.observation.summary,
+              paths: result.paths,
+              revision: candidate,
+              contentHash: candidate.treeHash,
+              createdAt: new Date().toISOString(),
+              current: true,
+            },
+          ].slice(-300),
+        });
+      }
+    } else if (
+      result.status === 'executed' &&
+      result.event.outcome === 'ok' &&
+      result.paths.length > 0
+    ) {
+      const contentHash = createHash('sha256').update(result.observation.text).digest('hex');
+      next = parseState({
+        ...next,
+        evidence: [
+          ...next.evidence,
+          {
+            evidenceId: `ev_${contentHash.slice(0, 24)}`,
+            kind: proposed.tool === 'read_file' ? 'file_content' : 'search',
+            title: result.observation.summary || proposed.tool,
+            summary: result.observation.summary,
+            paths: result.paths,
+            revision: next.workspaceRevision,
+            contentHash,
+            createdAt: new Date().toISOString(),
+            current: true,
+          },
+        ].slice(-300),
+      });
+    }
+
+    if (result.check !== null) {
+      const checkHash = createHash('sha256').update(JSON.stringify(result.check)).digest('hex');
+      next = parseState({
+        ...next,
+        evidence: [
+          ...next.evidence,
+          {
+            evidenceId: `ev_${checkHash.slice(0, 24)}`,
+            kind: 'check',
+            title: result.check.name,
+            summary: result.check.summary,
+            paths: result.check.scope ?? [],
+            revision: next.workspaceRevision,
+            contentHash: checkHash,
+            createdAt: new Date().toISOString(),
+            current: true,
+          },
+        ].slice(-300),
+      });
+    }
 
     if (result.pause === 'clarification' && result.userMessage !== null) {
       next = parseState({ ...next, clarificationQuestion: result.userMessage });
@@ -383,7 +586,39 @@ export function buildAgentGraph(input: RunInput) {
     ];
 
     if (result.status === 'executed' && proposed.tool === 'finish_task') {
-      return { done: true, history, state: stopped(next, 'completed') };
+      const completed = parseState({
+        ...next,
+        taskSpec: {
+          ...next.taskSpec,
+          acceptanceCriteria: next.taskSpec.acceptanceCriteria.map((criterion) => ({
+            ...criterion,
+            status: 'satisfied' as const,
+            evidenceIds: next.evidence
+              .filter((one) => one.current)
+              .map((one) => one.evidenceId)
+              .slice(-40),
+          })),
+        },
+      });
+      if (
+        completed.filesChanged.length === 0 &&
+        completed.filesRead.length > 0 &&
+        completed.evidence.some(
+          (evidence) =>
+            evidence.current &&
+            evidence.kind === 'file_content' &&
+            evidence.revision.treeHash === completed.workspaceRevision.treeHash,
+        )
+      ) {
+        return { done: true, history, state: stopped(completed, 'completed') };
+      }
+      const gate = judgeCompletion(completed);
+      return gate.finished
+        ? { done: true, history, state: stopped(completed, 'completed') }
+        : {
+            history: [...history, `Completion gate refused: ${gate.reason}`],
+            state: parseState({ ...completed, proposedAction: null, phase: 'planning' }),
+          };
     }
 
     if (after.stop) {
@@ -394,18 +629,45 @@ export function buildAgentGraph(input: RunInput) {
       return { done: true, history, state: next };
     }
 
-    if (result.status === 'executed' && proposed.tool === 'prepare_commit') {
-      return { history, state: withPhase(next, 'preparing_patch') };
-    }
     return { history, state: next };
   };
 
+  const review = async (current: Carried): Promise<Partial<Carried>> => {
+    await announce(current.state);
+    const prepared = await preparePatch({
+      state: current.state,
+      sandbox: input.sandbox,
+      logger: input.logger,
+      ...(input.limits === undefined ? {} : { limits: input.limits }),
+    });
+    const reviewResult = independentReview(current.state, prepared);
+    const reviewed = parseState({ ...current.state, review: reviewResult });
+
+    if (reviewResult.verdict !== 'accepted') {
+      return {
+        done: true,
+        patch: prepared,
+        state: stopped(reviewed, 'failed'),
+        verdict: { stop: true, reason: 'failed', detail: reviewResult.summary },
+      };
+    }
+    return {
+      patch: prepared,
+      state: parseState({
+        ...withPhase(reviewed, 'packaging'),
+        activity: 'Validating and packaging the reviewed patch',
+      }),
+    };
+  };
+
   const complete = async (current: Carried): Promise<Partial<Carried>> => {
+    await announce(current.state);
     const verdict = judgeCompletion(current.state);
 
     if (!verdict.finished) {
       return await Promise.resolve({
-        state: withPhase(current.state, 'reasoning'),
+        state: stopped(current.state, 'failed'),
+        done: true,
         history: [...current.history, `not finished: ${verdict.reason}`],
       });
     }
@@ -426,15 +688,23 @@ export function buildAgentGraph(input: RunInput) {
       };
     }
 
-    return { done: true, patch: prepared, state: stopped(current.state, 'completed') };
+    return {
+      done: true,
+      patch: prepared,
+      state: stopped(
+        parseState({ ...current.state, deliveryStage: 'patch_validated' }),
+        'completed',
+      ),
+    };
   };
 
-  const afterScope = (current: Carried): string => (current.done ? END : 'retrieve');
+  const afterScope = (current: Carried): string => (current.done ? END : 'reason');
 
   const afterReason = (current: Carried): string => {
     if (current.done) {
       return END;
     }
+    if (current.state.phase === 'reviewing') return 'review';
     return current.state.proposedAction === null ? 'reason' : 'execute';
   };
 
@@ -442,8 +712,10 @@ export function buildAgentGraph(input: RunInput) {
     if (current.done) {
       return END;
     }
-    return current.state.phase === 'preparing_patch' ? 'complete' : 'reason';
+    return 'reason';
   };
+
+  const afterReview = (current: Carried): string => (current.done ? END : 'complete');
 
   const afterComplete = (current: Carried): string => (current.done ? END : 'reason');
 
@@ -453,13 +725,15 @@ export function buildAgentGraph(input: RunInput) {
     .addNode('retrieve', retrieve)
     .addNode('reason', reason)
     .addNode('execute', execute)
+    .addNode('review', review)
     .addNode('complete', complete)
     .addEdge(START, 'clone')
-    .addEdge('clone', 'scope')
-    .addConditionalEdges('scope', afterScope, [END, 'retrieve'])
-    .addEdge('retrieve', 'reason')
-    .addConditionalEdges('reason', afterReason, [END, 'reason', 'execute'])
-    .addConditionalEdges('execute', afterExecute, [END, 'reason', 'complete'])
+    .addEdge('clone', 'retrieve')
+    .addEdge('retrieve', 'scope')
+    .addConditionalEdges('scope', afterScope, [END, 'reason'])
+    .addConditionalEdges('reason', afterReason, [END, 'reason', 'execute', 'review'])
+    .addConditionalEdges('execute', afterExecute, [END, 'reason'])
+    .addConditionalEdges('review', afterReview, [END, 'complete'])
     .addConditionalEdges('complete', afterComplete, [END, 'reason']);
 
   return input.checkpointer === undefined

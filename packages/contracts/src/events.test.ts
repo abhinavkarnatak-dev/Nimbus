@@ -68,6 +68,32 @@ const eventByType = {
     failure: { code: 'CHECKS_FAILED', message: 'The test suite failed' },
   },
   'session.cancelled': { type: 'session.cancelled', cancelledAt: VALID_TIMESTAMP },
+  'agent.phase': {
+    type: 'agent.phase',
+    phase: 'investigating',
+    activity: 'Reading relevant code',
+    completedPhases: ['scoping'],
+    remainingPhases: ['planning', 'implementing', 'verifying', 'reviewing', 'packaging'],
+  },
+  'agent.activity': { type: 'agent.activity', activity: 'Reading relevant code', level: 'primary' },
+  'agent.progress': {
+    type: 'agent.progress',
+    progress: 'new_content',
+    summary: 'Found the relevant handler',
+    evidenceIds: [],
+  },
+  'review.updated': { type: 'review.updated', verdict: 'accepted', summary: 'Review passed' },
+  'delivery.updated': { type: 'delivery.updated', stage: 'not_started', summary: 'Not started' },
+  'clarification.required': {
+    type: 'clarification.required',
+    clarificationId: 'clr_0123456789',
+    question: 'Which behavior should be used?',
+    context: 'This changes observable behavior.',
+    options: [],
+    allowFreeText: true,
+    blockingCriterionIds: [],
+    expiresAt: VALID_TIMESTAMP,
+  },
 } as const satisfies Record<(typeof SERVER_EVENT_TYPES)[number], object>;
 
 const envelope = (event: unknown, overrides: Record<string, unknown> = {}) => ({
@@ -75,6 +101,14 @@ const envelope = (event: unknown, overrides: Record<string, unknown> = {}) => ({
   sequence: 1,
   sessionId: VALID_SESSION_ID,
   emittedAt: VALID_TIMESTAMP,
+  eventId: 'evt_0123456789',
+  runId: 'run_0123456789',
+  phase: 'investigating',
+  step: 1,
+  title: 'Agent progress',
+  detail: 'Reading relevant code',
+  relatedObjectIds: [],
+  workspaceRevision: null,
   event,
   ...overrides,
 });

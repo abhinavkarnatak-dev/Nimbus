@@ -26,7 +26,7 @@ export const NextActionSchema = z.strictObject({
 export const NextActionWireSchema = z.strictObject({
   intent: z.string().min(1).max(MAX_INTENT_CHARS),
   tool: ToolNameSchema,
-  toolArgumentsJson: z.string().max(MAX_ARGUMENTS_CHARS),
+  toolArguments: ToolArgumentsSchema,
 });
 
 export const SCOPE_OUTCOMES = ['clear', 'needs_clarification', 'already_asked'] as const;
