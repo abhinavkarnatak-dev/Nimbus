@@ -32,12 +32,17 @@ interface PendingLogin {
   reject: (error: Error) => void;
 }
 
-const DEVICE_URL = /https:\/\/auth\.openai\.com\/codex\/device(?:[/?][^\s)]+)?/i;
+const DEVICE_URL = /https:\/\/auth\.openai\.com\/codex\/device\b/i;
 const DEVICE_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/i;
 const ANSI_ESCAPE = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, 'g');
+const ESCAPED_ANSI_ESCAPE = /\\u001b\[[0-?]*[ -/]*[@-~]/gi;
+const LITERAL_HEX_ANSI_ESCAPE = /\\x1b\[[0-?]*[ -/]*[@-~]/gi;
 
 export function parseDeviceChallenge(output: string): DeviceAuthChallenge | null {
-  const clean = output.replace(ANSI_ESCAPE, '');
+  const clean = output
+    .replace(ANSI_ESCAPE, '')
+    .replace(ESCAPED_ANSI_ESCAPE, '')
+    .replace(LITERAL_HEX_ANSI_ESCAPE, '');
   if (DEVICE_URL.exec(clean) === null) return null;
   const code = DEVICE_CODE.exec(clean)?.[0];
   if (code === undefined) return null;
@@ -73,7 +78,9 @@ export class CodexAuthService implements CodexProviderSource {
     this.#pending.set(userId, {
       process: child,
       cancelled: lifecycle,
-      reject: (error): void => { rejectPending?.(error); },
+      reject: (error): void => {
+        rejectPending?.(error);
+      },
     });
     let output = '';
     const challengePromise = new Promise<DeviceAuthChallenge>((resolve, reject) => {
