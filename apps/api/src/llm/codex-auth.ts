@@ -32,8 +32,15 @@ interface PendingLogin {
   reject: (error: Error) => void;
 }
 
-const URL = /https?:\/\/[^\s)]+/i;
-const CODE = /(?:code|user code|device code)\s*[:=]?\s*([A-Z0-9-]{4,})/i;
+const DEVICE_URL = /https:\/\/auth\.openai\.com\/codex\/device(?:[/?][^\s)]+)?/i;
+const DEVICE_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/i;
+
+export function parseDeviceChallenge(output: string): DeviceAuthChallenge | null {
+  if (DEVICE_URL.exec(output) === null) return null;
+  const code = DEVICE_CODE.exec(output)?.[0];
+  if (code === undefined) return null;
+  return { url: 'https://auth.openai.com/codex/device', code: code.toUpperCase(), expiresAt: null };
+}
 
 export class CodexAuthService implements CodexProviderSource {
   readonly #root: string;
@@ -72,10 +79,8 @@ export class CodexAuthService implements CodexProviderSource {
       const consume = (chunk: Buffer): void => {
         if (lifecycle.value) return;
         output += chunk.toString('utf8');
-        const url = URL.exec(output)?.[0];
-        const code = CODE.exec(output)?.[1] ?? /\b[A-Z0-9]{6,}\b/.exec(output)?.[0];
-        if (url !== undefined && code !== undefined) {
-          const challenge = { url, code, expiresAt: null };
+        const challenge = parseDeviceChallenge(output);
+        if (challenge !== null) {
           this.#active.set(userId, { process: child, challenge, cancelled: lifecycle });
           this.#pending.delete(userId);
           resolve(challenge);
