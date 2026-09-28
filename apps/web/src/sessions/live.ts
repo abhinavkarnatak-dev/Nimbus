@@ -9,6 +9,7 @@ import type {
   SessionMessage,
   SessionProgress,
   SessionStatus,
+  SessionEventEnvelope,
   RunStatus,
   DeliveryStatus,
   ToolName,
@@ -218,6 +219,33 @@ export function applyEvent(live: LiveSession, event: ServerEvent): LiveSession {
 
 export function applyEvents(live: LiveSession, events: readonly ServerEvent[]): LiveSession {
   return events.reduce(applyEvent, live);
+}
+
+const HISTORY_ONLY_EVENT_TYPES = new Set<ServerEvent['type']>([
+  'tool.started',
+  'tool.output',
+  'tool.completed',
+]);
+
+/**
+ * Session detail is the authoritative snapshot. Older events are replayed only
+ * to rebuild tool history, which is intentionally absent from that snapshot;
+ * newer events are applied in full to keep the selected session live.
+ */
+export function applySessionEvents(
+  live: LiveSession,
+  envelopes: readonly SessionEventEnvelope[],
+  snapshotSequence: number,
+): LiveSession {
+  return applyEvents(
+    live,
+    envelopes
+      .filter(
+        (envelope) =>
+          envelope.sequence > snapshotSequence || HISTORY_ONLY_EVENT_TYPES.has(envelope.event.type),
+      )
+      .map((envelope) => envelope.event),
+  );
 }
 
 export function outputLines(one: ToolRun): BoundedOutput {
