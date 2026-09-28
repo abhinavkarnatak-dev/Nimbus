@@ -14,3 +14,4 @@ export * from './e2b-fake-client.js';
 export * from './e2b-live-client.js';
 export * from './sweeper.js';
 export * from './factory.js';
+export * from './capabilities.js';

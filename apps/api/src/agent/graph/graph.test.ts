@@ -16,9 +16,7 @@ import { describeFailure, runAgent } from './run.js';
 const READ = action('read_file', { path: 'src/routing/redirect.ts' });
 const PATCH = action('apply_patch', { patch: REDIRECT_PATCH });
 const CHECKS = action('run_checks', {
-  name: 'unit tests',
-  kind: 'test',
-  argv: ['pnpm', 'test'],
+  checkId: 'syntax:typescript:src/routing/redirect.ts',
 });
 const COMMIT = action('prepare_commit', { summary: 'send people back where they came from' });
 const CURL = action('run_command', { argv: ['curl', 'https://collect.example.com/config'] });
@@ -44,7 +42,7 @@ describe('a whole run, with nobody calling a node by hand', () => {
 
     expect(result.cloned).toBeGreaterThan(0);
     expect(result.state.stopReason).toBe('completed');
-    expect(result.state.phase).toBe('finished');
+    expect(result.state.phase).toBe('completed');
     expect(result.patch).not.toBeNull();
   });
 
@@ -56,7 +54,7 @@ describe('a whole run, with nobody calling a node by hand', () => {
     const result = await runAgent(harness);
 
     expect(result.report?.decision).not.toBe('denied');
-    expect(result.report?.changedFiles).toBeGreaterThan(0);
+    expect(result.report?.files.length).toBeGreaterThan(0);
   });
 
   it('hands over only what changed, not the repository it cloned', async () => {
@@ -66,7 +64,7 @@ describe('a whole run, with nobody calling a node by hand', () => {
 
     const result = await runAgent(harness);
 
-    expect(result.report?.changedFiles).toBe(1);
+    expect(result.report?.files).toHaveLength(1);
     expect(result.patch?.patch).not.toContain('README.md');
     expect(result.patch?.patch).not.toContain('src/routing/login.ts');
   });
@@ -115,9 +113,8 @@ describe('a whole run, with nobody calling a node by hand', () => {
     await runAgent(harness);
 
     const secondAction = harness.text.calls[2];
-    const history = secondAction?.messages.find(
-      (message) =>
-        message.role === 'system' && message.content.startsWith('What has happened so far'),
+    const history = secondAction?.messages.find((message) =>
+      message.content.includes('README.md (file)'),
     );
 
     expect(history?.content).toContain('README.md (file)');
@@ -125,6 +122,23 @@ describe('a whole run, with nobody calling a node by hand', () => {
 });
 
 describe('a task nobody could act on', () => {
+  it('retrieves repository evidence before deciding whether to ask', async () => {
+    const harness = await graphHarness({
+      task: 'make the authentication flow nicer for users',
+      answers: [UNCLEAR],
+    });
+
+    await runAgent(harness);
+
+    const scopePrompt = harness.text.calls[0]?.messages
+      .map((message) => message.content)
+      .join('\n');
+    expect(scopePrompt).toContain('routing/');
+    expect(scopePrompt).toContain('login.ts');
+    expect(scopePrompt).toContain('auth/');
+    expect(scopePrompt).toContain('session.ts');
+  });
+
   it('asks one question and stops there', async () => {
     const harness = await graphHarness({
       task: 'make the authentication flow nicer for users',
@@ -133,7 +147,7 @@ describe('a task nobody could act on', () => {
 
     const result = await runAgent(harness);
 
-    expect(result.state.phase).toBe('clarifying');
+    expect(result.state.phase).toBe('awaiting_clarification');
     expect(result.state.clarificationQuestion).toBe(UNCLEAR.value.question);
     expect(result.patch).toBeNull();
   });
@@ -162,16 +176,79 @@ describe('a task nobody could act on', () => {
   });
 
   it('stops at a tool clarification instead of reasoning again', async () => {
-    const question = 'Which file should I change?';
+    const question = 'Should an invalid signature return 401 or 403?';
     const harness = await graphHarness({
       answers: [CLEAR_SCOPE, action('wait_for_user', { reason: 'clarification', question })],
     });
 
     const result = await runAgent(harness);
 
-    expect(result.state.phase).toBe('clarifying');
+    expect(result.state.phase).toBe('awaiting_clarification');
     expect(result.state.clarificationQuestion).toBe(question);
     expect(harness.text.calls).toHaveLength(2);
+  });
+
+  it('rejects a generic placement question and continues investigating', async () => {
+    const harness = await graphHarness({
+      budgets: { maxSteps: 1 },
+      answers: [
+        CLEAR_SCOPE,
+        action('wait_for_user', {
+          reason: 'clarification',
+          question: 'Which file should I change?',
+        }),
+        READ,
+      ],
+    });
+
+    const result = await runAgent(harness);
+
+    expect(result.state.clarificationQuestion).toBeNull();
+    expect(result.state.toolEvents.map((event) => event.tool)).toContain('read_file');
+  });
+
+  it('places a webhook validator beside the discovered handler without asking the user', async () => {
+    const validatorPath = 'src/webhooks/signature.ts';
+    const harness = await graphHarness({
+      task: 'create a file that validates webhook signatures',
+      files: {
+        'README.md': '# Webhook service\n',
+        'src/webhooks/handler.ts':
+          'export function receiveWebhook(body: string): string { return body; }\n',
+      },
+      answers: [
+        CLEAR_SCOPE,
+        action('wait_for_user', {
+          reason: 'clarification',
+          question: 'Which folder should I create the validator in?',
+        }),
+        action('create_file', {
+          path: validatorPath,
+          contents: [
+            "import { createHmac, timingSafeEqual } from 'node:crypto';",
+            '',
+            'export function hasValidWebhookSignature(body: string, signature: string, secret: string): boolean {',
+            "  const expected = createHmac('sha256', secret).update(body).digest('hex');",
+            '  const actualBytes = Buffer.from(signature);',
+            '  const expectedBytes = Buffer.from(expected);',
+            '  return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);',
+            '}',
+            '',
+          ].join('\n'),
+        }),
+      ],
+    });
+
+    const result = await runAgent(harness);
+
+    expect(result.state.stopReason).toBe('completed');
+    expect(result.state.clarificationQuestion).toBeNull();
+    expect(result.state.filesChanged).toContain(validatorPath);
+    expect(result.state.toolEvents.map((event) => event.tool)).not.toContain('wait_for_user');
+    expect(result.patch?.patch).toContain(`+++ b/${validatorPath}`);
+    expect(harness.text.calls[0]?.messages.map((message) => message.content).join('\n')).toContain(
+      'handler.ts',
+    );
   });
 });
 
@@ -192,7 +269,7 @@ describe('a requested change that is already present', () => {
     const result = await runAgent(harness);
 
     expect(result.state.stopReason).toBe('completed');
-    expect(result.state.phase).toBe('finished');
+    expect(result.state.phase).toBe('completed');
     expect(harness.text.calls).toHaveLength(3);
   });
 });
@@ -287,7 +364,11 @@ describe('a change that needs a person', () => {
 
   it('pauses on an ordinary source file that happens to handle sessions', async () => {
     const harness = await graphHarness({
-      answers: [CLEAR_SCOPE, action('apply_patch', { patch: SESSION_PATCH })],
+      answers: [
+        CLEAR_SCOPE,
+        action('read_file', { path: 'src/auth/session.ts' }),
+        action('apply_patch', { patch: SESSION_PATCH }),
+      ],
     });
 
     const result = await runAgent(harness);
@@ -355,9 +436,9 @@ describe('a model that will not converge', () => {
     expect(result.state.toolEvents.filter((event) => event.tool === 'read_file')).toHaveLength(1);
     expect(result.state.toolEvents.map((event) => event.tool)).toEqual([
       'read_file',
+      'message_user',
       'apply_patch',
       'run_checks',
-      'prepare_commit',
     ]);
   });
 
@@ -374,7 +455,6 @@ describe('a model that will not converge', () => {
       'read_file',
       'apply_patch',
       'run_checks',
-      'prepare_commit',
     ]);
   });
 
@@ -390,7 +470,6 @@ describe('a model that will not converge', () => {
       'read_file',
       'apply_patch',
       'run_checks',
-      'prepare_commit',
     ]);
   });
 
@@ -419,7 +498,7 @@ describe('finishing without having done anything', () => {
     expect(result.patch).toBeNull();
   });
 
-  it('refuses a commit when the checks were never run', async () => {
+  it('runs the required check automatically instead of allowing it to be skipped', async () => {
     const harness = await graphHarness({
       budgets: { maxSteps: 5 },
       answers: [CLEAR_SCOPE, PATCH, COMMIT, COMMIT, COMMIT, COMMIT],
@@ -427,7 +506,9 @@ describe('finishing without having done anything', () => {
 
     const result = await runAgent(harness);
 
-    expect(result.state.stopReason).not.toBe('completed');
+    expect(result.state.stopReason).toBe('completed');
+    expect(result.state.toolEvents.map((event) => event.tool)).toContain('run_checks');
+    expect(result.state.checks.every((check) => check.status === 'passed')).toBe(true);
   });
 });
 

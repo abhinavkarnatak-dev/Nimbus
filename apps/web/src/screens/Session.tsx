@@ -21,8 +21,8 @@ import {
   ChangesPane,
   ChecksPane,
   ProgressPane,
+  OverviewPane,
   PullRequestPane,
-  ShellPane,
 } from '../sessions/Panels.js';
 import { Rail } from '../sessions/Rail.js';
 import { RailToggle } from '../sessions/RailToggle.js';
@@ -60,7 +60,10 @@ function paneFor(
   prStates: Record<number, ManualPrState>,
   onPrState: (number: number, state: ManualPrState) => void,
 ): React.JSX.Element {
-  if (tab === 'progress') {
+  if (tab === 'overview') {
+    return <OverviewPane live={live} />;
+  }
+  if (tab === 'process') {
     return <ProgressPane live={live} />;
   }
   if (tab === 'changes') {
@@ -68,9 +71,6 @@ function paneFor(
   }
   if (tab === 'checks') {
     return <ChecksPane live={live} />;
-  }
-  if (tab === 'shell') {
-    return <ShellPane live={live} />;
   }
   return <PullRequestPane live={live} states={prStates} onState={onPrState} />;
 }
@@ -86,7 +86,7 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const [tab, setTab] = useState<SessionTab>('progress');
+  const [tab, setTab] = useState<SessionTab>('overview');
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
   const [clock, setClock] = useState(() => Date.now());
@@ -491,14 +491,17 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
 
                   {running && live.status !== 'awaiting_user' && live.question === null ? (
                     <motion.div
-                      className="thread__working"
+                      className="thread__working live-activity"
                       initial={{ opacity: 0, y: 5 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
                     >
-                      <span className="thread__working-dot" aria-hidden="true" />
-                      <span>
-                        {live.progress.currentActivity ?? 'Working'} (
+                      <div className="live-activity__head">
+                        <span className="thread__working-dot" aria-hidden="true" />
+                        <span className="live-activity__phase">
+                          {live.phase?.split('_').join(' ') ?? statusWords(live.status)}
+                        </span>
+                        <span className="live-activity__time">
                         {String(
                           Math.max(
                             1,
@@ -511,8 +514,16 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
                             ),
                           ),
                         )}
-                        s)
-                      </span>
+                        )}s
+                        </span>
+                      </div>
+                      <p className="live-activity__task">{live.progress.currentActivity ?? live.messages[0]?.text ?? 'Working on the task'}</p>
+                      <p className="live-activity__meta">
+                        {String(live.completedPhases.length)} phases complete · {String(live.remainingPhases.length)} remaining
+                      </p>
+                      {live.tools.at(-1) === undefined ? null : (
+                        <p className="live-activity__latest">Latest: {live.tools.at(-1)?.summary || 'tool activity'}</p>
+                      )}
                     </motion.div>
                   ) : null}
 
@@ -531,8 +542,17 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
                       </p>
                       <p className="card__what">{live.question.question}</p>
                       <p className="card__why">
-                        Answer below and the run carries on from where it paused.
+                        {live.question.context ?? 'Answer below and the run carries on from where it paused.'}
                       </p>
+                      {(live.question.options ?? []).length === 0 ? null : (
+                        <div className="card__options">
+                          {(live.question.options ?? []).map((option) => (
+                            <button key={option} type="button" className="card__option" onClick={(): void => setText(option)}>
+                              {option}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </motion.div>
                   )}
 
@@ -548,6 +568,10 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
                       <p className="card__word">Needs your approval</p>
                       <p className="card__what">{live.approval.effect.summary}</p>
                       <p className="card__why">{live.approval.effect.reason}</p>
+
+                      {live.approval.effect.command === undefined ? null : (
+                        <pre className="card__command">$ {live.approval.effect.command}</pre>
+                      )}
 
                       {live.approval.effect.paths.length === 0 ? null : (
                         <div className="card__paths">
@@ -567,6 +591,11 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
                         {live.approval.effect.commandCategory === undefined ? null : (
                           <span>{live.approval.effect.commandCategory}</span>
                         )}
+                        <span>{live.approval.effect.reversible === false ? 'not reversible' : 'reversible'}</span>
+                        {live.approval.effect.workspaceRevision === undefined ? null : (
+                          <span>revision {String(live.approval.effect.workspaceRevision)}</span>
+                        )}
+                        <span>expires {new Date(live.approval.expiresAt).toLocaleTimeString()}</span>
                       </p>
 
                       <div className="card__acts">

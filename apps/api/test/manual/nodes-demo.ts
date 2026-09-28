@@ -24,8 +24,8 @@ function answer(
   intent: string,
   tool: string,
   toolArguments: Record<string, unknown>,
-): { value: { intent: string; tool: string; toolArgumentsJson: string } } {
-  return { value: { intent, tool, toolArgumentsJson: JSON.stringify(toolArguments) } };
+): { value: { intent: string; tool: string; toolArguments: Record<string, unknown> } } {
+  return { value: { intent, tool, toolArguments } };
 }
 
 const READ_ACTION = answer('Read the redirect helper to see where it sends people.', 'read_file', {

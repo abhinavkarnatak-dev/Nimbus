@@ -282,11 +282,11 @@ describe('applyExecution', () => {
     expect(next.phase).toBe('awaiting_approval');
   });
 
-  it('goes back to reasoning after an ordinary step', async () => {
+  it('continues implementation after an ordinary step', async () => {
     const harness = await executeHarness();
     const next = applyExecution(harness.state, await harness.executor.execute(READ));
 
-    expect(next.phase).toBe('reasoning');
+    expect(next.phase).toBe('implementing');
   });
 
   it('keeps every event, including the ones where nothing ran', async () => {

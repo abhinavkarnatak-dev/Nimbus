@@ -50,7 +50,7 @@ function spentBudget(tokens: number): SessionBudget {
 function main(): void {
   heading('A session that has done some work');
   let state = sampleState();
-  state = withPhase(state, 'executing');
+  state = withPhase(state, 'investigating');
   state = recordFileRead(state, 'src/auth/login.ts');
   state = recordFileRead(state, 'src/auth/redirect.ts');
   state = recordToolEvent(state, {

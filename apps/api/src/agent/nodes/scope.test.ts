@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { CLEAR_TASK, SLIPPERY_TASK, TINY_TASK, VAGUE_TASK, nodeHarness } from './nodes.fixtures.js';
 import { TASK_MIN_CHARS, meaningfulWords } from '@nimbus/contracts';
 
-import { tooThinToJudge, validateScope } from './scope.js';
+import { delegatesRepositoryLookup, tooThinToJudge, validateScope } from './scope.js';
 
 const CLEAR = { value: { clear: true, question: '' } };
 const UNCLEAR = {
@@ -84,6 +84,41 @@ describe('validateScope', () => {
     expect(result.askedModel).toBe(true);
   });
 
+  it('does not delegate file placement back to the user', async () => {
+    const harness = await nodeHarness({
+      task: 'create a file that validates webhook signatures',
+      answers: {
+        answers: [
+          {
+            value: {
+              clear: false,
+              question: 'Which folder should I put the webhook validator in?',
+            },
+          },
+        ],
+      },
+    });
+
+    const result = await validateScope(harness.state, {
+      router: harness.router,
+      context: 'src/webhooks/handler.ts validates incoming webhook requests',
+    });
+
+    expect(result.outcome).toBe('clear');
+    expect(result.question).toBeNull();
+  });
+
+  it('recognizes repository lookup questions without blocking precise product choices', () => {
+    expect(delegatesRepositoryLookup('Where should I create this file?')).toBe(true);
+    expect(delegatesRepositoryLookup('Which module should contain the validator?')).toBe(true);
+    expect(delegatesRepositoryLookup('Should invalid signatures return 401 or 403?')).toBe(false);
+    expect(
+      delegatesRepositoryLookup(
+        'Which module should own this, billing/webhooks or integrations/webhooks?',
+      ),
+    ).toBe(false);
+  });
+
   it('asks a generic question when it never needed a model to tell', async () => {
     const harness = await nodeHarness({ task: VAGUE_TASK, answers: { answers: [UNCLEAR] } });
     const result = await validateScope(harness.state, { router: harness.router });
@@ -148,13 +183,16 @@ describe('validateScope', () => {
     ).toBeGreaterThan(0);
   });
 
-  it('judges the user words and never the repository', async () => {
+  it('judges the request with repository evidence', async () => {
     const harness = await nodeHarness({ answers: { answers: [CLEAR] } });
-    await validateScope(harness.state, { router: harness.router });
+    await validateScope(harness.state, {
+      router: harness.router,
+      context: 'src/auth/redirect.ts exports redirectAfterLogin',
+    });
 
     const sent = harness.text.calls[0]?.messages.map((one) => one.content).join('\n') ?? '';
 
     expect(sent).toContain(CLEAR_TASK);
-    expect(sent).not.toContain('redirectAfterLogin');
+    expect(sent).toContain('redirectAfterLogin');
   });
 });

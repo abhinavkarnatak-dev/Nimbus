@@ -48,12 +48,33 @@ export class LiveEventPublisher implements EventPublisher {
 
     try {
       await this.#redis.publish(EVENT_CHANNEL, JSON.stringify(envelope));
+      await this.#store.markPublished(envelope.eventId);
     } catch (error) {
       this.#logger.warn(
         { sessionId, sequence: envelope.sequence, error: String(error) },
         'an event was recorded but could not be sent live, a replay will carry it',
       );
     }
+  }
+
+  /** Replays the durable outbox in per-session sequence order after a restart. */
+  async recover(limit = 500): Promise<number> {
+    const pending = await this.#store.pending(limit);
+    let delivered = 0;
+    for (const envelope of pending) {
+      try {
+        await this.#redis.publish(EVENT_CHANNEL, JSON.stringify(envelope));
+        await this.#store.markPublished(envelope.eventId);
+        delivered += 1;
+      } catch (error) {
+        this.#logger.warn(
+          { sessionId: envelope.sessionId, sequence: envelope.sequence, error: String(error) },
+          'durable event publication recovery stopped and will retry later',
+        );
+        break;
+      }
+    }
+    return delivered;
   }
 }
 

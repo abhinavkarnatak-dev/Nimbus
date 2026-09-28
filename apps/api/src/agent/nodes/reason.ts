@@ -9,6 +9,7 @@ import {
 import type { ToolRegistry } from '../registry/registry.js';
 import type { SessionRouter } from '../../routing/router.js';
 import { NODE_LIMITS } from './limits.js';
+import { compilePhasePrompt } from '../prompt/compiler.js';
 
 export const REASON_SYSTEM = [
   'You are Nimbus, working inside a checked out copy of one repository, on one small task.',
@@ -33,15 +34,15 @@ export const REASON_SYSTEM = [
   'or keep reading after answering an informational request. When a requested file or change is already',
   'present, use finish_task once to say so. Never repeat a final answer.',
   'Only use create_file or apply_patch when the person explicitly asks to add, change, fix, remove, or refactor code.',
-  'Write those arguments as a JSON object inside a string, matching that tool schema exactly,',
-  'using its real parameter names and nothing else.',
+  'Put arguments directly in toolArguments as an object matching the selected tool schema exactly.',
+  'Unknown properties are rejected. The available tools were computed by deterministic code for this phase.',
   'There are no tools attached to this request, so do not try to invoke one. Any tool name you may',
   'remember from somewhere else does not exist here. Your whole answer is one JSON object.',
 ].join(' ');
 
-export function toolCatalogue(registry: ToolRegistry): string {
+export function toolCatalogue(registry: ToolRegistry, state?: AgentState): string {
   return registry
-    .describe()
+    .describe(state)
     .map(
       (tool) =>
         `${tool.name}: ${tool.description}\n  arguments: ${JSON.stringify(tool.parameters)}`,
@@ -49,43 +50,26 @@ export function toolCatalogue(registry: ToolRegistry): string {
     .join('\n\n');
 }
 
-export function nextActionJsonSchema(registry: ToolRegistry): Readonly<Record<string, unknown>> {
+export function nextActionJsonSchema(
+  registry: ToolRegistry,
+  state?: AgentState,
+): Readonly<Record<string, unknown>> {
+  const tools = registry.describe(state);
   return {
-    type: 'object',
-    properties: {
-      intent: {
-        type: 'string',
-        description: 'one plain sentence for the user saying what you are doing and why',
+    oneOf: tools.map((tool) => ({
+      type: 'object',
+      properties: {
+        intent: {
+          type: 'string',
+          description: 'one plain sentence for the user saying what you are doing and why',
+        },
+        tool: { type: 'string', const: tool.name },
+        toolArguments: tool.parameters,
       },
-      tool: {
-        type: 'string',
-        enum: registry.names(),
-        description: 'the name of the one tool this action uses',
-      },
-      toolArgumentsJson: {
-        type: 'string',
-        description:
-          'the arguments for that tool as a JSON object written out as a string, matching that tool schema exactly, for example {"path":"src/auth/login.ts"}',
-      },
-    },
-    required: ['intent', 'tool', 'toolArgumentsJson'],
-    additionalProperties: false,
+      required: ['intent', 'tool', 'toolArguments'],
+      additionalProperties: false,
+    })),
   };
-}
-
-export function readArguments(json: string): Record<string, unknown> | null {
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    return null;
-  }
-
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return null;
-  }
-  return parsed as Record<string, unknown>;
 }
 
 export interface ReasonInput {
@@ -125,34 +109,16 @@ export interface ReasonResult {
 }
 
 export async function chooseNextAction(input: ReasonInput): Promise<ReasonResult> {
-  const messages = [
-    { role: 'system' as const, content: REASON_SYSTEM },
-    {
-      role: 'system' as const,
-      content: `The tools you may name, and nothing else:\n\n${toolCatalogue(input.registry)}`,
-    },
-    { role: 'user' as const, content: input.context },
-  ];
-
-  if ((input.history ?? []).length > 0) {
-    messages.push({
-      role: 'system' as const,
-      content: `What has happened so far, oldest first:\n${(input.history ?? []).join('\n')}`,
-    });
-  }
-
   const spoken = conversationShown(input.conversation ?? []);
-
-  if (spoken !== null) {
-    messages.push({ role: 'system' as const, content: spoken });
-  }
-
-  if (input.reviewComments !== undefined && input.reviewComments !== '') {
-    messages.push({
-      role: 'system' as const,
-      content: `These are the current GitHub comments on the pull request. Treat them as the requested changes and implement them when the person refers to a comment or review.\n\n${input.reviewComments}`,
-    });
-  }
+  const messages = compilePhasePrompt({
+    immutableRules: REASON_SYSTEM,
+    state: input.state,
+    repositoryEvidence: input.context,
+    eligibleActions: toolCatalogue(input.registry, input.state),
+    ...(input.history === undefined ? {} : { failures: input.history }),
+    ...(spoken === null ? {} : { conversation: spoken }),
+    ...(input.reviewComments === undefined ? {} : { reviewComments: input.reviewComments }),
+  });
 
   if (input.state.clarificationAnswer !== null) {
     messages.push({
@@ -179,26 +145,15 @@ export async function chooseNextAction(input: ReasonInput): Promise<ReasonResult
     role: 'primary',
     schema: NextActionWireSchema,
     schemaName: 'next_action',
-    jsonSchema: nextActionJsonSchema(input.registry),
+    jsonSchema: nextActionJsonSchema(input.registry, input.state),
     maxOutputTokens: NODE_LIMITS.reasonMaxOutputTokens,
     messages,
   });
 
-  const toolArguments = readArguments(result.value.toolArgumentsJson);
-
-  if (toolArguments === null) {
-    return {
-      action: { intent: result.value.intent, tool: result.value.tool, toolArguments: {} },
-      accepted: false,
-      refusal:
-        'the arguments were not a JSON object. Write them as one, for example {"path":"src/auth/login.ts"}',
-    };
-  }
-
   const parsed = NextActionSchema.safeParse({
     intent: result.value.intent,
     tool: result.value.tool,
-    toolArguments,
+    toolArguments: result.value.toolArguments,
   });
 
   if (!parsed.success) {
@@ -209,10 +164,14 @@ export async function chooseNextAction(input: ReasonInput): Promise<ReasonResult
     };
   }
 
-  return checkAgainstRegistry(parsed.data, input.registry);
+  return checkAgainstRegistry(parsed.data, input.registry, input.state);
 }
 
-export function checkAgainstRegistry(action: NextAction, registry: ToolRegistry): ReasonResult {
+export function checkAgainstRegistry(
+  action: NextAction,
+  registry: ToolRegistry,
+  state?: AgentState,
+): ReasonResult {
   if (!registry.has(action.tool)) {
     return {
       action,
@@ -229,6 +188,12 @@ export function checkAgainstRegistry(action: NextAction, registry: ToolRegistry)
       accepted: false,
       refusal: `${action.tool} cannot accept those arguments: ${checked.detail}`,
     };
+  }
+  if (state !== undefined) {
+    const eligible = registry.checkEligible(state, action.tool, action.toolArguments);
+    if (!eligible.ok) {
+      return { action, accepted: false, refusal: eligible.detail };
+    }
   }
   return { action, accepted: true, refusal: null };
 }

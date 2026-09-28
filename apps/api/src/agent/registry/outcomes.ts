@@ -9,6 +9,7 @@ export const REGISTRY_ERROR_CODES = [
   'TOOL_TIMED_OUT',
   'TOOL_CANCELLED',
   'TOOL_FORBIDDEN',
+  'TOOL_INELIGIBLE',
 ] as const;
 
 export type RegistryErrorCode = (typeof REGISTRY_ERROR_CODES)[number];
@@ -50,6 +51,7 @@ export function outcomeFor(error: unknown): ToolOutcome {
       case 'TOOL_CANCELLED':
         return 'cancelled';
       case 'TOOL_FORBIDDEN':
+      case 'TOOL_INELIGIBLE':
         return 'denied';
       default:
         return 'failed';

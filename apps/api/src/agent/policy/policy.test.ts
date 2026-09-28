@@ -60,6 +60,10 @@ describe('what is allowed without asking', () => {
     ['packaging changes for review', { tool: 'prepare_commit', input: { summary: 'a fix' } }],
     ['a new ordinary file', { tool: 'create_file', input: { path: 'src/new.ts', contents: 'x' } }],
     ['an allowlisted command', { tool: 'run_command', input: { argv: ['git', 'status'] } }],
+    [
+      'a backend-resolved verification check',
+      { tool: 'run_checks', input: { checkId: 'syntax:typescript:src/a.ts' } },
+    ],
   ])('allows %s', async (_label, action) => {
     const { policy } = gate();
     expect((await policy.authorize(action)).decision).toBe('allowed');

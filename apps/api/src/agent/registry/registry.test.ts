@@ -6,6 +6,7 @@ import { REGISTRY_LIMITS } from './limits.js';
 import { SESSION_ID, VALID_INPUT, harness } from './registry.fixtures.js';
 import { BUILT_IN_TOOLS } from './tools.js';
 import { z } from 'zod';
+import { sampleState } from '../state/agent-state.fixtures.js';
 
 describe('the tools that are offered', () => {
   it('offers only names the contract knows', async () => {
@@ -313,30 +314,54 @@ describe('invoking a tool', () => {
     expect(result.output?.pause).toBe('approval');
   });
 
+  it('blocks generic repository-placement questions but allows product decisions', async () => {
+    const { registry } = await harness();
+    const state = sampleState();
+
+    expect(
+      registry.checkEligible(state, 'wait_for_user', {
+        reason: 'clarification',
+        question: 'Which folder should I create the validator in?',
+      }),
+    ).toMatchObject({ ok: false });
+    expect(
+      registry.checkEligible(state, 'wait_for_user', {
+        reason: 'clarification',
+        question: 'Should invalid signatures return 401 or 403?',
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      registry.checkEligible(state, 'wait_for_user', {
+        reason: 'clarification',
+        question: 'Which module should own this, billing/webhooks or integrations/webhooks?',
+      }),
+    ).toEqual({ ok: true });
+  });
+
   it('records a check result that a pull request body could use', async () => {
     const { registry } = await harness({
-      commands: { 'vitest run': { stdout: 'all good', exitCode: 0 } },
+      commands: { 'tsc --noEmit src/greet.ts': { stdout: 'all good', exitCode: 0 } },
     });
 
     const result = await registry.invoke({
       toolCallId: 'call_11',
       tool: 'run_checks',
-      input: { name: 'tests', kind: 'test', argv: ['vitest', 'run'] },
+      input: { checkId: 'syntax:typescript:src/greet.ts' },
     });
 
     expect(result.output?.check?.status).toBe('passed');
-    expect(result.output?.check?.name).toBe('tests');
+    expect(result.output?.check?.name).toBe('typescript syntax');
   });
 
   it('records a failing check as failed rather than errored', async () => {
     const { registry } = await harness({
-      commands: { 'vitest run': { stdout: '1 failed', exitCode: 1 } },
+      commands: { 'tsc --noEmit src/greet.ts': { stdout: '1 failed', exitCode: 1 } },
     });
 
     const result = await registry.invoke({
       toolCallId: 'call_12',
       tool: 'run_checks',
-      input: { name: 'tests', kind: 'test', argv: ['vitest', 'run'] },
+      input: { checkId: 'syntax:typescript:src/greet.ts' },
     });
 
     expect(result.output?.check?.status).toBe('failed');

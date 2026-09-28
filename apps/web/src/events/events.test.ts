@@ -19,6 +19,14 @@ function envelope(sequence: number): Record<string, unknown> {
     sequence,
     sessionId: SESSION_ID,
     emittedAt: '2026-08-17T10:00:00.000Z',
+    eventId: `evt_${String(sequence)}`,
+    runId: 'run_aaaaaaaa',
+    phase: 'investigating',
+    step: sequence,
+    title: 'Agent message',
+    detail: `note ${String(sequence)}`,
+    relatedObjectIds: [],
+    workspaceRevision: null,
     event: {
       type: 'agent.message',
       message: {

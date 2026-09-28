@@ -76,6 +76,7 @@ export async function nodeHarness(
   const base = sampleState({ task: options.task ?? CLEAR_TASK });
   const state = parseState({
     ...base,
+    phase: 'planning',
     clarificationQuestion: options.clarificationQuestion ?? null,
     clarificationAnswer: options.clarificationAnswer ?? null,
   });

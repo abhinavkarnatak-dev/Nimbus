@@ -19,6 +19,7 @@ import {
   ToolOutcomeSchema,
 } from './tools.js';
 import { CONTRACTS_WIRE_VERSION } from './version.js';
+import { DeliveryStageSchema, ProgressKindSchema, ReliableAgentPhaseSchema, WorkspaceRevisionSchema } from './reliability.js';
 
 export const SERVER_EVENT_TYPES = [
   'session.status',
@@ -34,6 +35,12 @@ export const SERVER_EVENT_TYPES = [
   'pr.created',
   'session.failed',
   'session.cancelled',
+  'agent.phase',
+  'agent.activity',
+  'agent.progress',
+  'review.updated',
+  'delivery.updated',
+  'clarification.required',
 ] as const;
 
 export const ServerEventTypeSchema = z.enum(SERVER_EVENT_TYPES);
@@ -114,6 +121,50 @@ const SessionCancelledEventSchema = z.strictObject({
   cancelledAt: IsoTimestampSchema,
 });
 
+const AgentPhaseEventSchema = z.strictObject({
+  type: z.literal('agent.phase'),
+  phase: ReliableAgentPhaseSchema,
+  activity: z.string().max(LIMITS.summaryMaxChars).nullable(),
+  completedPhases: z.array(ReliableAgentPhaseSchema).max(12),
+  remainingPhases: z.array(ReliableAgentPhaseSchema).max(12),
+});
+
+const AgentActivityEventSchema = z.strictObject({
+  type: z.literal('agent.activity'),
+  activity: z.string().min(1).max(LIMITS.summaryMaxChars),
+  level: z.enum(['primary', 'secondary']),
+});
+
+const AgentProgressEventSchema = z.strictObject({
+  type: z.literal('agent.progress'),
+  progress: ProgressKindSchema,
+  summary: z.string().max(LIMITS.summaryMaxChars),
+  evidenceIds: z.array(z.string().min(1).max(80)).max(40),
+});
+
+const ReviewUpdatedEventSchema = z.strictObject({
+  type: z.literal('review.updated'),
+  verdict: z.enum(['accepted', 'revision_requested', 'uncertain']),
+  summary: z.string().max(LIMITS.summaryMaxChars),
+});
+
+const DeliveryUpdatedEventSchema = z.strictObject({
+  type: z.literal('delivery.updated'),
+  stage: DeliveryStageSchema,
+  summary: z.string().max(LIMITS.summaryMaxChars),
+});
+
+const ClarificationRequiredEventSchema = z.strictObject({
+  type: z.literal('clarification.required'),
+  clarificationId: z.string().min(1).max(80),
+  question: z.string().min(1).max(LIMITS.messageMaxChars),
+  context: z.string().max(LIMITS.reasonMaxChars),
+  options: z.array(z.string().min(1).max(300)).max(8),
+  allowFreeText: z.boolean(),
+  blockingCriterionIds: z.array(z.string().min(1).max(80)).max(40),
+  expiresAt: IsoTimestampSchema,
+});
+
 export const ServerEventSchema = z.discriminatedUnion('type', [
   SessionStatusEventSchema,
   AgentMessageEventSchema,
@@ -128,6 +179,12 @@ export const ServerEventSchema = z.discriminatedUnion('type', [
   PullRequestCreatedEventSchema,
   SessionFailedEventSchema,
   SessionCancelledEventSchema,
+  AgentPhaseEventSchema,
+  AgentActivityEventSchema,
+  AgentProgressEventSchema,
+  ReviewUpdatedEventSchema,
+  DeliveryUpdatedEventSchema,
+  ClarificationRequiredEventSchema,
 ]);
 
 export const SessionEventEnvelopeSchema = z.strictObject({
@@ -135,6 +192,14 @@ export const SessionEventEnvelopeSchema = z.strictObject({
   sequence: z.int().positive(),
   sessionId: SessionIdSchema,
   emittedAt: IsoTimestampSchema,
+  eventId: z.string().min(1).max(96),
+  runId: z.string().min(1).max(120),
+  phase: ReliableAgentPhaseSchema.nullable(),
+  step: z.int().nonnegative(),
+  title: z.string().min(1).max(LIMITS.summaryMaxChars),
+  detail: z.string().max(LIMITS.summaryMaxChars),
+  relatedObjectIds: z.array(z.string().min(1).max(120)).max(20),
+  workspaceRevision: WorkspaceRevisionSchema.nullable(),
   event: ServerEventSchema,
 });
 

@@ -10,7 +10,10 @@ function terminationFor(result: RunResult): SandboxTerminationReason {
     return 'cancelled';
   }
 
-  if (result.state.phase === 'awaiting_approval' || result.state.phase === 'clarifying') {
+  if (
+    result.state.phase === 'awaiting_approval' ||
+    result.state.phase === 'awaiting_clarification'
+  ) {
     return 'completed';
   }
 

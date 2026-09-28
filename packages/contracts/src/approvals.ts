@@ -28,6 +28,13 @@ export const ApprovalEffectSchema = z.strictObject({
   commandCategory: z.string().min(1).max(120).optional(),
   reason: z.string().min(1).max(LIMITS.reasonMaxChars),
   risk: RiskLevelSchema,
+  operation: z.string().min(1).max(120).optional(),
+  command: z.string().min(1).max(2_000).optional(),
+  purpose: z.string().min(1).max(LIMITS.reasonMaxChars).optional(),
+  expectedEffect: z.string().min(1).max(LIMITS.reasonMaxChars).optional(),
+  requestedPermissions: z.array(z.string().min(1).max(120)).max(20).optional(),
+  reversible: z.boolean().optional(),
+  workspaceRevision: z.int().nonnegative().optional(),
 });
 
 export const ApprovalRequestSchema = z.strictObject({
@@ -40,7 +47,13 @@ export const ApprovalRequestSchema = z.strictObject({
 
 export const ApprovalDecisionSchema = z.enum(['approved', 'rejected']);
 
-export const ApprovalStatusSchema = z.enum(['pending', 'approved', 'rejected', 'expired']);
+export const ApprovalStatusSchema = z.enum([
+  'pending',
+  'approved',
+  'rejected',
+  'expired',
+  'cancelled',
+]);
 
 export const ApprovalDecisionBodySchema = z.strictObject({
   approvalId: ApprovalIdSchema,

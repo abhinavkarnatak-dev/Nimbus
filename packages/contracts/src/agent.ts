@@ -7,23 +7,24 @@ import { BudgetStateSchema } from './llm.js';
 import { ModelPlanSchema } from './routing.js';
 import { BranchNameSchema } from './github.js';
 import { CheckResultSchema } from './tools.js';
+import {
+  ActionRecordSchema,
+  ChangePlanSchema,
+  DeliveryStageSchema,
+  EvidenceRecordSchema,
+  PatchReviewSchema,
+  PhaseBudgetSchema,
+  ReliableAgentPhaseSchema,
+  RepositoryProfileSchema,
+  SandboxCapabilitySchema,
+  TaskSpecSchema,
+  WorkspaceRevisionSchema,
+} from './reliability.js';
 
-export const AGENT_STATE_VERSION = 2;
+export const AGENT_STATE_VERSION = 3;
 
-export const AGENT_PHASES = [
-  'starting',
-  'clarifying',
-  'retrieving',
-  'reasoning',
-  'awaiting_approval',
-  'executing',
-  'validating',
-  'preparing_patch',
-  'finished',
-  'failed',
-] as const;
-
-export const AgentPhaseSchema = z.enum(AGENT_PHASES);
+export const AGENT_PHASES = ReliableAgentPhaseSchema.options;
+export const AgentPhaseSchema = ReliableAgentPhaseSchema;
 
 export const AGENT_STOP_REASONS = [
   'completed',
@@ -67,7 +68,7 @@ export const RetrievedFileSchema = z.strictObject({
 export const ProposedActionSchema = z.strictObject({
   tool: z.string().min(1).max(60),
   reason: z.string().min(1).max(LIMITS.reasonMaxChars),
-  argumentsJson: z.string().max(LIMITS.toolOutputChunkMaxChars),
+  arguments: z.record(z.string(), z.unknown()),
   actionHash: z.string().regex(/^[0-9a-f]{64}$/),
 });
 
@@ -108,6 +109,8 @@ export const AgentStateSchema = z.strictObject({
   sandboxId: z.string().max(120).nullable(),
 
   phase: AgentPhaseSchema,
+  activity: z.string().max(LIMITS.summaryMaxChars).nullable().default(null),
+  phaseBudget: PhaseBudgetSchema,
   stopReason: AgentStopReasonSchema.nullable(),
   budgets: AgentBudgetsSchema,
   models: ModelPlanSchema,
@@ -120,6 +123,16 @@ export const AgentStateSchema = z.strictObject({
   policy: PolicyRecordSchema.nullable(),
   toolEvents: z.array(ToolEventSummarySchema).max(MAX_TOOL_EVENTS),
   checks: z.array(CheckResultSchema).max(MAX_CHECK_RESULTS),
+  taskSpec: TaskSpecSchema,
+  plan: ChangePlanSchema.nullable(),
+  evidence: z.array(EvidenceRecordSchema).max(300),
+  workspaceRevision: WorkspaceRevisionSchema,
+  actions: z.array(ActionRecordSchema).max(200),
+  review: PatchReviewSchema.nullable(),
+  deliveryStage: DeliveryStageSchema,
+  repositoryProfile: RepositoryProfileSchema.nullable(),
+  sandboxCapabilities: SandboxCapabilitySchema.nullable(),
+  generation: z.int().positive(),
 });
 
 export const CheckpointMetadataSchema = z.strictObject({

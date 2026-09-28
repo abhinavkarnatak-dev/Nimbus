@@ -2,15 +2,15 @@ import type { CheckStatus, ToolName, ToolOutcome } from '@nimbus/contracts';
 
 import type { LiveSession, ToolRun } from './live.js';
 
-export const SESSION_TABS = ['progress', 'changes', 'checks', 'shell', 'pull_request'] as const;
+export const SESSION_TABS = ['overview', 'process', 'changes', 'checks', 'pull_request'] as const;
 
 export type SessionTab = (typeof SESSION_TABS)[number];
 
 export const TAB_WORDS: Readonly<Record<SessionTab, string>> = {
-  progress: 'Progress',
+  overview: 'Overview',
+  process: 'Process',
   changes: 'Changes',
   checks: 'Checks',
-  shell: 'Shell',
   pull_request: 'Pull request',
 };
 
@@ -43,6 +43,11 @@ export const CHECK_WORDS: Readonly<Record<CheckStatus, string>> = {
   failed: 'failed',
   errored: 'errored',
   not_run: 'not run',
+  unavailable: 'unavailable',
+  blocked: 'blocked',
+  timed_out: 'timed out',
+  cancelled: 'cancelled',
+  skipped: 'skipped',
 };
 
 export const SHELL_TOOLS: readonly ToolName[] = ['run_command', 'run_checks'];
@@ -61,7 +66,7 @@ export function checkTone(status: CheckStatus): 'good' | 'bad' | 'quiet' {
   if (status === 'passed') {
     return 'good';
   }
-  return status === 'not_run' ? 'quiet' : 'bad';
+  return ['not_run', 'unavailable', 'cancelled', 'skipped'].includes(status) ? 'quiet' : 'bad';
 }
 
 export function toolWords(one: ToolRun): string {
@@ -73,7 +78,10 @@ export function shellRuns(tools: readonly ToolRun[]): readonly ToolRun[] {
 }
 
 export function tabCount(tab: SessionTab, live: LiveSession): number | null {
-  if (tab === 'progress') {
+  if (tab === 'overview') {
+    return null;
+  }
+  if (tab === 'process') {
     return live.tools.length === 0 ? null : live.tools.length;
   }
   if (tab === 'changes') {
@@ -81,10 +89,6 @@ export function tabCount(tab: SessionTab, live: LiveSession): number | null {
   }
   if (tab === 'checks') {
     return live.checks.length === 0 ? null : live.checks.length;
-  }
-  if (tab === 'shell') {
-    const ran = shellRuns(live.tools).length;
-    return ran === 0 ? null : ran;
   }
   return live.pullRequest === null ? null : 1;
 }

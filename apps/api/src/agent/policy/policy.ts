@@ -19,6 +19,7 @@ export const REFUSED_BY_PERSON =
 export interface ProposedTool {
   tool: string;
   input: unknown;
+  workspaceRevision?: number;
 }
 
 export interface PolicyOutcome {
@@ -54,7 +55,10 @@ export class PolicyGate {
   }
 
   hashOf(action: ProposedTool): string {
-    return actionHash(action.tool, action.input);
+    return actionHash(action.tool, {
+      input: action.input,
+      workspaceRevision: action.workspaceRevision ?? null,
+    });
   }
 
   async authorize(action: ProposedTool): Promise<PolicyOutcome> {
@@ -92,7 +96,7 @@ export class PolicyGate {
       });
     }
 
-    const effect = this.effectFor(action.tool, found);
+    const effect = this.effectFor(action, found);
     const refused = await this.approvals.findRefused(hash);
 
     if (refused !== null) {
@@ -147,16 +151,31 @@ export class PolicyGate {
     const hash = this.hashOf(action);
     const found = classifyAction(action.tool, action.input);
 
-    return await this.approvals.request(hash, this.effectFor(action.tool, found));
+    return await this.approvals.request(hash, this.effectFor(action, found));
   }
 
-  private effectFor(tool: string, found: ReturnType<typeof classifyAction>): ApprovalEffect {
+  private effectFor(action: ProposedTool, found: ReturnType<typeof classifyAction>): ApprovalEffect {
+    const input = typeof action.input === 'object' && action.input !== null
+      ? (action.input as Record<string, unknown>)
+      : {};
+    const argv = Array.isArray(input['argv'])
+      ? input['argv'].filter((one): one is string => typeof one === 'string')
+      : [];
     return ApprovalEffectSchema.parse({
       category: found.category,
-      summary: `${tool}: ${found.reason}`.slice(0, POLICY_LIMITS.reasonMaxChars),
+      summary: `${action.tool}: ${found.reason}`.slice(0, POLICY_LIMITS.reasonMaxChars),
       paths: found.paths.slice(0, POLICY_LIMITS.pathsPerEffectMax),
       reason: found.reason.slice(0, POLICY_LIMITS.reasonMaxChars),
       risk: found.risk,
+      operation: action.tool,
+      ...(argv.length === 0 ? {} : { command: argv.map((one) => JSON.stringify(one)).join(' ') }),
+      purpose: found.reason.slice(0, POLICY_LIMITS.reasonMaxChars),
+      expectedEffect: `${found.category}: ${found.reason}`.slice(0, POLICY_LIMITS.reasonMaxChars),
+      requestedPermissions: [found.category],
+      reversible: found.category !== 'file_deletion',
+      ...(action.workspaceRevision === undefined
+        ? {}
+        : { workspaceRevision: action.workspaceRevision }),
       ...(found.commandCategory === undefined ? {} : { commandCategory: found.commandCategory }),
     });
   }

@@ -1,5 +1,4 @@
 import {
-  CheckKindSchema,
   CheckResultSchema,
   LIMITS,
   WorkspacePathSchema,
@@ -10,6 +9,8 @@ import { z } from 'zod';
 import { applyPatch, createFile, listTree, readFile, searchCode } from '../tools/file-tools.js';
 import { defineTool, type ToolDefinition } from './definition.js';
 import { REGISTRY_LIMITS } from './limits.js';
+import { classifyCheckResult, resolvePlannedCheck } from '../verification/planner.js';
+import { delegatesRepositoryLookup } from '../nodes/scope.js';
 
 const boundedCount = z.int().positive().max(1_000);
 const argv = z.array(z.string().min(1).max(4_096)).min(1).max(64);
@@ -245,32 +246,62 @@ export function outcomeFromCommand(outcome: string): ToolOutcome | undefined {
 export const runChecksTool = defineTool({
   name: 'run_checks',
   description:
-    'Run the project tests, linter, type checker or build, and record whether it passed. Use this rather than run_command whenever the result should be reported to the user and shown in the pull request. Run it after making changes and before prepare_commit. A non zero exit is a failing check, not a broken tool, so read the output and fix the cause. Returns the output and a recorded pass, fail or error.',
+    'Run one trusted verification plan by its known check ID. Unlike run_command, the backend selects the executable, arguments, working directory, scope and failure classification. Returns bounded output and a revision-bound result.',
   timeoutMs: REGISTRY_LIMITS.checkTimeoutMs,
   input: z.strictObject({
-    name: z
+    checkId: z
       .string()
       .min(1)
-      .max(120)
-      .describe('a short name the user will see, such as unit tests or lint'),
-    kind: CheckKindSchema.describe('which sort of check this is'),
-    argv: argv.describe(
-      'the command as a list of words, for example ["pnpm", "test"], taken from the repository scripts',
-    ),
+      .max(240)
+      .describe('an ID from the trusted repository verification plan'),
   }),
   run: async (input, context) => {
+    const planned = resolvePlannedCheck(
+      context.state?.repositoryProfile ?? null,
+      input.checkId,
+      context.state?.filesChanged ?? [],
+    );
+    if (planned === null) {
+      return {
+        summary: `check unavailable: ${input.checkId}`,
+        text: 'The requested check ID is not in the trusted verification plan.',
+        outcome: 'failed' as const,
+        check: CheckResultSchema.parse({
+          checkId: input.checkId,
+          name: input.checkId,
+          kind: 'test',
+          status: 'unavailable',
+          reason: 'invalid_command',
+          summary: 'The check ID is not known for this repository profile.',
+          required: true,
+          fallbackAvailable: false,
+          baselineStatus: 'not_compared',
+          ...(context.state === undefined ? {} : { revision: context.state.workspaceRevision }),
+        }),
+      };
+    }
     const result = await context.commands.run({
-      argv: input.argv,
+      argv: planned.argv,
+      cwd: planned.cwd,
       signal: context.signal,
       check: true,
     });
     const clipped = clip(`${result.stdout}${result.stderr}`);
-    const status = checkStatusFor(result.outcome);
+    const classified = classifyCheckResult(
+      result.outcome,
+      result.exitCode,
+      `${result.stdout}\n${result.stderr}`,
+      planned.kind,
+    );
+    const status = classified.status;
     const detail = result.stderr === '' ? result.stdout : result.stderr;
+    const display = planned.argv
+      .map((part) => (/^[A-Za-z0-9_./:@+-]+$/.test(part) ? part : JSON.stringify(part)))
+      .join(' ');
 
     return {
       summary: shorten(
-        `${input.name}: ${status}${result.generatedPaths.length === 0 ? '' : `, removed generated output: ${result.generatedPaths.join(', ')}`}${result.unexpectedPaths.length === 0 ? '' : `, new workspace files: ${result.unexpectedPaths.join(', ')}`}`,
+        `${planned.name}: ${status}${result.generatedPaths.length === 0 ? '' : `, removed generated output: ${result.generatedPaths.join(', ')}`}${result.unexpectedPaths.length === 0 ? '' : `, new workspace files: ${result.unexpectedPaths.join(', ')}`}`,
       ),
       text: clipped.text,
       stdout: result.stdout,
@@ -278,11 +309,32 @@ export const runChecksTool = defineTool({
       truncated: clipped.truncated || result.truncated,
       ...only('outcome', outcomeFromCommand(result.outcome)),
       check: CheckResultSchema.parse({
-        name: input.name,
-        kind: input.kind,
+        checkId: planned.checkId,
+        name: planned.name,
+        kind: planned.kind,
         status,
+        reason: classified.reason,
         summary: detail.slice(0, LIMITS.summaryMaxChars),
+        command: {
+          executable: planned.argv[0] ?? '',
+          args: planned.argv.slice(1),
+          workingDirectory: planned.cwd,
+          purpose: planned.name,
+          source: 'repository',
+          display,
+        },
+        scope: planned.scope,
+        ...(context.state === undefined ? {} : { revision: context.state.workspaceRevision }),
+        exitCode: result.exitCode,
         durationMs: result.durationMs,
+        output: clipped.text,
+        outputTruncated: clipped.truncated || result.truncated,
+        required: planned.required,
+        fallbackAvailable: planned.fallbackAvailable,
+        baselineStatus:
+          classified.reason === 'permission_denied' || classified.reason === 'network_denied'
+            ? 'infrastructure'
+            : 'not_compared',
       }),
     };
   },
@@ -398,6 +450,20 @@ export const waitForUserTool = defineTool({
         'one specific question, naming the exact files or choices involved, answerable in a sentence',
       ),
   }),
+  metadata: {
+    precondition: (_state, value) => {
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+      const input = value as { reason?: unknown; question?: unknown };
+      if (
+        input.reason === 'clarification' &&
+        typeof input.question === 'string' &&
+        delegatesRepositoryLookup(input.question)
+      ) {
+        return 'repository placement is agent work; inspect the code and choose the strongest convention';
+      }
+      return null;
+    },
+  },
   run: async (input) =>
     await Promise.resolve({
       summary: `waiting for ${input.reason}`,

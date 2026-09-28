@@ -13,6 +13,11 @@ import type {
   DeliveryStatus,
   ToolName,
   ToolOutcome,
+  ReliableAgentPhase,
+  PatchReview,
+  DeliveryStage,
+  WorkspaceRevision,
+  CommandDescriptor,
 } from '@nimbus/contracts';
 
 import { terminalLines, type BoundedOutput } from '../render/safe.js';
@@ -29,6 +34,7 @@ export interface ToolRun {
   durationMs: number | null;
   output: string;
   truncated: boolean;
+  command: CommandDescriptor | null;
 }
 
 export interface LiveSession {
@@ -37,13 +43,34 @@ export interface LiveSession {
   deliveryStatus: DeliveryStatus | null;
   progress: SessionProgress;
   messages: readonly SessionMessage[];
-  question: { question: string; expiresAt: string } | null;
+  question: {
+    question: string;
+    expiresAt: string;
+    context?: string;
+    options?: readonly string[];
+    blockingCriterionIds?: readonly string[];
+  } | null;
   approval: ApprovalRequest | null;
   failure: SessionFailure | null;
   pullRequest: PullRequestResult | null;
   files: readonly FileChange[];
   checks: readonly CheckResult[];
   tools: readonly ToolRun[];
+  phase: ReliableAgentPhase | null;
+  completedPhases: readonly ReliableAgentPhase[];
+  remainingPhases: readonly ReliableAgentPhase[];
+  review: PatchReview | null;
+  deliveryStage: DeliveryStage;
+  workspaceRevision: WorkspaceRevision | null;
+  milestones: readonly ProcessMilestone[];
+}
+
+export interface ProcessMilestone {
+  id: string;
+  title: string;
+  detail: string;
+  tone: 'running' | 'good' | 'bad' | 'quiet';
+  at: string;
 }
 
 export function liveFrom(detail: SessionDetail): LiveSession {
@@ -59,7 +86,14 @@ export function liveFrom(detail: SessionDetail): LiveSession {
     pullRequest: detail.pullRequest,
     files: detail.filesChanged,
     checks: detail.checks,
-    tools: [],
+    tools: detail.toolRuns.map((run) => ({ ...run, output: '', truncated: false })),
+    phase: detail.progress.phase,
+    completedPhases: detail.progress.completedPhases,
+    remainingPhases: detail.progress.remainingPhases,
+    review: detail.review,
+    deliveryStage: detail.deliveryStage,
+    workspaceRevision: detail.workspaceRevision,
+    milestones: [],
   };
 }
 
@@ -89,6 +123,7 @@ function blankTool(toolCallId: string): ToolRun {
     durationMs: null,
     output: '',
     truncated: false,
+    command: null,
   };
 }
 
@@ -162,6 +197,7 @@ export function applyEvent(live: LiveSession, event: ServerEvent): LiveSession {
             summary: event.invocation.summary,
             paths: event.invocation.paths,
             startedAt: event.invocation.startedAt,
+            command: event.invocation.command ?? null,
           }),
           () => blankTool(event.invocation.toolCallId),
         ),
@@ -213,6 +249,61 @@ export function applyEvent(live: LiveSession, event: ServerEvent): LiveSession {
 
     case 'session.cancelled':
       return { ...live, status: 'cancelled', approval: null, question: null };
+
+    case 'agent.phase':
+      return {
+        ...live,
+        phase: event.phase,
+        progress: { ...live.progress, phase: event.phase, currentActivity: event.activity, completedPhases: event.completedPhases, remainingPhases: event.remainingPhases },
+        completedPhases: event.completedPhases,
+        remainingPhases: event.remainingPhases,
+        milestones: [
+          ...live.milestones,
+          { id: `phase-${event.phase}-${String(live.milestones.length)}`, title: event.phase.split('_').join(' '), detail: event.activity ?? '', tone: ['completed', 'packaging'].includes(event.phase) ? 'good' : 'running', at: new Date().toISOString() },
+        ],
+      };
+
+    case 'agent.activity':
+      return {
+        ...live,
+        progress: { ...live.progress, currentActivity: event.activity },
+        milestones: event.level === 'primary'
+          ? [...live.milestones, { id: `activity-${String(live.milestones.length)}`, title: event.activity, detail: '', tone: 'running', at: new Date().toISOString() }]
+          : live.milestones,
+      };
+
+    case 'agent.progress':
+      return {
+        ...live,
+        milestones: [...live.milestones, { id: `progress-${String(live.milestones.length)}`, title: event.progress.split('_').join(' '), detail: event.summary, tone: event.progress === 'none' ? 'quiet' : 'good', at: new Date().toISOString() }],
+      };
+
+    case 'review.updated':
+      return {
+        ...live,
+        milestones: [...live.milestones, { id: `review-${String(live.milestones.length)}`, title: `Review ${event.verdict.split('_').join(' ')}`, detail: event.summary, tone: event.verdict === 'accepted' ? 'good' : 'bad', at: new Date().toISOString() }],
+      };
+
+    case 'delivery.updated':
+      return {
+        ...live,
+        deliveryStage: event.stage,
+        milestones: [...live.milestones, { id: `delivery-${event.stage}`, title: event.stage.split('_').join(' '), detail: event.summary, tone: event.stage === 'pr_created' ? 'good' : 'running', at: new Date().toISOString() }],
+      };
+
+    case 'clarification.required':
+      return {
+        ...live,
+        status: 'awaiting_user',
+        question: {
+          question: event.question,
+          expiresAt: event.expiresAt,
+          context: event.context,
+          options: event.options,
+          blockingCriterionIds: event.blockingCriterionIds,
+        },
+        milestones: [...live.milestones, { id: event.clarificationId, title: 'Clarification required', detail: event.context, tone: 'quiet', at: new Date().toISOString() }],
+      };
   }
 }
 

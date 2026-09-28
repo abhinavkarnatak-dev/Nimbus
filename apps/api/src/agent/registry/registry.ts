@@ -1,4 +1,5 @@
 import {
+  type AgentState,
   ToolInvocationSchema,
   type ToolInvocation,
   type ToolName,
@@ -19,12 +20,14 @@ import {
 import { REGISTRY_LIMITS } from './limits.js';
 import { RegistryError, alreadyAborted, codeFor, isAbortError, outcomeFor } from './outcomes.js';
 import { BUILT_IN_TOOLS } from './tools.js';
+import { eligibleTools, toolNameEligible } from '../reliability/eligibility.js';
 
 export interface InvokeRequest {
   toolCallId: string;
   tool: string;
   input: unknown;
   signal?: AbortSignal;
+  state?: AgentState;
 }
 
 export interface InvokeResult {
@@ -97,8 +100,9 @@ export class ToolRegistry {
     this.tools.set(tool.name, tool);
   }
 
-  names(): ToolName[] {
-    return [...this.tools.keys()].sort();
+  names(state?: AgentState): ToolName[] {
+    const tools = state === undefined ? [...this.tools.values()] : eligibleTools(state, [...this.tools.values()]);
+    return tools.map((tool) => tool.name).sort();
   }
 
   has(name: string): boolean {
@@ -116,8 +120,26 @@ export class ToolRegistry {
     return parsed.ok ? { ok: true } : { ok: false, detail: parsed.detail };
   }
 
-  describe(): ReturnType<typeof describeForModel>[] {
-    return [...this.tools.values()]
+  checkEligible(
+    state: AgentState,
+    name: string,
+    input: Record<string, unknown>,
+  ): { ok: true } | { ok: false; detail: string; reusableActionId: string | null } {
+    const checked = this.check(name, input);
+    if (!checked.ok) return { ...checked, reusableActionId: null };
+    const decision = toolNameEligible(state, [...this.tools.values()], name, input);
+    return decision.eligible
+      ? { ok: true }
+      : {
+          ok: false,
+          detail: decision.reason ?? 'that tool is not eligible',
+          reusableActionId: decision.reusableActionId,
+        };
+  }
+
+  describe(state?: AgentState): ReturnType<typeof describeForModel>[] {
+    const tools = state === undefined ? [...this.tools.values()] : eligibleTools(state, [...this.tools.values()]);
+    return tools
       .sort((left, right) => left.name.localeCompare(right.name))
       .map((tool) => describeForModel(tool));
   }
@@ -152,12 +174,27 @@ export class ToolRegistry {
       });
     }
 
+    if (request.state !== undefined) {
+      const eligible = this.checkEligible(
+        request.state,
+        request.tool,
+        parsed.value as Record<string, unknown>,
+      );
+      if (!eligible.ok) {
+        return this.finish(request, startedAt, started, null, {
+          error: new RegistryError('TOOL_INELIGIBLE', 'That tool is no longer eligible.', {
+            detail: eligible.detail,
+          }),
+        });
+      }
+    }
+
     const timeout = AbortSignal.timeout(tool.timeoutMs);
     const signal =
       request.signal === undefined ? timeout : AbortSignal.any([request.signal, timeout]);
 
     try {
-      const output = await tool.run(parsed.value, this.contextWith(signal));
+      const output = await tool.run(parsed.value, this.contextWith(signal, request.state));
       return this.finish(request, startedAt, started, output, {});
     } catch (error) {
       if (alreadyAborted(request.signal)) {
@@ -175,13 +212,14 @@ export class ToolRegistry {
     }
   }
 
-  private contextWith(signal: AbortSignal): ToolContext {
+  private contextWith(signal: AbortSignal, state?: AgentState): ToolContext {
     return {
       sessionId: this.sessionId,
       sandbox: this.sandbox,
       commands: this.commands,
       signal,
       limits: this.limits,
+      ...(state === undefined ? {} : { state }),
     };
   }
 

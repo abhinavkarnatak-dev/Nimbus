@@ -24,7 +24,7 @@ function Nothing({ what, why }: { what: string; why: string }): React.JSX.Elemen
 }
 
 export function ProgressPane({ live }: { live: LiveSession }): React.JSX.Element {
-  if (live.tools.length === 0) {
+  if (live.tools.length === 0 && live.milestones.length === 0) {
     return (
       <Nothing
         what="Nothing has run yet."
@@ -35,6 +35,18 @@ export function ProgressPane({ live }: { live: LiveSession }): React.JSX.Element
 
   return (
     <ol className="steps">
+      {live.milestones.map((one) => (
+        <li className="step" key={one.id} data-tone={one.tone}>
+          <span className="step__mark" aria-hidden="true" />
+          <div className="step__body">
+            <p className="step__head">
+              <span className="step__what">{one.title}</span>
+              <span className="step__state">{new Date(one.at).toLocaleTimeString()}</span>
+            </p>
+            {one.detail === '' ? null : <p className="step__why">{one.detail}</p>}
+          </div>
+        </li>
+      ))}
       {live.tools.map((one, at) => (
         <li className="step" key={one.toolCallId} data-tone={toneOf(one.outcome)}>
           <span className="step__mark" aria-hidden="true" />
@@ -50,6 +62,9 @@ export function ProgressPane({ live }: { live: LiveSession }): React.JSX.Element
             </p>
 
             {one.summary === '' ? null : <p className="step__why">{one.summary}</p>}
+            {one.command === null ? null : (
+              <code className="check__command">$ {one.command.display}</code>
+            )}
 
             {one.paths.length === 0 ? null : (
               <p className="step__paths">
@@ -60,10 +75,47 @@ export function ProgressPane({ live }: { live: LiveSession }): React.JSX.Element
                 ))}
               </p>
             )}
+            {one.output === '' ? null : (
+              <details className="step__details">
+                <summary>Bounded output</summary>
+                <pre className="shell__out">{one.output}</pre>
+              </details>
+            )}
           </div>
         </li>
       ))}
     </ol>
+  );
+}
+
+export function OverviewPane({ live }: { live: LiveSession }): React.JSX.Element {
+  return (
+    <div className="overview">
+      <section className="overview__card">
+        <p className="pane__word">Current execution</p>
+        <h3 className="overview__phase">{live.phase?.split('_').join(' ') ?? 'queued'}</h3>
+        <p className="overview__activity">{live.progress.currentActivity ?? 'Waiting for the next durable activity.'}</p>
+        {live.workspaceRevision === null ? null : (
+          <p className="overview__revision">Revision {String(live.workspaceRevision.number)} · {live.workspaceRevision.treeHash.slice(0, 12)}</p>
+        )}
+      </section>
+      <section className="overview__card">
+        <p className="pane__word">Phase progress</p>
+        <div className="phase-list">
+          {live.completedPhases.map((phase) => <span className="phase-chip" data-state="done" key={phase}>{phase.split('_').join(' ')}</span>)}
+          {live.phase === null ? null : <span className="phase-chip" data-state="current">{live.phase.split('_').join(' ')}</span>}
+          {live.remainingPhases.map((phase) => <span className="phase-chip" key={phase}>{phase.split('_').join(' ')}</span>)}
+        </div>
+      </section>
+      <section className="overview__card">
+        <p className="pane__word">Outcome gates</p>
+        <dl className="facts">
+          <div className="fact"><dt>Checks</dt><dd>{String(live.checks.length)}</dd></div>
+          <div className="fact"><dt>Review</dt><dd>{live.review?.verdict.split('_').join(' ') ?? 'pending'}</dd></div>
+          <div className="fact"><dt>Delivery</dt><dd>{live.deliveryStage.split('_').join(' ')}</dd></div>
+        </dl>
+      </section>
+    </div>
   );
 }
 
@@ -202,6 +254,21 @@ function CheckRow({ check }: { check: CheckResult }): React.JSX.Element {
         </p>
 
         {check.summary === '' ? null : <p className="check__why">{check.summary}</p>}
+        <p className="check__meta">
+          {check.reason === undefined ? null : <span>{check.reason.split('_').join(' ')}</span>}
+          {check.revision === undefined ? null : <span>revision {String(check.revision.number)}</span>}
+          {check.baselineStatus === undefined ? null : <span>baseline {check.baselineStatus.split('_').join(' ')}</span>}
+          {check.fallbackAvailable === undefined ? null : <span>{check.fallbackAvailable ? 'fallback available' : 'no fallback'}</span>}
+        </p>
+        {check.command === undefined ? null : (
+          <code className="check__command">$ {check.command.display}</code>
+        )}
+        {(check.scope ?? []).length === 0 ? null : (
+          <p className="step__paths">{(check.scope ?? []).map((path) => <span className="step__path" key={path}>{path}</span>)}</p>
+        )}
+        {check.output === undefined || check.output === '' ? null : (
+          <details className="step__details"><summary>Bounded output</summary><pre className="shell__out">{check.output}</pre></details>
+        )}
       </div>
     </li>
   );

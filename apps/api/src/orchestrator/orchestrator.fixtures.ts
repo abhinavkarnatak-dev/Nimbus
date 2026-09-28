@@ -56,9 +56,9 @@ export const BACKEND_ONLY_TOKEN = 'ghs_atokenthatnevergoesinsidethesandbox';
 export function answer(
   tool: string,
   toolArguments: Record<string, unknown>,
-): { value: { intent: string; tool: string; toolArgumentsJson: string } } {
+): { value: { intent: string; tool: string; toolArguments: Record<string, unknown> } } {
   return {
-    value: { intent: `do ${tool}`, tool, toolArgumentsJson: JSON.stringify(toolArguments) },
+    value: { intent: `do ${tool}`, tool, toolArguments },
   };
 }
 

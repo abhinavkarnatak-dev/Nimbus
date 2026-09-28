@@ -60,14 +60,77 @@ export const FileChangeSchema = z.strictObject({
 
 export const CheckKindSchema = z.enum(['test', 'lint', 'typecheck', 'build']);
 
-export const CheckStatusSchema = z.enum(['passed', 'failed', 'errored', 'not_run']);
+export const CheckStatusSchema = z.enum([
+  'passed',
+  'failed',
+  'unavailable',
+  'blocked',
+  'timed_out',
+  'errored',
+  'cancelled',
+  'skipped',
+  // Kept on the wire while pre-V1.1 session records are migrated.
+  'not_run',
+]);
+
+export const CHECK_REASONS = [
+  'source_failure',
+  'test_failure',
+  'lint_failure',
+  'typecheck_failure',
+  'build_failure',
+  'compiler_missing',
+  'runtime_missing',
+  'dependency_missing',
+  'permission_denied',
+  'network_denied',
+  'filesystem_denied',
+  'resource_limit',
+  'invalid_command',
+  'unsupported_language',
+  'baseline_failure',
+  'cancelled',
+  'unknown',
+] as const;
+
+export const CheckReasonSchema = z.enum(CHECK_REASONS);
+export const BaselineStatusSchema = z.enum([
+  'not_compared',
+  'introduced',
+  'pre_existing',
+  'mixed',
+  'infrastructure',
+  'unknown',
+]);
+
+export const CommandDescriptorSchema = z.strictObject({
+  executable: z.string().min(1).max(500),
+  args: z.array(z.string().max(4_096)).max(64),
+  workingDirectory: z.string().min(1).max(LIMITS.pathMaxChars),
+  purpose: z.string().min(1).max(LIMITS.summaryMaxChars),
+  source: z.enum(['repository', 'trusted_infrastructure']),
+  display: z.string().min(1).max(2_000),
+});
 
 export const CheckResultSchema = z.strictObject({
+  checkId: z.string().min(1).max(120).optional(),
   name: z.string().min(1).max(120),
   kind: CheckKindSchema,
   status: CheckStatusSchema,
+  reason: CheckReasonSchema.optional(),
   summary: z.string().max(LIMITS.summaryMaxChars),
+  command: CommandDescriptorSchema.optional(),
+  scope: z.array(WorkspacePathSchema).max(LIMITS.maxFilesListed).optional(),
+  revision: z
+    .strictObject({ number: z.int().nonnegative(), treeHash: z.string().regex(/^[0-9a-f]{64}$/) })
+    .optional(),
+  exitCode: z.int().nullable().optional(),
   durationMs: z.int().nonnegative().optional(),
+  output: z.string().max(LIMITS.toolOutputChunkMaxChars).optional(),
+  outputTruncated: z.boolean().optional(),
+  required: z.boolean().optional(),
+  fallbackAvailable: z.boolean().optional(),
+  baselineStatus: BaselineStatusSchema.optional(),
 });
 
 export const ToolInvocationSchema = z.strictObject({
@@ -76,6 +139,9 @@ export const ToolInvocationSchema = z.strictObject({
   summary: z.string().min(1).max(LIMITS.summaryMaxChars),
   paths: z.array(WorkspacePathSchema).max(LIMITS.maxFilesListed),
   startedAt: z.iso.datetime({ offset: false }),
+  phase: z.string().min(1).max(40).optional(),
+  command: CommandDescriptorSchema.optional(),
+  workspaceRevision: z.int().nonnegative().optional(),
 });
 
 export type ToolName = z.infer<typeof ToolNameSchema>;
@@ -87,4 +153,7 @@ export type FileChange = z.infer<typeof FileChangeSchema>;
 export type CheckKind = z.infer<typeof CheckKindSchema>;
 export type CheckStatus = z.infer<typeof CheckStatusSchema>;
 export type CheckResult = z.infer<typeof CheckResultSchema>;
+export type CheckReason = z.infer<typeof CheckReasonSchema>;
+export type BaselineStatus = z.infer<typeof BaselineStatusSchema>;
+export type CommandDescriptor = z.infer<typeof CommandDescriptorSchema>;
 export type ToolInvocation = z.infer<typeof ToolInvocationSchema>;

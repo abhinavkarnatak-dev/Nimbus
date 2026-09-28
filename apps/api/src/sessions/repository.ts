@@ -7,6 +7,12 @@ import type {
   SessionFailure,
   SessionMessage,
   SessionStatus,
+  ReliableAgentPhase,
+  WorkspaceRevision,
+  PatchReview,
+  DeliveryStage,
+  ToolInvocation,
+  ToolOutcome,
 } from '@nimbus/contracts';
 import type { Db } from 'mongodb';
 
@@ -49,6 +55,8 @@ export function wasLeftMidRun(status: SessionStatus): boolean {
 export interface RunProgress {
   step: number;
   currentActivity: string | null;
+  phase?: ReliableAgentPhase | null;
+  deliveryStage?: DeliveryStage;
 }
 
 export interface RunOutcome {
@@ -64,6 +72,10 @@ export interface RunOutcome {
   checks?: CheckResult[];
   /** Delivery is independent from the conversation being open. */
   deliveryStatus?: DeliveryStatus | null;
+  phase?: ReliableAgentPhase | null;
+  workspaceRevision?: WorkspaceRevision | null;
+  review?: PatchReview | null;
+  deliveryStage?: DeliveryStage;
 }
 
 export interface UserMessageInput {
@@ -109,6 +121,15 @@ export interface SessionRecords {
   startRun(sessionId: string, at: Date): Promise<SessionDocument | null>;
   pinBaseCommitSha(sessionId: string, candidate: string, at: Date): Promise<string | null>;
   recordProgress(sessionId: string, progress: RunProgress, at: Date): Promise<void>;
+  recordToolStarted(sessionId: string, invocation: ToolInvocation, at: Date): Promise<void>;
+  recordToolCompleted(
+    sessionId: string,
+    toolCallId: string,
+    outcome: ToolOutcome,
+    summary: string,
+    durationMs: number,
+    at: Date,
+  ): Promise<void>;
   recordOutcome(sessionId: string, outcome: RunOutcome, at: Date): Promise<SessionDocument | null>;
   bumpRetry(sessionId: string, at: Date): Promise<number>;
   isLive(sessionId: string): Promise<boolean>;
@@ -288,8 +309,67 @@ export class MongoSessionRecords implements SessionRecords {
     await sessionsCollection(this.db).updateOne(
       { sessionId, status: { $in: activeStatuses() } },
       {
-        $set: { currentActivity: progress.currentActivity, updatedAt: at, lastActivityAt: at },
+        $set: {
+          currentActivity: progress.currentActivity,
+          ...(progress.phase === undefined ? {} : { agentPhase: progress.phase }),
+          ...(progress.deliveryStage === undefined
+            ? {}
+            : { deliveryStage: progress.deliveryStage }),
+          updatedAt: at,
+          lastActivityAt: at,
+        },
         $max: { step: progress.step },
+      },
+    );
+  }
+
+  async recordToolStarted(sessionId: string, invocation: ToolInvocation, at: Date): Promise<void> {
+    await sessionsCollection(this.db).updateOne(
+      {
+        sessionId,
+        status: { $in: activeStatuses() },
+        'toolEvents.toolCallId': { $ne: invocation.toolCallId },
+      },
+      {
+        $push: {
+          toolEvents: {
+            $each: [
+              {
+                toolCallId: invocation.toolCallId,
+                tool: invocation.tool,
+                outcome: 'succeeded',
+                summary: invocation.summary,
+                paths: invocation.paths,
+                startedAt: new Date(invocation.startedAt),
+                ...(invocation.command === undefined ? {} : { command: invocation.command }),
+              },
+            ],
+            $slice: -200,
+          },
+        },
+        $set: { updatedAt: at, lastActivityAt: at },
+      },
+    );
+  }
+
+  async recordToolCompleted(
+    sessionId: string,
+    toolCallId: string,
+    outcome: ToolOutcome,
+    summary: string,
+    durationMs: number,
+    at: Date,
+  ): Promise<void> {
+    await sessionsCollection(this.db).updateOne(
+      { sessionId, 'toolEvents.toolCallId': toolCallId },
+      {
+        $set: {
+          'toolEvents.$.outcome': outcome,
+          'toolEvents.$.summary': summary,
+          'toolEvents.$.durationMs': durationMs,
+          updatedAt: at,
+          lastActivityAt: at,
+        },
       },
     );
   }
@@ -724,9 +804,50 @@ export class InMemorySessionRecords implements SessionRecords {
 
     held.step = Math.max(held.step, progress.step);
     held.currentActivity = progress.currentActivity;
+    if (progress.phase !== undefined) held.agentPhase = progress.phase;
+    if (progress.deliveryStage !== undefined) held.deliveryStage = progress.deliveryStage;
     held.updatedAt = at;
     held.lastActivityAt = at;
     return Promise.resolve();
+  }
+
+  async recordToolStarted(sessionId: string, invocation: ToolInvocation, at: Date): Promise<void> {
+    const held = this.#activeOne(sessionId);
+    if (
+      held === undefined ||
+      held.toolEvents.some((event) => event.toolCallId === invocation.toolCallId)
+    )
+      return;
+    held.toolEvents.push({
+      toolCallId: invocation.toolCallId,
+      tool: invocation.tool,
+      outcome: 'succeeded',
+      summary: invocation.summary,
+      paths: [...invocation.paths],
+      startedAt: new Date(invocation.startedAt),
+      ...(invocation.command === undefined ? {} : { command: invocation.command }),
+    });
+    held.toolEvents = held.toolEvents.slice(-200);
+    held.updatedAt = at;
+    held.lastActivityAt = at;
+  }
+
+  async recordToolCompleted(
+    sessionId: string,
+    toolCallId: string,
+    outcome: ToolOutcome,
+    summary: string,
+    durationMs: number,
+    at: Date,
+  ): Promise<void> {
+    const held = this.documents.find((one) => one.sessionId === sessionId);
+    const event = held?.toolEvents.find((one) => one.toolCallId === toolCallId);
+    if (held === undefined || event === undefined) return;
+    event.outcome = outcome;
+    event.summary = summary;
+    event.durationMs = durationMs;
+    held.updatedAt = at;
+    held.lastActivityAt = at;
   }
 
   async recordOutcome(
@@ -1085,5 +1206,11 @@ export function outcomeFields(outcome: RunOutcome, at: Date): Partial<SessionDoc
     ...(outcome.currentActivity === undefined ? {} : { currentActivity: outcome.currentActivity }),
     ...(outcome.filesChanged === undefined ? {} : { filesChanged: outcome.filesChanged }),
     ...(outcome.checks === undefined ? {} : { checks: outcome.checks }),
+    ...(outcome.phase === undefined ? {} : { agentPhase: outcome.phase }),
+    ...(outcome.workspaceRevision === undefined
+      ? {}
+      : { workspaceRevision: outcome.workspaceRevision }),
+    ...(outcome.review === undefined ? {} : { patchReview: outcome.review }),
+    ...(outcome.deliveryStage === undefined ? {} : { deliveryStage: outcome.deliveryStage }),
   };
 }
