@@ -58,6 +58,7 @@ export interface AgentSessionServiceOptions {
   events?: EventPublisher;
   notifyCancelled?: (session: SessionDocument) => Promise<void>;
   maxSteps?: number;
+  maxStepsOrigin?: 'default' | 'configured';
   now?: () => Date;
   providerKeys: ProviderKeyDirectory;
   titles?: SessionTitleGenerator;
@@ -121,6 +122,8 @@ export class AgentSessionService {
 
   readonly #maxSteps: number;
 
+  readonly #maxStepsOrigin: 'default' | 'configured';
+
   readonly #approvalsFor: (sessionId: string) => ApprovalStore;
 
   readonly #cancellations: CancelAnnouncer | null;
@@ -140,6 +143,8 @@ export class AgentSessionService {
     this.#repositories = options.repositories;
     this.#logger = options.logger;
     this.#maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
+    this.#maxStepsOrigin =
+      options.maxStepsOrigin ?? (options.maxSteps === undefined ? 'default' : 'configured');
     this.#approvalsFor = options.approvalsFor ?? ((): ApprovalStore => new InMemoryApprovals());
     this.#cancellations = options.cancellations ?? null;
     this.#events = options.events ?? null;
@@ -545,6 +550,7 @@ export class AgentSessionService {
       sandboxId: null,
       step: 0,
       maxSteps: this.#maxSteps,
+      maxStepsOrigin: this.#maxStepsOrigin,
       currentActivity: null,
       retryCount: 0,
       filesRead: [],

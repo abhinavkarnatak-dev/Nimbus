@@ -145,7 +145,7 @@ export class SessionRunner {
         status: 'working',
         progress: {
           step: session.step,
-          maxSteps: session.maxSteps,
+          maxSteps: prepared.input.state.budgets.maxSteps,
           currentActivity: resuming ? 'continuing from your answer' : 'reading the code',
         },
       });

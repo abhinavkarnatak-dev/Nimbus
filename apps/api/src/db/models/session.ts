@@ -198,6 +198,8 @@ export interface SessionDocument {
   sandboxId: string | null;
   step: number;
   maxSteps: number;
+  /** Missing only on sessions written before step-limit provenance was recorded. */
+  maxStepsOrigin?: 'default' | 'configured';
   currentActivity: string | null;
   retryCount: number;
   filesRead: string[];
@@ -483,6 +485,7 @@ export const sessionModel: ModelDefinition = {
         sandboxId: { bsonType: ['string', 'null'], maxLength: 200 },
         step: { bsonType: 'number', minimum: 0 },
         maxSteps: { bsonType: 'number', minimum: 1 },
+        maxStepsOrigin: { enum: ['default', 'configured'] },
         currentActivity: { bsonType: ['string', 'null'], maxLength: LIMITS.summaryMaxChars },
         retryCount: { bsonType: 'number', minimum: 0 },
         filesRead: {

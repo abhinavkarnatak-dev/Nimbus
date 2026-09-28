@@ -700,6 +700,7 @@ describe('the step budget written onto a session', () => {
     await harness.service.create(OWNER_ID, newBody());
 
     expect(harness.records.documents[0]?.maxSteps).toBe(DEFAULT_MAX_STEPS);
+    expect(harness.records.documents[0]?.maxStepsOrigin).toBe('default');
     expect(DEFAULT_MAX_STEPS).toBe(DEFAULT_LIMITS.maxAgentSteps);
   });
 

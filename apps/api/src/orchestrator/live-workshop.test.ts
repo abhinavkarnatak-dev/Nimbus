@@ -50,29 +50,38 @@ async function workshopFor(
   session: SessionDocument;
   workshop: LiveSessionWorkshop;
   vision: FakeVisionProvider;
+  records: InMemorySessionRecords;
 }> {
   const session = sessionDocument();
   const owned = documents.map((one) => ({ ...one, userId: session.userId }));
-  const records = new InMemoryAttachmentRecords();
+  const attachmentRecords = new InMemoryAttachmentRecords();
+  const sessionRecords = new InMemorySessionRecords();
   const captured = capturingLogger();
   const vision = options.vision ?? new FakeVisionProvider();
   const bytes = new FakeImageBytes();
 
   for (const document of owned) {
-    await records.insert(document);
+    await attachmentRecords.insert(document);
   }
+  await sessionRecords.insert(session);
 
   const attachments = new SessionAttachments({
-    records,
+    records: attachmentRecords,
     bytes,
     describers: fixedDescriber(
-      new ImageDescriber({ vision, records, bytes, logger: captured.logger }),
+      new ImageDescriber({
+        vision,
+        records: attachmentRecords,
+        bytes,
+        logger: captured.logger,
+      }),
     ),
     logger: captured.logger,
   });
 
   return {
     vision,
+    records: sessionRecords,
     session: { ...session, attachments: owned.map(listed) },
     workshop: new LiveSessionWorkshop({
       db: NO_DATABASE,
@@ -83,6 +92,7 @@ async function workshopFor(
       providerKeys: everyProviderKey(),
       config: loadConfig({ ...minimalEnv(), ...options.env }),
       logger: captured.logger,
+      records: sessionRecords,
       ...(options.wired === false ? {} : { attachments }),
     }),
   };
@@ -401,11 +411,41 @@ describe('the limits a run is prepared with', () => {
     await prepared.finish();
   });
 
-  it('preserves an existing 30-step contract when the current default is larger', async () => {
+  it('migrates a legacy 30-step session when the deployment uses product defaults', async () => {
     const held = await workshopFor([]);
 
     const prepared = await held.workshop.prepare(
       { ...held.session, maxSteps: 30 },
+      { signal: new AbortController().signal },
+    );
+
+    expect(prepared.input.state.budgets.maxSteps).toBe(DEFAULT_LIMITS.maxAgentSteps);
+    expect(held.records.documents[0]?.maxSteps).toBe(DEFAULT_LIMITS.maxAgentSteps);
+    expect(held.records.documents[0]?.maxStepsOrigin).toBe('default');
+    await prepared.finish();
+  });
+
+  it('preserves an ambiguous legacy 30 when the operator explicitly configures the deployment', async () => {
+    const held = await workshopFor([], {
+      env: { MAX_AGENT_STEPS: String(DEFAULT_LIMITS.maxAgentSteps) },
+    });
+
+    const prepared = await held.workshop.prepare(
+      { ...held.session, maxSteps: 30 },
+      { signal: new AbortController().signal },
+    );
+
+    expect(prepared.input.state.budgets.maxSteps).toBe(30);
+    expect(held.records.documents[0]?.maxSteps).toBe(30);
+    expect(held.records.documents[0]?.maxStepsOrigin).toBe('configured');
+    await prepared.finish();
+  });
+
+  it('never widens a persisted operator ceiling under product defaults', async () => {
+    const held = await workshopFor([]);
+
+    const prepared = await held.workshop.prepare(
+      { ...held.session, maxSteps: 30, maxStepsOrigin: 'configured' },
       { signal: new AbortController().signal },
     );
 

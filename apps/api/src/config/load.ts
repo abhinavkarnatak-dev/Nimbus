@@ -91,6 +91,7 @@ export interface AppConfig {
   features: { semanticSearch: boolean };
   qdrant: QdrantConfig | null;
   limits: EffectiveLimits;
+  limitSources: { maxAgentSteps: 'default' | 'configured' };
   logging: { level: LogLevel };
 }
 
@@ -276,7 +277,7 @@ function productionIssues(config: AppConfig): string[] {
   return issues;
 }
 
-function toAppConfig(raw: RawEnvironment): AppConfig {
+function toAppConfig(raw: RawEnvironment, source: Record<string, string | undefined>): AppConfig {
   return {
     env: raw.NODE_ENV,
     isProduction: raw.NODE_ENV === 'production',
@@ -335,6 +336,9 @@ function toAppConfig(raw: RawEnvironment): AppConfig {
       maxDiffLines: raw.MAX_DIFF_LINES,
       maxSandboxSeconds: raw.SANDBOX_MAX_SECONDS,
     },
+    limitSources: {
+      maxAgentSteps: source['MAX_AGENT_STEPS'] === undefined ? 'default' : 'configured',
+    },
     logging: { level: raw.LOG_LEVEL },
   };
 }
@@ -346,7 +350,7 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     throw new ConfigError(describeIssues(parsed.error));
   }
 
-  const config = toAppConfig(parsed.data);
+  const config = toAppConfig(parsed.data, source);
   const issues = [
     ...modelCatalogueIssues(config.llm),
     ...sessionLifetimeIssues(config),

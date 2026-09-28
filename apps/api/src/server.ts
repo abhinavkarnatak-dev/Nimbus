@@ -360,6 +360,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
           repositories,
           logger,
           maxSteps: config.limits.maxAgentSteps,
+          maxStepsOrigin: config.limitSources.maxAgentSteps,
           approvalsFor: (sessionId) => new MongoApprovals({ db: handle.db, sessionId }),
           cancellations: cancelAnnouncer,
           events,
