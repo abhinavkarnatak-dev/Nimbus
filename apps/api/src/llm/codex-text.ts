@@ -116,19 +116,37 @@ export class CodexTextProvider implements TextProvider {
     signal: AbortSignal | undefined,
     outputSchema?: unknown,
   ) {
-    const thread = this.#client.startThread({
-      model,
-      ...(this.#workingDirectory === undefined ? {} : { workingDirectory: this.#workingDirectory }),
-      skipGitRepoCheck: true,
-      sandboxMode: 'read-only',
-      approvalPolicy: 'never',
-      networkAccessEnabled: false,
-      webSearchMode: 'disabled',
-    });
-    const turn = await thread.run(prompt, {
-      ...(outputSchema === undefined ? {} : { outputSchema }),
-      ...(signal === undefined ? {} : { signal }),
-    });
-    return turn;
+    try {
+      const thread = this.#client.startThread({
+        model,
+        ...(this.#workingDirectory === undefined ? {} : { workingDirectory: this.#workingDirectory }),
+        skipGitRepoCheck: true,
+        sandboxMode: 'read-only',
+        approvalPolicy: 'never',
+        networkAccessEnabled: false,
+        webSearchMode: 'disabled',
+      });
+      return await thread.run(prompt, {
+        ...(outputSchema === undefined ? {} : { outputSchema }),
+        ...(signal === undefined ? {} : { signal }),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const lower = message.toLowerCase();
+      const code = signal?.aborted
+        ? 'LLM_CANCELLED'
+        : lower.includes('auth') || lower.includes('login') || lower.includes('credential')
+          ? 'LLM_UNAUTHENTICATED'
+          : lower.includes('rate limit') || lower.includes('429')
+            ? 'LLM_RATE_LIMITED'
+            : lower.includes('timeout') || lower.includes('timed out')
+              ? 'LLM_TIMED_OUT'
+              : 'LLM_UNAVAILABLE';
+      this.#logger.error(
+        { provider: this.name, model, error: message, code },
+        'Codex request failed',
+      );
+      throw new LlmError(code, `Codex request failed: ${message}`, { cause: error });
+    }
   }
 }

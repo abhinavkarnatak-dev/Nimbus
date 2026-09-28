@@ -34,7 +34,12 @@ import type { ProviderKeyDirectory, TextProviderSource } from '../llm/sources.js
 import { NO_KEYS_FOR_RUN } from '../llm/user-providers.js';
 import { buildSandboxSpec, type Sandbox, type SandboxProvider } from '../sandbox/index.js';
 import { ORCHESTRATOR_LIMITS } from './limits.js';
-import { WorkshopError, type PreparedRun, type SessionWorkshop } from './workshop.js';
+import {
+  WorkshopError,
+  type PreparationStage,
+  type PreparedRun,
+  type SessionWorkshop,
+} from './workshop.js';
 
 export interface InstallationDirectory {
   activeInstallation(userId: string): Promise<{ installationId: number } | null>;
@@ -96,7 +101,19 @@ export class LiveSessionWorkshop implements SessionWorkshop {
     this.#options = options;
   }
 
-  async prepare(session: SessionDocument, options: { signal: AbortSignal }): Promise<PreparedRun> {
+  async prepare(
+    session: SessionDocument,
+    options: {
+      signal: AbortSignal;
+      onStage?: (stage: PreparationStage) => Promise<void>;
+    },
+  ): Promise<PreparedRun> {
+    const stage = async (name: PreparationStage): Promise<void> => {
+      this.#options.logger.info({ sessionId: session.sessionId, stage: name }, 'run preparation stage');
+      await options.onStage?.(name);
+    };
+
+    await stage('checking GitHub access');
     const installation = await this.#options.installations.activeInstallation(session.userId);
 
     if (installation === null) {
@@ -112,6 +129,7 @@ export class LiveSessionWorkshop implements SessionWorkshop {
 
     let base: string;
 
+    await stage('resolving the repository commit');
     try {
       base = await this.#baseCommit(session, readToken, options.signal);
     } catch (error) {
@@ -122,6 +140,7 @@ export class LiveSessionWorkshop implements SessionWorkshop {
     let plan: ModelPlan;
     let text: TextProvider;
 
+    await stage('checking model access');
     try {
       const held = await this.#options.providerKeys.providersFor(session.userId);
 
@@ -166,7 +185,9 @@ export class LiveSessionWorkshop implements SessionWorkshop {
       );
     }
 
+    await stage('starting the sandbox');
     const sandbox = await this.#rent(session);
+    await stage('preparing the workspace');
     const registry = new ToolRegistry({
       sessionId: session.sessionId,
       sandbox,

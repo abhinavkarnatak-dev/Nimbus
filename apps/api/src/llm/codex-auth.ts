@@ -1,4 +1,4 @@
-import { chmod, mkdir, rm, stat } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm } from 'node:fs/promises';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -69,6 +69,7 @@ export class CodexAuthService implements CodexProviderSource {
     if (existing !== undefined) return existing.challenge;
     if (this.#pending.has(userId)) throw new Error('Codex device login is already in progress.');
     const home = await this.#home(userId);
+    this.#logger.info({ userId, home: '[redacted]' }, 'starting Codex device authentication');
     const child = this.#spawn(this.#codexPath, ['login', '--device-auth'], {
       env: { ...process.env, CODEX_HOME: home },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -92,6 +93,7 @@ export class CodexAuthService implements CodexProviderSource {
         if (challenge !== null) {
           this.#active.set(userId, { process: child, challenge, cancelled: lifecycle });
           this.#pending.delete(userId);
+          this.#logger.info({ userId }, 'Codex device authentication challenge received');
           resolve(challenge);
         }
       };
@@ -100,6 +102,7 @@ export class CodexAuthService implements CodexProviderSource {
       child.once('error', reject);
       child.once('exit', (code) => {
         if (!lifecycle.value && !this.#active.has(userId) && code !== 0) {
+          this.#logger.warn({ userId, exitCode: code }, 'Codex device authentication exited before completion');
           reject(new Error('Codex device login failed.'));
         }
         if (this.#active.get(userId)?.cancelled === lifecycle) this.#active.delete(userId);
@@ -118,14 +121,21 @@ export class CodexAuthService implements CodexProviderSource {
 
   async connected(userId: string): Promise<boolean> {
     try {
-      await stat(join(await this.#home(userId), 'auth.json'));
+      const contents = await readFile(join(await this.#home(userId), 'auth.json'), 'utf8');
+      const auth = JSON.parse(contents) as unknown;
+      if (typeof auth !== 'object' || auth === null) {
+        this.#logger.warn({ userId }, 'Codex auth file is not a JSON object');
+        return false;
+      }
       return true;
-    } catch {
+    } catch (error) {
+      this.#logger.debug({ userId, error: String(error) }, 'Codex credentials are not connected');
       return false;
     }
   }
 
   async disconnect(userId: string): Promise<void> {
+    this.#logger.info({ userId }, 'disconnecting Codex credentials');
     const active = this.#active.get(userId);
     if (active !== undefined) {
       active.cancelled.value = true;
@@ -144,7 +154,9 @@ export class CodexAuthService implements CodexProviderSource {
 
   async for(userId: string): Promise<CodexTextProvider | null> {
     if (!(await this.connected(userId))) return null;
-    return new CodexTextProvider({ logger: this.#logger, codexHome: await this.#home(userId) });
+    const home = await this.#home(userId);
+    this.#logger.debug({ userId, home: '[redacted]' }, 'building Codex provider');
+    return new CodexTextProvider({ logger: this.#logger, codexHome: home });
   }
 
   async #home(userId: string): Promise<string> {

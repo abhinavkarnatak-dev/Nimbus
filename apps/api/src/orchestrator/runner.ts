@@ -128,13 +128,33 @@ export class SessionRunner {
       );
     }
 
+    let preparationStage = 'starting preparation';
     try {
-      prepared = await this.#workshop.prepare(session, { signal });
+      prepared = await this.#workshop.prepare(session, {
+        signal,
+        onStage: async (stage): Promise<void> => {
+          preparationStage = stage;
+          await this.#records?.recordProgress(
+            session.sessionId,
+            { step: session.step, maxSteps: session.maxSteps, currentActivity: stage },
+            new Date(),
+          );
+          await this.#say(session, {
+            type: 'session.status',
+            status: 'provisioning',
+            progress: {
+              step: session.step,
+              maxSteps: session.maxSteps,
+              currentActivity: stage,
+            },
+          });
+        },
+      });
     } catch (error) {
       if (error instanceof WorkshopError && error.reason === 'stopped') {
         return { status: 'cancelled', currentActivity: null };
       }
-      const failed = this.#couldNotStart(session, error);
+      const failed = this.#couldNotStart(session, error, preparationStage);
       await this.#sayFailed(session, failed);
       return failed;
     }
@@ -625,24 +645,56 @@ export class SessionRunner {
     }
   }
 
-  #couldNotStart(session: SessionDocument, error: unknown): RunOutcome {
+  #couldNotStart(session: SessionDocument, error: unknown, stage = 'starting preparation'): RunOutcome {
     const reason = error instanceof WorkshopError ? error.reason : 'sandbox';
+    const thrown = describeFailure(error);
 
     this.#logger.error(
-      { sessionId: session.sessionId, reason, error: String(error) },
+      {
+        sessionId: session.sessionId,
+        stage,
+        reason,
+        error: thrown.error,
+        errorCode: thrown.code,
+        errorDetail: thrown.detail,
+        cause:
+          error instanceof Error && error.cause !== undefined
+            ? error.cause instanceof Error
+              ? error.cause.message
+              : JSON.stringify(error.cause)
+            : null,
+      },
       'a session could not be started',
     );
 
     if (reason === 'no_installation') {
-      return { status: 'failed', failure: failureOf('PROVIDER_UNAVAILABLE') };
+      return {
+        status: 'failed',
+        failure: failureOf(
+          'PROVIDER_UNAVAILABLE',
+          'Nimbus could not access the connected GitHub repository. Reconnect GitHub and try again.',
+        ),
+      };
     }
 
     if (reason === 'models') {
-      return { status: 'failed', failure: failureOf('PROVIDER_UNAVAILABLE') };
+      return {
+        status: 'failed',
+        failure: failureOf(
+          'PROVIDER_UNAVAILABLE',
+          'Nimbus could not start a usable model provider. Reconnect Codex or check the selected model.',
+        ),
+      };
     }
     if (reason === 'no_commit') {
       return { status: 'failed', failure: failureOf('REPOSITORY_EMPTY') };
     }
-    return { status: 'failed', failure: failureOf('SANDBOX_FAILED') };
+    return {
+      status: 'failed',
+      failure: failureOf(
+        'SANDBOX_FAILED',
+        'Nimbus could not start the coding sandbox. Check the sandbox provider and try again.',
+      ),
+    };
   }
 }

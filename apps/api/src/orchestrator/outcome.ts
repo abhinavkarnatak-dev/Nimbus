@@ -52,8 +52,8 @@ export const FAILURE_FOR_LLM: Readonly<Partial<Record<LlmErrorCode, FailureCode>
   LLM_BUDGET_EXCEEDED: 'TOKEN_BUDGET_EXHAUSTED',
 };
 
-export function failureOf(code: FailureCode): SessionFailure {
-  return { code, message: FAILURE_MESSAGES[code] };
+export function failureOf(code: FailureCode, message?: string): SessionFailure {
+  return { code, message: message ?? FAILURE_MESSAGES[code] };
 }
 
 export function isPaused(state: AgentState): boolean {
