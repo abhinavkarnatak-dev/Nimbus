@@ -34,10 +34,12 @@ interface PendingLogin {
 
 const DEVICE_URL = /https:\/\/auth\.openai\.com\/codex\/device(?:[/?][^\s)]+)?/i;
 const DEVICE_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/i;
+const ANSI_ESCAPE = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, 'g');
 
 export function parseDeviceChallenge(output: string): DeviceAuthChallenge | null {
-  if (DEVICE_URL.exec(output) === null) return null;
-  const code = DEVICE_CODE.exec(output)?.[0];
+  const clean = output.replace(ANSI_ESCAPE, '');
+  if (DEVICE_URL.exec(clean) === null) return null;
+  const code = DEVICE_CODE.exec(clean)?.[0];
   if (code === undefined) return null;
   return { url: 'https://auth.openai.com/codex/device', code: code.toUpperCase(), expiresAt: null };
 }

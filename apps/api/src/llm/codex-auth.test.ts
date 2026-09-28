@@ -25,4 +25,10 @@ describe('Codex device-auth output', () => {
     expect(parseDeviceChallenge('https://auth.openai.com/codex/device')).toBeNull();
     expect(parseDeviceChallenge('Code: ABCD-EFGHI')).toBeNull();
   });
+
+  it('strips terminal color escapes before reading the code', () => {
+    expect(
+      parseDeviceChallenge('\u001b[94mhttps://auth.openai.com/codex/device\u001b[0m\n\u001b[93mABCD-EFGHI\u001b[0m'),
+    ).toMatchObject({ code: 'ABCD-EFGHI' });
+  });
 });
