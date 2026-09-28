@@ -49,6 +49,8 @@ export function wasLeftMidRun(status: SessionStatus): boolean {
 export interface RunProgress {
   step: number;
   currentActivity: string | null;
+  maxSteps?: number;
+  maxStepsOrigin?: 'default' | 'configured';
 }
 
 export interface RunOutcome {
@@ -288,7 +290,15 @@ export class MongoSessionRecords implements SessionRecords {
     await sessionsCollection(this.db).updateOne(
       { sessionId, status: { $in: activeStatuses() } },
       {
-        $set: { currentActivity: progress.currentActivity, updatedAt: at, lastActivityAt: at },
+        $set: {
+          currentActivity: progress.currentActivity,
+          updatedAt: at,
+          lastActivityAt: at,
+          ...(progress.maxSteps === undefined ? {} : { maxSteps: progress.maxSteps }),
+          ...(progress.maxStepsOrigin === undefined
+            ? {}
+            : { maxStepsOrigin: progress.maxStepsOrigin }),
+        },
         $max: { step: progress.step },
       },
     );
@@ -724,6 +734,8 @@ export class InMemorySessionRecords implements SessionRecords {
 
     held.step = Math.max(held.step, progress.step);
     held.currentActivity = progress.currentActivity;
+    if (progress.maxSteps !== undefined) held.maxSteps = progress.maxSteps;
+    if (progress.maxStepsOrigin !== undefined) held.maxStepsOrigin = progress.maxStepsOrigin;
     held.updatedAt = at;
     held.lastActivityAt = at;
     return Promise.resolve();

@@ -50,6 +50,9 @@ export function ProgressPane({ live }: { live: LiveSession }): React.JSX.Element
             </p>
 
             {one.summary === '' ? null : <p className="step__why">{one.summary}</p>}
+            {one.resultSummary === '' ? null : (
+              <p className="step__why">Result: {one.resultSummary}</p>
+            )}
 
             {one.paths.length === 0 ? null : (
               <p className="step__paths">
@@ -236,6 +239,9 @@ function ShellRun({ run }: { run: ToolRun }): React.JSX.Element {
           $
         </span>
         <span className="shell__what">{run.summary === '' ? toolWords(run) : run.summary}</span>
+        {run.resultSummary === '' ? null : (
+          <span className="shell__result">{run.resultSummary}</span>
+        )}
         <span className="shell__state">
           {run.outcome === null ? 'running' : OUTCOME_WORDS[run.outcome]}
           {run.durationMs === null ? '' : ` · ${tookWords(run.durationMs)}`}

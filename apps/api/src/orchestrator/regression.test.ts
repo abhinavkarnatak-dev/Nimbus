@@ -18,6 +18,7 @@ import {
 import { resumedState } from './live-workshop.js';
 import { planFor } from '../routing/selection.js';
 import { SessionRunner } from './runner.js';
+import { shortfall } from '../agent/state/budgets.js';
 
 interface Harness {
   orchestrator: Orchestrator;
@@ -200,7 +201,7 @@ describe('038g and 038h together: progress and conversation share one document',
 });
 
 describe('038d and 038g together: a session keeps its own budget across a recovery', () => {
-  it('carries what was spent without ever exceeding the number the session was written with', () => {
+  it('carries monotonic usage and stops an over-budget recovery before another action', () => {
     const session = sessionDocument({ status: 'working', step: 40, maxSteps: 12 });
 
     const state = resumedState(
@@ -219,6 +220,7 @@ describe('038d and 038g together: a session keeps its own budget across a recove
     );
 
     expect(state.budgets.maxSteps).toBe(12);
-    expect(state.budgets.steps).toBe(12);
+    expect(state.budgets.steps).toBe(40);
+    expect(shortfall(state.budgets, Date.now())?.reason).toBe('step_budget');
   });
 });

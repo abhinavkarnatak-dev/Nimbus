@@ -61,6 +61,32 @@ export interface LiveWorkshopOptions {
   maxSteps?: number;
 }
 
+type StepLimitOrigin = 'default' | 'configured';
+const LEGACY_DEFAULT_MAX_STEPS = 30;
+
+export interface ResolvedStepLimit {
+  maxSteps: number;
+  origin: StepLimitOrigin;
+}
+
+export function stepLimitForSession(
+  persisted: number,
+  configured: number,
+  persistedOrigin: StepLimitOrigin | undefined,
+  configuredOrigin: StepLimitOrigin,
+): ResolvedStepLimit {
+  if (persisted <= 0) return { maxSteps: configured, origin: configuredOrigin };
+  if (persistedOrigin === 'default') return { maxSteps: configured, origin: 'default' };
+  if (persistedOrigin === 'configured') return { maxSteps: persisted, origin: 'configured' };
+
+  // Legacy records predate provenance. Migrate the former 30-step product default only when the
+  // current deployment is itself using product defaults. An explicit operator configuration makes
+  // the ambiguous legacy value a strict ceiling, so raising MAX_AGENT_STEPS never widens it.
+  return configuredOrigin === 'default' && persisted === LEGACY_DEFAULT_MAX_STEPS
+    ? { maxSteps: configured, origin: 'default' }
+    : { maxSteps: persisted, origin: 'configured' };
+}
+
 export class LiveSessionWorkshop implements SessionWorkshop {
   readonly name = 'live';
 
@@ -112,6 +138,33 @@ export class LiveSessionWorkshop implements SessionWorkshop {
     }
 
     const limits = this.#options.config.limits;
+    const configuredMaxSteps = this.#options.maxSteps ?? limits.maxAgentSteps;
+    const configuredOrigin: StepLimitOrigin =
+      this.#options.maxSteps === undefined
+        ? this.#options.config.limitSources.maxAgentSteps
+        : 'configured';
+    const stepLimit = stepLimitForSession(
+      session.maxSteps,
+      configuredMaxSteps,
+      session.maxStepsOrigin,
+      configuredOrigin,
+    );
+
+    if (
+      this.#options.records !== undefined &&
+      (stepLimit.maxSteps !== session.maxSteps || stepLimit.origin !== session.maxStepsOrigin)
+    ) {
+      await this.#options.records.recordProgress(
+        session.sessionId,
+        {
+          step: session.step,
+          currentActivity: session.currentActivity,
+          maxSteps: stepLimit.maxSteps,
+          maxStepsOrigin: stepLimit.origin,
+        },
+        new Date(),
+      );
+    }
 
     const sandbox = await this.#rent(session);
     const registry = new ToolRegistry({
@@ -133,7 +186,7 @@ export class LiveSessionWorkshop implements SessionWorkshop {
         baseCommitSha: base,
         defaultBranch: session.repository.defaultBranch,
         models: plan,
-        budgets: { maxSteps: session.maxSteps || (this.#options.maxSteps ?? limits.maxAgentSteps) },
+        budgets: { maxSteps: stepLimit.maxSteps },
       },
       session,
     );
@@ -425,7 +478,9 @@ export function resumedState(
     // reasoning node as conversation, so the agent does not lose the original context.
     task: session.clarificationAnswer === null && followUp !== null ? followUp : input.task,
   });
-  const spent = Math.min(Math.max(session.step, 0), fresh.budgets.maxSteps);
+  // Preserve the monotonic persisted count. An over-budget resume stops at the guard instead of
+  // pretending earlier work never happened and reusing its step-derived identity.
+  const spent = Math.max(session.step, 0);
 
   if (session.clarificationAnswer !== null) {
     return parseState({

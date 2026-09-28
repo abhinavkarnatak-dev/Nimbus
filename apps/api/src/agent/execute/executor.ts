@@ -1,4 +1,5 @@
 import {
+  LIMITS,
   PolicyRecordSchema,
   ToolEventSummarySchema,
   ToolInvocationSchema,
@@ -190,13 +191,17 @@ export class ActionExecutor {
       return;
     }
 
-    const summary = shorten(redactSecrets(request.intent));
+    const described = describeInvocation(request.tool, request.toolArguments);
+    const intent = shorten(redactSecrets(request.intent));
+    const summary = shorten(
+      redactSecrets([described.summary, intent === '' ? null : intent].filter(Boolean).join(' — ')),
+    );
 
     const invocation = ToolInvocationSchema.parse({
       toolCallId: request.toolCallId,
       tool: request.tool,
       summary: summary === '' ? `${request.tool} is running` : summary,
-      paths: [],
+      paths: described.paths,
       startedAt: new Date(this.#now()).toISOString(),
     });
 
@@ -335,6 +340,90 @@ export class ActionExecutor {
       userMessage: parts.userMessage ?? null,
       pause: parts.pause ?? null,
     };
+  }
+}
+
+interface InvocationDescription {
+  summary: string;
+  paths: string[];
+}
+
+function stringArgument(arguments_: Record<string, unknown>, name: string): string | null {
+  const value = arguments_[name];
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+function commandArgument(arguments_: Record<string, unknown>): string | null {
+  const value = arguments_['argv'];
+  if (!Array.isArray(value) || !value.every((part) => typeof part === 'string')) {
+    return null;
+  }
+  return redactSecrets(
+    value.map((part) => (/\s/.test(part) ? JSON.stringify(part) : part)).join(' '),
+  );
+}
+
+function patchPaths(arguments_: Record<string, unknown>): string[] {
+  const patch = stringArgument(arguments_, 'patch');
+  if (patch === null) return [];
+
+  const paths = [...patch.matchAll(/^\+\+\+\s+(?:b\/)?([^\s]+)$/gm)]
+    .map((match) => match[1] ?? '')
+    .filter((path) => path !== '' && path !== '/dev/null');
+  return [...new Set(paths)].slice(0, LIMITS.maxFilesListed);
+}
+
+export function describeInvocation(
+  tool: string,
+  arguments_: Record<string, unknown>,
+): InvocationDescription {
+  const path = stringArgument(arguments_, 'path');
+  const pathPrefix = stringArgument(arguments_, 'pathPrefix');
+  const command = commandArgument(arguments_);
+
+  switch (tool) {
+    case 'list_tree':
+      return { summary: `Listing ${path ?? 'the repository'}`, paths: path === null ? [] : [path] };
+    case 'search_code': {
+      const query = stringArgument(arguments_, 'query');
+      return {
+        summary: `Searching${query === null ? ' the code' : ` for ${JSON.stringify(query)}`}${pathPrefix === null ? '' : ` in ${pathPrefix}`}`,
+        paths: pathPrefix === null ? [] : [pathPrefix],
+      };
+    }
+    case 'semantic_search': {
+      const query = stringArgument(arguments_, 'query');
+      return {
+        summary: `Searching by meaning${query === null ? '' : ` for ${JSON.stringify(query)}`}`,
+        paths: [],
+      };
+    }
+    case 'read_file':
+      return { summary: `Reading ${path ?? 'a file'}`, paths: path === null ? [] : [path] };
+    case 'create_file':
+      return { summary: `Creating ${path ?? 'a file'}`, paths: path === null ? [] : [path] };
+    case 'apply_patch': {
+      const paths = patchPaths(arguments_);
+      return {
+        summary: paths.length === 0 ? 'Applying code changes' : `Editing ${paths.join(', ')}`,
+        paths,
+      };
+    }
+    case 'run_command':
+      return { summary: command === null ? 'Running a command' : `Running: ${command}`, paths: [] };
+    case 'run_checks': {
+      const name = stringArgument(arguments_, 'name');
+      return {
+        summary: `Running ${name ?? 'project checks'}${command === null ? '' : `: ${command}`}`,
+        paths: [],
+      };
+    }
+    case 'git_status':
+      return { summary: 'Inspecting workspace changes', paths: [] };
+    case 'prepare_commit':
+      return { summary: 'Preparing the completed changes for review', paths: [] };
+    default:
+      return { summary: '', paths: [] };
   }
 }
 

@@ -72,6 +72,13 @@ describe('shortfall', () => {
     expect(shortfall(spent, START)?.detail).toContain('2 of 2');
   });
 
+  it('honors a configured step ceiling above the default window', () => {
+    const spent = { ...budgets({ maxSteps: 35 }), steps: 35 };
+
+    expect(shortfall(spent, START)?.reason).toBe('step_budget');
+    expect(takeStep({ ...spent, steps: 34 }).maxSteps).toBe(35);
+  });
+
   it('names the retry budget', () => {
     const spent = { ...budgets({ maxRetries: 3 }), retries: 3 };
     expect(shortfall(spent, START)?.reason).toBe('retry_budget');

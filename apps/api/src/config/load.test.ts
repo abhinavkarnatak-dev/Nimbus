@@ -7,6 +7,7 @@ import {
   VALID_PRIVATE_KEY_PEM,
 } from './env.fixtures.js';
 import { ConfigError, loadConfig } from './load.js';
+import { DEFAULT_LIMITS } from './limits.js';
 
 const expectConfigError = (env: Record<string, string | undefined>): ConfigError => {
   try {
@@ -29,7 +30,8 @@ describe('valid configuration', () => {
     expect(config.api.port).toBe(4000);
     expect(config.session.ttlSeconds).toBe(604_800);
     expect(config.session.absoluteTtlSeconds).toBe(2_592_000);
-    expect(config.limits.maxAgentSteps).toBe(30);
+    expect(config.limits.maxAgentSteps).toBe(DEFAULT_LIMITS.maxAgentSteps);
+    expect(config.limitSources.maxAgentSteps).toBe('default');
     expect(config.logging.level).toBe('info');
   });
 
@@ -38,6 +40,12 @@ describe('valid configuration', () => {
 
     expect(config.api.port).toBe(8080);
     expect(config.limits.maxDiffLines).toBe(500);
+  });
+
+  it('remembers when the step ceiling was explicitly configured', () => {
+    expect(loadConfig({ ...minimalEnv(), MAX_AGENT_STEPS: '30' }).limitSources.maxAgentSteps).toBe(
+      'configured',
+    );
   });
 
   it('converts boolean settings from text', () => {

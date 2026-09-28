@@ -32,6 +32,10 @@ describe('the ceilings this build supports', () => {
     }
   });
 
+  it('does not impose a smaller arbitrary step window on normal agent runs', () => {
+    expect(DEFAULT_LIMITS.maxAgentSteps).toBe(HARD_LIMITS.maxAgentSteps);
+  });
+
   it('describes every limit it holds, so the startup line cannot go stale', () => {
     const described = describeLimits(DEFAULT_LIMITS);
 

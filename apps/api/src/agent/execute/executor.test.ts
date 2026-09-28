@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Sandbox } from '../../sandbox/index.js';
-import { ActionExecutor } from './executor.js';
+import { ActionExecutor, describeInvocation } from './executor.js';
 import { actionFor, executeHarness } from './execute.fixtures.js';
 
 async function holds(sandbox: Sandbox, path: string): Promise<boolean> {
@@ -25,11 +25,42 @@ describe('a person watching the run while it happens', () => {
     expect(harness.reporter.order).toEqual(['started', 'output', 'completed']);
   });
 
-  it('hears why the agent is doing it, in the agent own words', async () => {
+  it('hears what is actually happening and why the agent is doing it', async () => {
     const harness = await executeHarness();
     await harness.executor.execute({ ...READ, intent: 'checking how sign in redirects' });
 
-    expect(harness.reporter.starts[0]?.summary).toBe('checking how sign in redirects');
+    expect(harness.reporter.starts[0]?.summary).toBe(
+      'Reading src/auth/login.ts — checking how sign in redirects',
+    );
+    expect(harness.reporter.starts[0]?.paths).toEqual(['src/auth/login.ts']);
+  });
+
+  it('distinguishes creating a file from reading one', async () => {
+    const harness = await executeHarness();
+    const request = actionFor('create_file', { path: 'src/new.ts', contents: 'export {};\n' });
+    await harness.executor.execute(request);
+
+    expect(harness.reporter.starts[0]?.summary).toContain('Creating src/new.ts');
+    expect(harness.reporter.starts[0]?.summary).not.toContain('Reading');
+  });
+
+  it('shows the exact command in the live activity', () => {
+    expect(describeInvocation('run_command', { argv: ['git', 'log', '-n', '5'] })).toEqual({
+      summary: 'Running: git log -n 5',
+      paths: [],
+    });
+  });
+
+  it('redacts secrets from search terms and separate command arguments', async () => {
+    const harness = await executeHarness();
+    await harness.executor.execute(actionFor('search_code', { query: 'api_key=abcd1234efgh' }));
+
+    expect(harness.reporter.starts[0]?.summary).not.toContain('abcd1234efgh');
+    expect(
+      describeInvocation('run_command', {
+        argv: ['deploy', '--api-key', 'abcd1234efgh', '--region', 'us-east-1'],
+      }).summary,
+    ).not.toContain('abcd1234efgh');
   });
 
   it('names the same call on all three, so a view can join them up', async () => {

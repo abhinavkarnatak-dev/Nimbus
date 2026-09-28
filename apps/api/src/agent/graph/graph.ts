@@ -8,6 +8,7 @@ import type {
 } from '@nimbus/contracts';
 
 import type { Logger } from '../../logging/logger.js';
+import { newPrefixedId } from '../../lib/id.js';
 import type { AttachedText } from '../../routing/context.js';
 import type { SessionRouter } from '../../routing/router.js';
 import type { Sandbox } from '../../sandbox/index.js';
@@ -22,7 +23,7 @@ import {
 } from '../execute/loop.js';
 import { chooseNextAction } from '../nodes/reason.js';
 import { gatherContext } from '../nodes/retrieve.js';
-import { validateScope } from '../nodes/scope.js';
+import { isDiscoverableQuestion, validateScope } from '../nodes/scope.js';
 import type { ToolRegistry } from '../registry/registry.js';
 import { parseState, recordToolEvent, stopped, withPhase } from '../state/state.js';
 import type { PatchCaps } from '../../config/limits.js';
@@ -96,6 +97,14 @@ function checkedSinceLastEdit(state: AgentState): boolean {
   });
 
   return lastCheck > lastEdit;
+}
+
+function hasInvestigatedRepository(state: AgentState): boolean {
+  return state.toolEvents.some(
+    (event) =>
+      event.outcome === 'ok' &&
+      ['list_tree', 'search_code', 'semantic_search', 'read_file'].includes(event.tool),
+  );
 }
 
 function automaticExampleCheck(
@@ -298,6 +307,36 @@ export function buildAgentGraph(input: RunInput) {
     const toolArguments = JSON.parse(proposed.argumentsJson) as Record<string, unknown>;
     const actionHash = actionFingerprint(proposed.tool, toolArguments);
 
+    const proposedQuestion =
+      proposed.tool === 'wait_for_user' && typeof toolArguments['question'] === 'string'
+        ? toolArguments['question']
+        : '';
+
+    if (
+      proposed.tool === 'wait_for_user' &&
+      isDiscoverableQuestion(proposedQuestion) &&
+      !hasInvestigatedRepository(current.state)
+    ) {
+      const blocked = guard.blockRepeat(actionHash);
+      const history = [
+        ...current.history,
+        'Blocked before asking: this file, folder, path, command, or script can be found by inspecting the repository. Use list_tree, search_code, semantic_search, or read_file instead.',
+      ];
+
+      if (blocked >= 2) {
+        return {
+          done: true,
+          history,
+          state: stopped(parseState({ ...current.state, proposedAction: null }), 'repeated_action'),
+        };
+      }
+
+      return {
+        history,
+        state: parseState({ ...current.state, proposedAction: null, phase: 'reasoning' }),
+      };
+    }
+
     if (proposed.tool === 'run_checks' && checkedSinceLastEdit(current.state)) {
       return {
         history: [
@@ -358,7 +397,7 @@ export function buildAgentGraph(input: RunInput) {
 
     const result = await input.executor.execute({
       step: current.state.budgets.steps,
-      toolCallId: `call_${String(current.state.budgets.steps)}`,
+      toolCallId: newPrefixedId('call'),
       tool: proposed.tool,
       toolArguments,
       intent: proposed.reason,

@@ -1,11 +1,12 @@
 import {
   CONTRACTS_WIRE_VERSION,
   SessionIdSchema,
+  type ServerEvent,
   type SessionEventEnvelope,
 } from '@nimbus/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { applySessionEvents, type LiveSession } from './live.js';
+import { applyEvent, applySessionEvents, type LiveSession } from './live.js';
 
 const SESSION_ID = SessionIdSchema.parse('ses_0123456789abcdefghijk');
 const AT = '2026-09-28T10:00:00.000Z';
@@ -27,9 +28,46 @@ function live(): LiveSession {
   };
 }
 
+function completed(toolCallId: string, summary: string): ServerEvent {
+  return {
+    type: 'tool.completed',
+    toolCallId,
+    tool: 'run_command',
+    outcome: 'denied',
+    durationMs: 0,
+    summary,
+  };
+}
+
 function envelope(sequence: number, event: SessionEventEnvelope['event']): SessionEventEnvelope {
   return { v: CONTRACTS_WIRE_VERSION, sequence, sessionId: SESSION_ID, emittedAt: AT, event };
 }
+
+describe('tool completion activity', () => {
+  it('uses the result as a readable headline when policy denied the action before it started', () => {
+    const next = applyEvent(live(), completed('call_denied', 'command denied by policy'));
+
+    expect(next.tools[0]?.summary).toBe('command denied by policy');
+    expect(next.tools[0]?.resultSummary).toBe('');
+  });
+
+  it('keeps the truthful invocation headline when the tool did start', () => {
+    const started = applyEvent(live(), {
+      type: 'tool.started',
+      invocation: {
+        toolCallId: 'call_started',
+        tool: 'run_command',
+        summary: 'Running: pnpm test',
+        paths: [],
+        startedAt: '2026-01-01T10:00:00.000Z',
+      },
+    });
+    const next = applyEvent(started, completed('call_started', 'pnpm exited 0'));
+
+    expect(next.tools[0]?.summary).toBe('Running: pnpm test');
+    expect(next.tools[0]?.resultSummary).toBe('pnpm exited 0');
+  });
+});
 
 describe('session event replay', () => {
   it('rebuilds tool history without replacing the authoritative session snapshot', () => {
