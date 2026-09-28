@@ -1,10 +1,10 @@
 import {
-  LLM_PROVIDERS,
+  KEY_PROVIDERS,
   PROVIDER_KEY_SHAPES,
   ProviderKeysResponseSchema,
   providerKeyHint,
   providerKeyProblem,
-  type LlmProviderName,
+  type KeyProviderName,
   type ProviderKeysResponse,
 } from '@nimbus/contracts';
 import type { Db } from 'mongodb';
@@ -37,7 +37,7 @@ export interface ProviderKeyServiceOptions {
 
 export interface SaveProviderKeyInput {
   userId: string;
-  provider: LlmProviderName;
+  provider: KeyProviderName;
   apiKey: string;
   ip?: string | null;
 }
@@ -119,7 +119,7 @@ export class ProviderKeyService {
 
   async remove(
     userId: string,
-    provider: LlmProviderName,
+    provider: KeyProviderName,
     ip?: string | null,
   ): Promise<ProviderKeysResponse> {
     const gone = await providerKeysCollection(this.#db).deleteOne({ userId, provider });
@@ -141,12 +141,12 @@ export class ProviderKeyService {
     return this.list(userId);
   }
 
-  async providersFor(userId: string): Promise<LlmProviderName[]> {
+  async providersFor(userId: string): Promise<KeyProviderName[]> {
     return (await this.#documents(userId)).map((one) => one.provider);
   }
 
-  async keysFor(userId: string): Promise<Map<LlmProviderName, string>> {
-    const keys = new Map<LlmProviderName, string>();
+  async keysFor(userId: string): Promise<Map<KeyProviderName, string>> {
+    const keys = new Map<KeyProviderName, string>();
 
     for (const document of await this.#documents(userId)) {
       const opened = this.#open(document);
@@ -208,11 +208,11 @@ export class ProviderKeyService {
 
   async #documents(userId: string): Promise<ProviderKeyDocument[]> {
     const documents = await providerKeysCollection(this.#db)
-      .find({ userId, provider: { $in: LLM_PROVIDERS } })
+      .find({ userId, provider: { $in: KEY_PROVIDERS } })
       .toArray();
 
     return documents.sort(
-      (left, right) => LLM_PROVIDERS.indexOf(left.provider) - LLM_PROVIDERS.indexOf(right.provider),
+      (left, right) => KEY_PROVIDERS.indexOf(left.provider) - KEY_PROVIDERS.indexOf(right.provider),
     );
   }
 }

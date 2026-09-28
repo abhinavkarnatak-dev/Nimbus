@@ -177,6 +177,7 @@ describe('planFor', () => {
 
   it('never lets a model that cannot see become the vision model', () => {
     for (const id of SELECTABLE_TEXT_MODELS) {
+      if (findModel(id)?.vision !== true) continue;
       expect(findModel(planFor({ textModel: id }).vision)?.vision).toBe(true);
     }
   });

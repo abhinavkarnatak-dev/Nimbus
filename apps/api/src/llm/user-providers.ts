@@ -7,7 +7,12 @@ import { GeminiVisionProvider } from './gemini.js';
 import { DEFAULT_VISION_MODEL, defaultTextModelFor } from './models.js';
 import type { TextProvider, VisionProvider } from './provider.js';
 import { RoutedTextProvider } from './routed-text.js';
-import type { ProviderKeyDirectory, TextProviderSource, VisionProviderSource } from './sources.js';
+import type {
+  CodexProviderSource,
+  ProviderKeyDirectory,
+  TextProviderSource,
+  VisionProviderSource,
+} from './sources.js';
 
 export const NO_KEYS_FOR_RUN =
   'This account has no working model API key. Add one in settings and start the session again.';
@@ -15,6 +20,7 @@ export const NO_KEYS_FOR_RUN =
 export interface UserProvidersOptions {
   keys: ProviderKeyDirectory;
   logger: Logger;
+  codex?: CodexProviderSource;
 }
 
 export class UserProviders implements TextProviderSource {
@@ -22,17 +28,28 @@ export class UserProviders implements TextProviderSource {
 
   readonly #logger: Logger;
 
+  readonly #codex: CodexProviderSource | undefined;
+
   constructor(options: UserProvidersOptions) {
     this.#keys = options.keys;
     this.#logger = options.logger;
+    this.#codex = options.codex;
   }
 
   async for(userId: string): Promise<TextProvider> {
     const keys = await this.#keys.keysFor(userId);
     const providers: TextProvider[] = [];
+    const providerNames: LlmProviderName[] = [];
+
+    const codex = await this.#codex?.for(userId);
+    if (codex !== null && codex !== undefined) {
+      providers.push(codex);
+      providerNames.push(codex.name);
+    }
 
     for (const [provider, apiKey] of keys) {
       providers.push(this.#text(provider, apiKey));
+      providerNames.push(provider);
     }
 
     if (providers.length === 0) {
@@ -46,7 +63,7 @@ export class UserProviders implements TextProviderSource {
 
     return new RoutedTextProvider({
       providers,
-      defaultModel: defaultTextModelFor([...keys.keys()]),
+      defaultModel: defaultTextModelFor(providerNames),
     });
   }
 

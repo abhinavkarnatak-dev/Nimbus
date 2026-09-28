@@ -17,6 +17,8 @@ import {
 } from '../github/manage.js';
 import type { InstallationHandle } from '../github/useInstallation.js';
 import { ProviderKeys } from '../providers/ProviderKeys.js';
+import { CodexConnection } from '../providers/CodexConnection.js';
+import type { CodexAuthHandle } from '../providers/useCodexAuth.js';
 import type { ProviderKeysHandle } from '../providers/useProviderKeys.js';
 import { Button } from '../ui/Button.js';
 
@@ -25,6 +27,7 @@ export interface SettingsProps {
   context: SessionContext | null;
   installation: InstallationHandle;
   keys: ProviderKeysHandle;
+  codex: CodexAuthHandle;
   onSignedOut: () => Promise<void>;
 }
 
@@ -33,6 +36,7 @@ export function Settings({
   context,
   installation,
   keys,
+  codex,
   onSignedOut,
 }: SettingsProps): React.JSX.Element {
   const [asking, setAsking] = useState(false);
@@ -112,6 +116,11 @@ export function Settings({
             What Nimbus knows about you, and what it is allowed to reach on GitHub.
           </p>
         </header>
+
+        <section className="panel">
+          <h2 className="panel__title">Codex account</h2>
+          <CodexConnection auth={codex} />
+        </section>
 
         <section className="panel">
           <h2 className="panel__title">Signed in</h2>

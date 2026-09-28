@@ -1,5 +1,5 @@
 import {
-  LLM_PROVIDERS,
+  KEY_PROVIDERS,
   ModelCatalogueResponseSchema,
   SelectableModelSchema,
   type LlmProviderName,
@@ -12,6 +12,7 @@ import {
 import { LlmError } from '../llm/errors.js';
 import {
   DEFAULT_LIGHT_MODEL,
+  DEFAULT_CODEX_TEXT_MODEL,
   DEFAULT_REASONING_MODEL,
   DEFAULT_TEXT_MODEL,
   DEFAULT_VISION_MODEL,
@@ -24,9 +25,9 @@ export const SELECTABLE_TEXT_MODELS: readonly string[] = KNOWN_MODELS.filter(
 ).map((model) => model.id);
 
 export const ROLE_CANDIDATES: Readonly<Record<ModelRole, readonly string[]>> = {
-  primary: [DEFAULT_TEXT_MODEL, DEFAULT_LIGHT_MODEL],
-  light: [DEFAULT_LIGHT_MODEL, DEFAULT_TEXT_MODEL],
-  reasoning: [DEFAULT_REASONING_MODEL, DEFAULT_TEXT_MODEL],
+  primary: [DEFAULT_TEXT_MODEL, DEFAULT_CODEX_TEXT_MODEL, DEFAULT_LIGHT_MODEL],
+  light: [DEFAULT_LIGHT_MODEL, DEFAULT_TEXT_MODEL, DEFAULT_CODEX_TEXT_MODEL],
+  reasoning: [DEFAULT_REASONING_MODEL, DEFAULT_TEXT_MODEL, DEFAULT_CODEX_TEXT_MODEL],
   vision: [DEFAULT_VISION_MODEL],
 };
 
@@ -126,7 +127,7 @@ function modelForCandidates(role: ModelRole, providers: readonly LlmProviderName
 }
 
 export function planFor(selection?: PlanSelection): ModelPlan {
-  const providers = selection?.providers ?? LLM_PROVIDERS;
+  const providers = selection?.providers ?? KEY_PROVIDERS;
   const asked = selection?.textModel;
   const chosenByUser = asked !== undefined && asked.trim() !== '';
 

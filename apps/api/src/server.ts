@@ -30,10 +30,13 @@ import { LiveEventPublisher } from './events/publisher.js';
 import { MongoEventStore } from './events/store.js';
 import { ProviderKeyService } from './llm/provider-keys.js';
 import { UserProviders, UserVisionProviders } from './llm/user-providers.js';
+import { UserProviderDirectory } from './llm/sources.js';
 import { LiveProviderKeyVerifier } from './llm/verify.js';
 import { SecretBox } from './lib/secret-box.js';
 import { PROVIDER_KEY_INFO, deriveKey } from './auth/csrf.js';
 import { createProviderKeysRouter } from './http/routes/provider-keys.js';
+import { createCodexAuthRouter } from './http/routes/codex-auth.js';
+import { CodexAuthService } from './llm/codex-auth.js';
 import { SessionAttachments } from './routing/attached.js';
 import { UserImageDescribers } from './routing/describe.js';
 import { providersForPlan } from './routing/requirements.js';
@@ -248,9 +251,18 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
     logger,
   });
 
-  const userProviders = new UserProviders({ keys: providerKeys, logger });
+  const codexAuth = new CodexAuthService({
+    rootDirectory: process.env['NIMBUS_CODEX_HOME'] ?? '.nimbus-codex',
+    logger,
+  });
+  const userProviders = new UserProviders({ keys: providerKeys, codex: codexAuth, logger });
+  const modelProviders = new UserProviderDirectory(providerKeys, codexAuth);
 
-  const routers = [authRouter, createProviderKeysRouter({ keys: providerKeys, sessions })];
+  const routers = [
+    authRouter,
+    createProviderKeysRouter({ keys: providerKeys, sessions }),
+    createCodexAuthRouter({ auth: codexAuth, sessions }),
+  ];
   let repositories: InstallationService | null = null;
   let githubTokens: GitHubAppTokenProvider | null = null;
 
@@ -365,7 +377,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
           cancellations: cancelAnnouncer,
           events,
           notifyCancelled: tellCancelled,
-          providerKeys,
+          providerKeys: modelProviders,
           titles: new LlmSessionTitleGenerator({ text: userProviders, logger }),
         }),
       }),
@@ -400,7 +412,7 @@ export async function startApi(options: StartApiOptions): Promise<RunningApi> {
               tokens: githubTokens,
               sandboxes: sandboxProviderFor(config, logger),
               text: userProviders,
-              providerKeys,
+              providerKeys: modelProviders,
               config,
               logger,
               events,

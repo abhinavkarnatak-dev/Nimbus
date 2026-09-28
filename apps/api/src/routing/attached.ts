@@ -18,6 +18,7 @@ export interface LoadedAttachments {
   texts: readonly AttachedText[];
   reports: readonly CallReport[];
   lost: number;
+  warnings?: readonly string[];
 }
 
 export const NOTHING_ATTACHED: LoadedAttachments = {
@@ -59,19 +60,24 @@ export class SessionAttachments {
     const images = found.documents.filter((one) => one.kind === 'image');
     const described = await this.#describe(owner, images);
     const texts = await this.#texts(found.documents.filter((one) => one.kind === 'text'));
+    const warnings =
+      images.length > 0 && described.describerMissing === true
+        ? ['Image attachments were omitted because the connected model cannot read images.']
+        : undefined;
 
     return {
       images: described.images,
       texts: texts.texts,
       reports: described.reports,
       lost: found.lost + described.skipped + texts.lost,
+      ...(warnings === undefined ? {} : { warnings }),
     };
   }
 
   async #describe(
     owner: AttachmentOwner,
     images: readonly AttachmentDocument[],
-  ): Promise<DescribeResult> {
+  ): Promise<DescribeResult & { describerMissing?: boolean }> {
     if (images.length === 0) {
       return { images: [], reports: [], skipped: 0 };
     }
@@ -83,7 +89,7 @@ export class SessionAttachments {
         { userId: owner.userId, images: images.length },
         'this account has no key for a model that can read images, the run carries on without them',
       );
-      return { images: [], reports: [], skipped: images.length };
+      return { images: [], reports: [], skipped: images.length, describerMissing: true };
     }
 
     return describer.describeAll(images);

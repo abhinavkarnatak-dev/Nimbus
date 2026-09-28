@@ -29,6 +29,7 @@ services:
       GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL:?set GITHUB_CALLBACK_URL}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?set GITHUB_WEBHOOK_SECRET}
       E2B_API_KEY: ${E2B_API_KEY:?set E2B_API_KEY}
+      NIMBUS_CODEX_HOME: /data/codex
       SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:?set SMTP_USER}
@@ -42,6 +43,8 @@ services:
     ports:
       - '127.0.0.1:4000:4000'
     stop_grace_period: 45s
+    volumes:
+      - codex_data:/data/codex
 
   web:
     build:
@@ -87,3 +90,4 @@ services:
 volumes:
   mongo_data:
   redis_data:
+  codex_data:

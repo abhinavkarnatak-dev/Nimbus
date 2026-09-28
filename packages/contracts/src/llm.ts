@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
-export const LLM_PROVIDERS = ['gemini'] as const;
+export const LLM_PROVIDERS = ['gemini', 'codex'] as const;
+export const KEY_PROVIDERS = ['gemini'] as const;
+export type KeyProviderName = (typeof KEY_PROVIDERS)[number];
 
 export const LlmProviderSchema = z.enum(LLM_PROVIDERS);
 

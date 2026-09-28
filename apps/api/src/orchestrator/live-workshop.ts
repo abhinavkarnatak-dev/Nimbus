@@ -208,7 +208,13 @@ export class LiveSessionWorkshop implements SessionWorkshop {
         registry,
         router,
         images: attached.images,
-        attachments: attached.texts,
+        attachments: [
+          ...attached.texts,
+          ...(attached.warnings ?? []).map((contents) => ({
+            name: '[Nimbus attachment warning]',
+            contents,
+          })),
+        ],
         executor: new ActionExecutor({
           registry,
           policy: new PolicyGate({

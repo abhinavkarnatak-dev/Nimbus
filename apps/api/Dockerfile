@@ -31,7 +31,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 COPY --from=build /app/packages/contracts/dist packages/contracts/dist
 COPY --from=build /app/apps/api/dist apps/api/dist
 
-RUN chown -R node:node /app
+RUN mkdir -p /data/codex && chown -R node:node /app /data
 USER node
 EXPOSE 4000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \

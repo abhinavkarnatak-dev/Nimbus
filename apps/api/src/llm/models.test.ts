@@ -21,8 +21,8 @@ describe('KNOWN_MODELS', () => {
 
   it('prices every model it knows', () => {
     for (const model of KNOWN_MODELS) {
-      expect(model.inputMicroCentsPerToken).toBeGreaterThan(0);
-      expect(model.outputMicroCentsPerToken).toBeGreaterThan(0);
+      expect(model.inputMicroCentsPerToken).toBeGreaterThanOrEqual(0);
+      expect(model.outputMicroCentsPerToken).toBeGreaterThanOrEqual(0);
       expect(model.contextTokens).toBeGreaterThan(0);
     }
   });

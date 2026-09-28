@@ -1,15 +1,15 @@
 import {
-  LLM_PROVIDERS,
+  KEY_PROVIDERS,
   PROVIDER_KEY_SHAPES,
-  type LlmProviderName,
+  type KeyProviderName,
   type ProviderKeySummary,
 } from '@nimbus/contracts';
 
 import { ApiError, NetworkError } from '../api/errors.js';
 
-export const PROVIDER_ORDER: readonly LlmProviderName[] = LLM_PROVIDERS;
+export const PROVIDER_ORDER: readonly KeyProviderName[] = KEY_PROVIDERS;
 
-export function shapeOf(provider: LlmProviderName): (typeof PROVIDER_KEY_SHAPES)[LlmProviderName] {
+export function shapeOf(provider: KeyProviderName): (typeof PROVIDER_KEY_SHAPES)[KeyProviderName] {
   return PROVIDER_KEY_SHAPES[provider];
 }
 
@@ -45,11 +45,11 @@ export function removeProblem(error: unknown): string {
   return 'That key could not be removed. Try again.';
 }
 
-export function savedWords(provider: LlmProviderName): string {
+export function savedWords(provider: KeyProviderName): string {
   return `${PROVIDER_KEY_SHAPES[provider].label} is ready. Nimbus checked the key against ${PROVIDER_KEY_SHAPES[provider].label} before saving it.`;
 }
 
-export function removedWords(provider: LlmProviderName): string {
+export function removedWords(provider: KeyProviderName): string {
   return `The ${PROVIDER_KEY_SHAPES[provider].label} key is gone. Nimbus kept no copy of it.`;
 }
 
