@@ -401,20 +401,8 @@ describe('the limits a run is prepared with', () => {
     await prepared.finish();
   });
 
-  it('moves sessions carrying the former 30-step default to the current normal ceiling', async () => {
+  it('preserves an existing 30-step contract when the current default is larger', async () => {
     const held = await workshopFor([]);
-
-    const prepared = await held.workshop.prepare(
-      { ...held.session, maxSteps: 30 },
-      { signal: new AbortController().signal },
-    );
-
-    expect(prepared.input.state.budgets.maxSteps).toBe(DEFAULT_LIMITS.maxAgentSteps);
-    await prepared.finish();
-  });
-
-  it('does not widen the former default when configuration is currently tighter', async () => {
-    const held = await workshopFor([], { env: { MAX_AGENT_STEPS: '9' } });
 
     const prepared = await held.workshop.prepare(
       { ...held.session, maxSteps: 30 },

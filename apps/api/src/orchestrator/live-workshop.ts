@@ -61,19 +61,11 @@ export interface LiveWorkshopOptions {
   maxSteps?: number;
 }
 
-export const LEGACY_DEFAULT_MAX_STEPS = 30;
-
 export function maxStepsForSession(persisted: number, configured: number): number {
-  if (persisted <= 0) return configured;
-
-  // Sessions written before event-driven progress shipped carry 30 because that was the product
-  // default, not a user choice. Move only that legacy default forward; all other persisted values
-  // remain strict per-session ceilings. A currently tightened configuration also stays strict.
-  if (persisted === LEGACY_DEFAULT_MAX_STEPS && configured > LEGACY_DEFAULT_MAX_STEPS) {
-    return configured;
-  }
-
-  return persisted;
+  // A stored number is an existing session contract. Older documents do not record whether 30
+  // came from the former product default or an operator override, so widening it would be unsafe.
+  // New sessions receive the current configured default when they are created.
+  return persisted > 0 ? persisted : configured;
 }
 
 export class LiveSessionWorkshop implements SessionWorkshop {
