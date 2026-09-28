@@ -171,7 +171,7 @@ describe('budgets before a step', () => {
     const harness = await executeHarness();
     const spent = parseState({
       ...harness.state,
-      budgets: { ...harness.state.budgets, steps: harness.state.budgets.maxSteps },
+      budgets: { ...harness.state.budgets, steps: 2, maxSteps: 2 },
     });
 
     const verdict = harness.guard.beforeStep(spent, Date.now());

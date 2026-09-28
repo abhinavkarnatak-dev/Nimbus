@@ -161,17 +161,23 @@ describe('a task nobody could act on', () => {
     expect(harness.sandbox.status().state).toBe('terminated');
   });
 
-  it('stops at a tool clarification instead of reasoning again', async () => {
+  it('investigates before accepting a tool clarification', async () => {
     const question = 'Which file should I change?';
     const harness = await graphHarness({
-      answers: [CLEAR_SCOPE, action('wait_for_user', { reason: 'clarification', question })],
+      answers: [
+        CLEAR_SCOPE,
+        action('wait_for_user', { reason: 'clarification', question }),
+        READ,
+        action('wait_for_user', { reason: 'clarification', question }),
+      ],
     });
 
     const result = await runAgent(harness);
 
     expect(result.state.phase).toBe('clarifying');
     expect(result.state.clarificationQuestion).toBe(question);
-    expect(harness.text.calls).toHaveLength(2);
+    expect(result.state.toolEvents.some((event) => event.tool === 'read_file')).toBe(true);
+    expect(harness.text.calls).toHaveLength(4);
   });
 });
 

@@ -72,6 +72,13 @@ describe('shortfall', () => {
     expect(shortfall(spent, START)?.detail).toContain('2 of 2');
   });
 
+  it('does not stop a normal session at its initial step estimate', () => {
+    const spent = budgets({ maxSteps: STATE_LIMITS.expandingStepWindow });
+    spent.steps = spent.maxSteps;
+
+    expect(shortfall(spent, START)).toBeNull();
+  });
+
   it('names the retry budget', () => {
     const spent = { ...budgets({ maxRetries: 3 }), retries: 3 };
     expect(shortfall(spent, START)?.reason).toBe('retry_budget');
@@ -126,6 +133,14 @@ describe('assertRoom', () => {
 describe('spending', () => {
   it('counts a step', () => {
     expect(takeStep(budgets()).steps).toBe(1);
+  });
+
+  it('expands a normal session before it reaches the end of its step window', () => {
+    const almost = { ...budgets(), steps: STATE_LIMITS.maxSteps - 1 };
+    const next = takeStep(almost);
+
+    expect(next.steps).toBe(STATE_LIMITS.maxSteps);
+    expect(next.maxSteps).toBe(STATE_LIMITS.maxSteps + STATE_LIMITS.expandingStepWindow);
   });
 
   it('counts a retry', () => {

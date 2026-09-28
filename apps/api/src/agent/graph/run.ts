@@ -1,9 +1,11 @@
 import { alerting } from '../../logging/alerts.js';
 import type { SandboxTerminationReason } from '../../sandbox/index.js';
 import { stopped } from '../state/state.js';
+import { STATE_LIMITS } from '../state/limits.js';
 import { buildAgentGraph, type RunInput, type RunResult } from './graph.js';
 
 const RECURSION_HEADROOM = 6;
+const EXPANDING_RUN_RECURSION_LIMIT = 10_000;
 
 function terminationFor(result: RunResult): SandboxTerminationReason {
   if (result.state.stopReason === 'cancelled') {
@@ -24,7 +26,10 @@ export async function runAgent(input: RunInput): Promise<RunResult> {
 
   const graph = buildAgentGraph(input);
   const config = {
-    recursionLimit: input.state.budgets.maxSteps * 3 + RECURSION_HEADROOM,
+    recursionLimit:
+      input.state.budgets.maxSteps >= STATE_LIMITS.expandingStepWindow
+        ? EXPANDING_RUN_RECURSION_LIMIT
+        : input.state.budgets.maxSteps * 3 + RECURSION_HEADROOM,
     ...(input.checkpointer === undefined
       ? {}
       : { configurable: { thread_id: input.state.sessionId, checkpoint_ns: '' } }),

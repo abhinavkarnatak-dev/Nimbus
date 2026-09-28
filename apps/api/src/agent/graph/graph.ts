@@ -98,6 +98,14 @@ function checkedSinceLastEdit(state: AgentState): boolean {
   return lastCheck > lastEdit;
 }
 
+function hasInvestigatedRepository(state: AgentState): boolean {
+  return state.toolEvents.some(
+    (event) =>
+      event.outcome === 'ok' &&
+      ['list_tree', 'search_code', 'semantic_search', 'read_file'].includes(event.tool),
+  );
+}
+
 function automaticExampleCheck(
   state: AgentState,
 ): { argv: string[]; name: string; kind: 'test' | 'typecheck' } | null {
@@ -297,6 +305,16 @@ export function buildAgentGraph(input: RunInput) {
 
     const toolArguments = JSON.parse(proposed.argumentsJson) as Record<string, unknown>;
     const actionHash = actionFingerprint(proposed.tool, toolArguments);
+
+    if (proposed.tool === 'wait_for_user' && !hasInvestigatedRepository(current.state)) {
+      return {
+        history: [
+          ...current.history,
+          'Blocked before asking: inspect the repository first. Use list_tree, search_code, semantic_search, or read_file to resolve file locations and implementation details without burdening the person. Ask only if an important ambiguity remains after that investigation.',
+        ],
+        state: parseState({ ...current.state, proposedAction: null, phase: 'reasoning' }),
+      };
+    }
 
     if (proposed.tool === 'run_checks' && checkedSinceLastEdit(current.state)) {
       return {

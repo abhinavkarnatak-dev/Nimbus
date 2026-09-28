@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { CLEAR_TASK, SLIPPERY_TASK, TINY_TASK, VAGUE_TASK, nodeHarness } from './nodes.fixtures.js';
 import { TASK_MIN_CHARS, meaningfulWords } from '@nimbus/contracts';
 
-import { tooThinToJudge, validateScope } from './scope.js';
+import { isDiscoverableQuestion, tooThinToJudge, validateScope } from './scope.js';
 
 const CLEAR = { value: { clear: true, question: '' } };
 const UNCLEAR = {
@@ -75,13 +75,27 @@ describe('validateScope', () => {
     expect(result.askedModel).toBe(true);
   });
 
-  it('asks the question the model wrote about a task that reads real but is not', async () => {
+  it('asks about an important behavior choice that code cannot settle', async () => {
     const harness = await nodeHarness({ task: SLIPPERY_TASK, answers: { answers: [UNCLEAR] } });
     const result = await validateScope(harness.state, { router: harness.router });
 
     expect(result.outcome).toBe('needs_clarification');
     expect(result.question).toBe(UNCLEAR.value.question);
     expect(result.askedModel).toBe(true);
+  });
+
+  it('does not ask for a file location that repository inspection can discover', async () => {
+    const question = 'Which file or folder should I change?';
+    const harness = await nodeHarness({
+      task: CLEAR_TASK,
+      answers: { answers: [{ value: { clear: false, question } }] },
+    });
+
+    const result = await validateScope(harness.state, { router: harness.router });
+
+    expect(isDiscoverableQuestion(question)).toBe(true);
+    expect(result.outcome).toBe('clear');
+    expect(result.question).toBeNull();
   });
 
   it('asks a generic question when it never needed a model to tell', async () => {

@@ -50,6 +50,12 @@ export interface ScopeOptions {
   router: SessionRouter;
 }
 
+export function isDiscoverableQuestion(question: string): boolean {
+  return /\b(which|what|where)\s+(?:file|folder|directory|path|module|package|service|command|script)\b/i.test(
+    question,
+  );
+}
+
 function isRepositoryQuestion(task: string): boolean {
   const request = task.trim().replace(/^@[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\s+/, '');
 
@@ -91,11 +97,13 @@ export async function validateScope(
 
   const verdict = await judge(state.task, options.router);
 
-  if (verdict.clear || verdict.question.trim() === '') {
+  if (verdict.clear || verdict.question.trim() === '' || isDiscoverableQuestion(verdict.question)) {
     return ScopeResultSchema.parse({
       outcome: 'clear',
       question: null,
-      reason: 'the task names something specific enough to start on',
+      reason: isDiscoverableQuestion(verdict.question)
+        ? 'the missing detail can be discovered by inspecting the repository'
+        : 'the task names something specific enough to start on',
       askedModel: true,
     });
   }
@@ -103,7 +111,7 @@ export async function validateScope(
   return ScopeResultSchema.parse({
     outcome: 'needs_clarification',
     question: verdict.question.trim(),
-    reason: 'the task could mean too many different changes',
+    reason: 'the task leaves an important product or behavior choice unresolved',
     askedModel: true,
   });
 }

@@ -23,6 +23,7 @@ export interface ToolRun {
   toolCallId: string;
   tool: ToolName | null;
   summary: string;
+  resultSummary: string;
   paths: readonly string[];
   startedAt: string;
   outcome: ToolOutcome | null;
@@ -83,6 +84,7 @@ function blankTool(toolCallId: string): ToolRun {
     toolCallId,
     tool: null,
     summary: '',
+    resultSummary: '',
     paths: [],
     startedAt: new Date().toISOString(),
     outcome: null,
@@ -193,7 +195,7 @@ export function applyEvent(live: LiveSession, event: ServerEvent): LiveSession {
             tool: event.tool,
             outcome: event.outcome,
             durationMs: event.durationMs,
-            summary: event.summary === '' ? one.summary : event.summary,
+            resultSummary: event.summary,
           }),
           () => blankTool(event.toolCallId),
         ),

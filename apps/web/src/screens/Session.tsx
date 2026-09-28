@@ -16,6 +16,7 @@ import { ApiError, NetworkError } from '../api/errors.js';
 import { newPrefixedId } from '../lib/id.js';
 import { plainText } from '../render/safe.js';
 import { answered, decided, type LiveSession } from '../sessions/live.js';
+import { ActivityFeed, MessageContent } from '../sessions/Conversation.js';
 import type { ManualPrState } from '../sessions/Panels.js';
 import {
   ChangesPane,
@@ -96,12 +97,28 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
   const detail = view.detail;
   const live = view.live;
   const running = live !== null && isLive(live.status);
+  const currentActivity =
+    live?.tools.findLast((run) => run.outcome === null)?.summary ??
+    live?.tools.at(-1)?.summary ??
+    live?.progress.currentActivity ??
+    'Working';
+  const activityAnchor = running
+    ? null
+    : ([...(live?.messages ?? [])].reverse().find((message) => message.role === 'agent')
+        ?.messageId ?? null);
   const composerDisabled = busy || (running && live.question === null);
   const refreshSessions = sessions.refresh;
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: 'end' });
-  }, [live?.messages.length, live?.approval, live?.question]);
+  }, [
+    live?.messages.length,
+    live?.tools.length,
+    live?.tools.at(-1)?.output.length,
+    live?.tools.at(-1)?.outcome,
+    live?.approval,
+    live?.question,
+  ]);
 
   useEffect(() => {
     void refreshSessions();
@@ -422,7 +439,10 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
             <div className="thread">
               <div className="thread__inner">
                 <AnimatePresence initial={false}>
-                  {live.messages.map((one, index) => (
+                  {live.messages.flatMap((one, index) => [
+                    ...(one.messageId === activityAnchor
+                      ? [<ActivityFeed tools={live.tools} key="activity-history" />]
+                      : []),
                     <motion.div
                       key={one.messageId}
                       className="turn"
@@ -484,10 +504,12 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
                           </p>
                         </div>
                       ) : (
-                        <p className="turn__body">{one.text.replace(/^Worked for \d+s\. /, '')}</p>
+                        <MessageContent text={one.text.replace(/^Worked for \d+s\. /, '')} />
                       )}
-                    </motion.div>
-                  ))}
+                    </motion.div>,
+                  ])}
+
+                  {activityAnchor === null ? <ActivityFeed tools={live.tools} /> : null}
 
                   {running && live.status !== 'awaiting_user' && live.question === null ? (
                     <motion.div
@@ -498,7 +520,7 @@ export function Session({ api, sessionId, view, sessions }: SessionScreenProps):
                     >
                       <span className="thread__working-dot" aria-hidden="true" />
                       <span>
-                        {live.progress.currentActivity ?? 'Working'} (
+                        {currentActivity} (
                         {String(
                           Math.max(
                             1,
