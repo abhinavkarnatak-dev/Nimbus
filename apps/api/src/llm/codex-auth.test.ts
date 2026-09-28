@@ -34,9 +34,9 @@ describe('Codex device-auth output', () => {
     ).toMatchObject({ code: 'ABCD-EFGHI' });
   });
 
-  it('strips a reset escape appended directly to the URL', () => {
+  it('strips an escaped color sequence embedded in the code', () => {
     expect(
-      parseDeviceChallenge('https://auth.openai.com/codex/device\\u001b[0m ABCD-EFGHI'),
+      parseDeviceChallenge('https://auth.openai.com/codex/device ABCD-\\u001b[93mEFGHI'),
     ).toEqual({
       url: 'https://auth.openai.com/codex/device',
       code: 'ABCD-EFGHI',
