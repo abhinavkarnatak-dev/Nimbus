@@ -156,6 +156,7 @@ export function applyEvent(live: LiveSession, event: ServerEvent): LiveSession {
     case 'tool.started':
       return {
         ...live,
+        progress: { ...live.progress, currentActivity: event.invocation.summary },
         tools: withTool(
           live.tools,
           event.invocation.toolCallId,
@@ -188,6 +189,7 @@ export function applyEvent(live: LiveSession, event: ServerEvent): LiveSession {
     case 'tool.completed':
       return {
         ...live,
+        progress: { ...live.progress, currentActivity: event.summary },
         tools: withTool(
           live.tools,
           event.toolCallId,
@@ -243,15 +245,27 @@ export function applySessionEvents(
   envelopes: readonly SessionEventEnvelope[],
   snapshotSequence: number,
 ): LiveSession {
-  return applyEvents(
-    live,
-    envelopes
-      .filter(
-        (envelope) =>
-          envelope.sequence > snapshotSequence || HISTORY_ONLY_EVENT_TYPES.has(envelope.event.type),
-      )
-      .map((envelope) => envelope.event),
+  const replay = envelopes.filter(
+    (envelope) =>
+      envelope.sequence > snapshotSequence || HISTORY_ONLY_EVENT_TYPES.has(envelope.event.type),
   );
+  const next = applyEvents(
+    live,
+    replay.map((envelope) => envelope.event),
+  );
+
+  // Tool history is intentionally replayed into a fresh session snapshot, but
+  // those old starts/completions must not overwrite the snapshot's current
+  // activity. Only events newer than the snapshot are allowed to do that.
+  const hasNewerActivity = replay.some(
+    (envelope) =>
+      envelope.sequence > snapshotSequence &&
+      (envelope.event.type === 'session.status' ||
+        envelope.event.type === 'tool.started' ||
+        envelope.event.type === 'tool.completed'),
+  );
+
+  return hasNewerActivity ? next : { ...next, progress: live.progress };
 }
 
 export function outputLines(one: ToolRun): BoundedOutput {

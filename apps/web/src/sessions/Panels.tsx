@@ -33,40 +33,48 @@ export function ProgressPane({ live }: { live: LiveSession }): React.JSX.Element
     );
   }
 
+  const running = live.tools.findLast((one) => one.outcome === null);
+
   return (
-    <ol className="steps">
-      {live.tools.map((one, at) => (
-        <li className="step" key={one.toolCallId} data-tone={toneOf(one.outcome)}>
-          <span className="step__mark" aria-hidden="true" />
+    <>
+      <p className="steps__live" role="status" aria-live="polite">
+        {running === undefined ? 'Latest activity: ' : 'Working now: '}
+        {running?.summary ?? live.progress.currentActivity ?? 'Waiting for the next step'}
+      </p>
+      <ol className="steps">
+        {live.tools.map((one, at) => (
+          <li className="step" key={one.toolCallId} data-tone={toneOf(one.outcome)}>
+            <span className="step__mark" aria-hidden="true" />
 
-          <div className="step__body">
-            <p className="step__head">
-              <span className="step__no">{String(at + 1)}</span>
-              <span className="step__what">{toolWords(one)}</span>
-              <span className="step__state">
-                {one.outcome === null ? 'running' : OUTCOME_WORDS[one.outcome]}
-                {one.durationMs === null ? '' : ` · ${tookWords(one.durationMs)}`}
-              </span>
-            </p>
-
-            {one.summary === '' ? null : <p className="step__why">{one.summary}</p>}
-            {one.resultSummary === '' ? null : (
-              <p className="step__why">Result: {one.resultSummary}</p>
-            )}
-
-            {one.paths.length === 0 ? null : (
-              <p className="step__paths">
-                {one.paths.map((path) => (
-                  <span className="step__path" key={path}>
-                    {path}
-                  </span>
-                ))}
+            <div className="step__body">
+              <p className="step__head">
+                <span className="step__no">{String(at + 1)}</span>
+                <span className="step__what">{toolWords(one)}</span>
+                <span className="step__state">
+                  {one.outcome === null ? 'running' : OUTCOME_WORDS[one.outcome]}
+                  {one.durationMs === null ? '' : ` · ${tookWords(one.durationMs)}`}
+                </span>
               </p>
-            )}
-          </div>
-        </li>
-      ))}
-    </ol>
+
+              {one.summary === '' ? null : <p className="step__why">{one.summary}</p>}
+              {one.resultSummary === '' ? null : (
+                <p className="step__why">Result: {one.resultSummary}</p>
+              )}
+
+              {one.paths.length === 0 ? null : (
+                <p className="step__paths">
+                  {one.paths.map((path) => (
+                    <span className="step__path" key={path}>
+                      {path}
+                    </span>
+                  ))}
+                </p>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }
 
@@ -121,6 +129,14 @@ function FileRow({
             <p className="hunks__none">This file changed, and the diff was not kept.</p>
           ) : (
             <table className="hunks__table">
+              <thead>
+                <tr className="hunks__labels">
+                  <th className="hunks__label">Previous</th>
+                  <th className="hunks__label">After</th>
+                  <th aria-hidden="true" />
+                  <th className="hunks__label">Change</th>
+                </tr>
+              </thead>
               <tbody>
                 {shown.rows.map((row, at) => (
                   <tr className="hunks__row" data-kind={row.kind} key={`${String(at)}-${row.text}`}>
@@ -153,8 +169,21 @@ function FileRow({
 
 export function ChangesPane({ live }: { live: LiveSession }): React.JSX.Element {
   const [open, setOpen] = useState<string | null>(null);
+  const pendingPaths = [
+    ...new Set(
+      live.tools
+        .filter(
+          (tool) =>
+            tool.outcome === null &&
+            ['apply_patch', 'create_file', 'delete_file', 'edit_file', 'move_file'].includes(
+              tool.tool ?? '',
+            ),
+        )
+        .flatMap((tool) => tool.paths),
+    ),
+  ];
 
-  if (live.files.length === 0) {
+  if (live.files.length === 0 && pendingPaths.length === 0) {
     return (
       <Nothing
         what="Nothing has changed yet."
@@ -167,6 +196,16 @@ export function ChangesPane({ live }: { live: LiveSession }): React.JSX.Element 
 
   return (
     <>
+      {pendingPaths.length === 0 ? null : (
+        <div className="pane__pending" role="status" aria-live="polite">
+          <p className="pane__word">Change in progress</p>
+          <p className="pane__none-why">
+            Nimbus is updating {pendingPaths.join(', ')}. The previous/after diff will appear as
+            soon as the write finishes.
+          </p>
+        </div>
+      )}
+
       <p className="pane__word">
         {String(live.files.length)} {live.files.length === 1 ? 'file' : 'files'} changed
         <span className="filed__plus">+{String(sum.added)}</span>

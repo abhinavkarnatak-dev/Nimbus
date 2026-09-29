@@ -44,6 +44,22 @@ function envelope(sequence: number, event: SessionEventEnvelope['event']): Sessi
 }
 
 describe('tool completion activity', () => {
+  it('moves the live activity headline as soon as a tool starts', () => {
+    const next = applyEvent(live(), {
+      type: 'tool.started',
+      invocation: {
+        toolCallId: 'call_live',
+        tool: 'move_file',
+        summary: 'Moving src/old.ts to src/new.ts',
+        paths: ['src/old.ts', 'src/new.ts'],
+        startedAt: AT,
+      },
+    });
+
+    expect(next.progress.currentActivity).toBe('Moving src/old.ts to src/new.ts');
+    expect(next.tools[0]?.outcome).toBeNull();
+  });
+
   it('uses the result as a readable headline when policy denied the action before it started', () => {
     const next = applyEvent(live(), completed('call_denied', 'command denied by policy'));
 

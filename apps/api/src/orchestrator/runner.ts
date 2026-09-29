@@ -319,8 +319,6 @@ export class SessionRunner {
 
     const baseCommitSha = result.state.baseCommitSha;
 
-    const latestRequest =
-      session.messages.filter((message) => message.role === 'user').at(-1)?.text ?? session.task;
     const beforePush = await this.#verdict(signal, liveness, 'before pushing a branch');
 
     if (beforePush !== 'live') {
@@ -337,7 +335,7 @@ export class SessionRunner {
         name: session.repository.name,
         sessionId: session.sessionId,
         ...(session.pullRequest === null ? {} : { branch: session.pullRequest.branch }),
-        task: latestRequest,
+        task: session.task,
         baseCommitSha,
         patch: patch.patch,
         report,
@@ -375,7 +373,7 @@ export class SessionRunner {
         defaultBranch: session.repository.defaultBranch,
         branch: pushed.branch,
         baseCommitSha,
-        task: latestRequest,
+        task: session.task,
         summary: patch.summary,
         report,
         checks: result.state.checks,
@@ -401,7 +399,7 @@ export class SessionRunner {
     await this.#say(session, { type: 'pr.created', pullRequest: opened });
 
     if (opened.number !== session.pullRequest?.number) {
-      await this.#mailPullRequest(session, latestRequest, opened);
+      await this.#mailPullRequest(session, session.task, opened);
     }
 
     const changed = progress.filesChanged?.length ?? 0;
@@ -412,7 +410,7 @@ export class SessionRunner {
     const elapsedSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1_000));
     await this.#narrate(
       session,
-      `Worked for ${String(elapsedSeconds)}s. PR #${String(opened.number)} was ${session.pullRequest === null ? 'created' : 'updated'} for "${latestRequest}". ${String(changed)} ${changed === 1 ? 'file was' : 'files were'} changed, +${String(added)} −${String(removed)} lines, and ${String(checks)} ${checks === 1 ? 'check passed' : 'checks passed'}. You can continue working in this session.`,
+      `Worked for ${String(elapsedSeconds)}s. PR #${String(opened.number)} was ${session.pullRequest === null ? 'created' : 'updated'} for "${session.task}". ${String(changed)} ${changed === 1 ? 'file was' : 'files were'} changed, +${String(added)} −${String(removed)} lines, and ${String(checks)} ${checks === 1 ? 'check passed' : 'checks passed'}. You can continue working in this session.`,
     );
 
     return {
@@ -645,7 +643,11 @@ export class SessionRunner {
     }
   }
 
-  #couldNotStart(session: SessionDocument, error: unknown, stage = 'starting preparation'): RunOutcome {
+  #couldNotStart(
+    session: SessionDocument,
+    error: unknown,
+    stage = 'starting preparation',
+  ): RunOutcome {
     const reason = error instanceof WorkshopError ? error.reason : 'sandbox';
     const thrown = describeFailure(error);
 

@@ -60,8 +60,12 @@ export interface TrustedPullRequestGatewayOptions {
   wait?: (ms: number) => Promise<void>;
 }
 
-export function titleFor(task: string): string {
-  const single = task.replace(/\s+/g, ' ').trim();
+export function titleFor(task: string, summary?: string): string {
+  // Follow-up answers are often short clarifications ("anywhere", "yes", ...).
+  // The summary is produced after the agent has actually inspected and changed
+  // the repository, so it is the authoritative source for a PR title.
+  const source = summary?.replace(/\s+/g, ' ').trim() || task;
+  const single = source.replace(/\s+/g, ' ').trim();
   const trimmed = single.length > TITLE_MAX_CHARS ? single.slice(0, TITLE_MAX_CHARS) : single;
 
   return trimmed === '' ? 'Nimbus change' : trimmed;
@@ -115,7 +119,7 @@ export class TrustedPullRequestGateway implements PullRequestGateway {
       const input = {
         branch: request.branch,
         baseBranch: request.defaultBranch,
-        title: titleFor(request.task),
+        title: titleFor(request.task, request.summary),
         body: buildPullRequestBody({
           task: request.task,
           summary: request.summary,

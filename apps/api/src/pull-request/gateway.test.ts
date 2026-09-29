@@ -79,6 +79,9 @@ describe('opening a pull request', () => {
 
   it('titles it from the task', () => {
     expect(titleFor('Fix the broken login redirect')).toBe('Fix the broken login redirect');
+    expect(titleFor('anywhere', 'renamed HelloWorld.java to HelloName.java')).toBe(
+      'renamed HelloWorld.java to HelloName.java',
+    );
     expect(titleFor('  ')).toBe('Nimbus change');
     expect(titleFor('x'.repeat(300))).toHaveLength(72);
   });
