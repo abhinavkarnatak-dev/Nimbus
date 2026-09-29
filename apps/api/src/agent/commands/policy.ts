@@ -28,6 +28,17 @@ export interface CommandClassification {
 
 const NUL = String.fromCharCode(0);
 const SCRIPT_SUBCOMMANDS: readonly string[] = ['run', 'run-script'];
+const READ_ONLY_PACKAGE_SUBCOMMANDS: readonly string[] = [
+  'ls',
+  'list',
+  'why',
+  'explain',
+  'outdated',
+  'view',
+  'info',
+  'prefix',
+  'root',
+];
 const ARBITRARY_PACKAGE_SUBCOMMANDS: readonly string[] = ['exec', 'dlx', 'create', 'init'];
 const BLOCKED_PACKAGE_SUBCOMMANDS: readonly string[] = [
   'publish',
@@ -150,6 +161,10 @@ function classifyPackageManager(program: string, argv: readonly string[]): Comma
       subcommand,
       'that package-manager action can publish or change credentials',
     );
+  }
+
+  if (READ_ONLY_PACKAGE_SUBCOMMANDS.includes(subcommand)) {
+    return allowed(program, subcommand, 'read_only');
   }
 
   if (DEPENDENCY_SUBCOMMANDS.includes(subcommand)) {

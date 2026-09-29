@@ -234,6 +234,11 @@ describe('package manager subcommands', () => {
     expect(decisionOf(['npm', 'token', 'create'])).toBe('denied');
   });
 
+  it('allows read-only dependency inspection', () => {
+    expect(classifyCommand(['npm', 'ls']).decision).toBe('allowed');
+    expect(classifyCommand(['pnpm', 'why', 'typescript']).decision).toBe('allowed');
+  });
+
   it('refuses a package manager with no subcommand', () => {
     expect(decisionOf(['npm'])).toBe('denied');
   });
