@@ -3,7 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { FakeSandboxProvider, type Sandbox } from '../../sandbox/index.js';
 import { testSpec } from '../../sandbox/sandbox.fixtures.js';
 import { ToolError } from './errors.js';
-import { applyPatch, createFile, editFile, listTree, readFile, searchCode } from './file-tools.js';
+import {
+  applyPatch,
+  createFile,
+  editFile,
+  listTree,
+  moveFile,
+  readFile,
+  searchCode,
+} from './file-tools.js';
 import { TOOL_LIMITS } from './limits.js';
 
 const FILES: Record<string, string> = {
@@ -346,6 +354,18 @@ describe('edit_file', () => {
   });
 });
 
+describe('move_file', () => {
+  it('renames a file without leaving the source or creating a duplicate', async () => {
+    const { sandbox } = await workspace({ 'XYZ.txt': 'keep this content\n' });
+
+    const result = await moveFile(sandbox, { from: 'XYZ.txt', to: 'ABC.txt' });
+
+    expect(result).toMatchObject({ path: 'ABC.txt', previousPath: 'XYZ.txt' });
+    expect(await sandbox.readFile('ABC.txt')).toBe('keep this content\n');
+    await expect(sandbox.readFile('XYZ.txt')).rejects.toThrow();
+  });
+});
+
 describe('apply_patch', () => {
   const patchFor = (path: string, from: string, to: string): string =>
     [`--- a/${path}`, `+++ b/${path}`, '@@ -1,1 +1,1 @@', `-${from}`, `+${to}`, ''].join('\n');
@@ -442,6 +462,61 @@ describe('apply_patch', () => {
     expect(await codeOf(async () => applyPatch(sandbox, { patch }))).toBe(
       'PATCH_APPROVAL_REQUIRED',
     );
+  });
+
+  it('renames after the approval has been granted and removes the source', async () => {
+    const { sandbox } = await workspace({ 'README.md': '# Demo\n\nA small repository.\n' });
+    const patch = [
+      '--- a/README.md',
+      '+++ b/READTHIS.md',
+      '@@ -1,1 +1,1 @@',
+      '-# Demo',
+      '+# Demo',
+      '',
+    ].join('\n');
+
+    const result = await applyPatch(sandbox, { patch }, undefined, true);
+
+    expect(result.files[0]).toMatchObject({
+      path: 'READTHIS.md',
+      previousPath: 'README.md',
+      changeKind: 'renamed',
+    });
+    expect(await sandbox.readFile('READTHIS.md')).toContain('# Demo');
+    await expect(sandbox.readFile('README.md')).rejects.toThrow();
+  });
+
+  it('rejects an approved rename when the destination already exists', async () => {
+    const { sandbox } = await workspace({ 'A.txt': 'a\n', 'B.txt': 'b\n' });
+    const patch = ['--- a/A.txt', '+++ b/B.txt', '@@ -1,1 +1,1 @@', '-a', '+a', ''].join('\n');
+
+    expect(await codeOf(async () => applyPatch(sandbox, { patch }, undefined, true))).toBe(
+      'FILE_EXISTS',
+    );
+    expect(await sandbox.readFile('A.txt')).toBe('a\n');
+    expect(await sandbox.readFile('B.txt')).toBe('b\n');
+  });
+
+  it('deletes after the approval has been granted', async () => {
+    const { sandbox } = await workspace({ 'remove.txt': 'remove me\n' });
+    const patch = ['--- a/remove.txt', '+++ /dev/null', '@@ -1,1 +0,0 @@', '-remove me', ''].join(
+      '\n',
+    );
+
+    await applyPatch(sandbox, { patch }, undefined, true);
+    await expect(sandbox.readFile('remove.txt')).rejects.toThrow();
+  });
+
+  it('does not delete a file whose contents changed after approval', async () => {
+    const { sandbox } = await workspace({ 'remove.txt': 'new content\n' });
+    const patch = ['--- a/remove.txt', '+++ /dev/null', '@@ -1,1 +0,0 @@', '-old content', ''].join(
+      '\n',
+    );
+
+    expect(await codeOf(async () => applyPatch(sandbox, { patch }, undefined, true))).toBe(
+      'PATCH_CONTEXT_MISMATCH',
+    );
+    expect(await sandbox.readFile('remove.txt')).toBe('new content\n');
   });
 
   it('refuses when the surrounding lines have moved on', async () => {

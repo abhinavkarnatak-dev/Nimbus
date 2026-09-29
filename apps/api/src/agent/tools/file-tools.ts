@@ -490,17 +490,20 @@ export async function applyPatch(
   sandbox: Sandbox,
   input: ApplyPatchInput,
   caps: PatchCaps = DEFAULT_LIMITS,
+  approvedByUser = false,
 ): Promise<ApplyPatchResult> {
   const index = await buildIndex(sandbox);
   const parsed = parsePatch(input.patch, caps);
 
-  const planned: { file: AppliedFile; contents: string }[] = [];
+  const planned: { file: AppliedFile; contents: string | null }[] = [];
 
   for (const file of parsed) {
-    if (file.changeKind === 'deleted' || file.changeKind === 'renamed') {
+    if ((file.changeKind === 'deleted' || file.changeKind === 'renamed') && !approvedByUser) {
       throw new ToolError(
         'PATCH_APPROVAL_REQUIRED',
-        'Deleting or renaming a file needs a separate approval.',
+        file.changeKind === 'renamed'
+          ? 'Renaming a file needs a separate approval.'
+          : 'Deleting a file needs a separate approval.',
         { path: file.oldPath ?? '' },
       );
     }
@@ -514,8 +517,41 @@ export async function applyPatch(
       });
     }
 
+    if (file.changeKind === 'deleted') {
+      if (oldResolved === null) {
+        throw new ToolError('PATCH_MALFORMED', 'That patch could not be read: no source file.');
+      }
+      // Validate the deletion hunk against the current contents before removing
+      // anything. Approval is bound to the exact action; it must not authorize
+      // deleting a file that changed after the patch was prepared.
+      const original = await sandbox.readFile(oldResolved.path);
+      applyPatchToFile(file, original);
+      planned.push({
+        file: {
+          path: oldResolved.path,
+          previousPath: null,
+          changeKind: 'deleted',
+          addedLines: file.addedLines,
+          removedLines: file.removedLines,
+          isProtected: oldResolved.protected,
+        },
+        contents: null,
+      });
+      continue;
+    }
+
     if (newResolved === null) {
       throw new ToolError('PATCH_MALFORMED', 'That patch could not be read: no target file.');
+    }
+
+    if (file.changeKind === 'renamed' && newResolved.kind !== 'missing') {
+      throw new ToolError(
+        'FILE_EXISTS',
+        'That patch renames a file onto an existing destination.',
+        {
+          path: file.newPath ?? '',
+        },
+      );
     }
 
     if (file.changeKind === 'added' && newResolved.kind !== 'missing') {
@@ -529,11 +565,11 @@ export async function applyPatch(
     planned.push({
       file: {
         path: newResolved.path,
-        previousPath: null,
+        previousPath: file.changeKind === 'renamed' ? (oldResolved?.path ?? null) : null,
         changeKind: file.changeKind,
         addedLines: file.addedLines,
         removedLines: file.removedLines,
-        isProtected: isProtectedPath(newResolved.path),
+        isProtected: oldResolved?.protected === true || isProtectedPath(newResolved.path),
       },
       contents: applyPatchToFile(file, original),
     });
@@ -542,7 +578,26 @@ export async function applyPatch(
   const applied: AppliedFile[] = [];
 
   for (const step of planned) {
-    await sandbox.writeFile(step.file.path, step.contents);
+    if (step.file.changeKind === 'deleted') {
+      await sandbox.removeFile(step.file.path);
+    } else {
+      await sandbox.writeFile(step.file.path, step.contents ?? '');
+      if (step.file.changeKind === 'renamed' && step.file.previousPath !== null) {
+        try {
+          await sandbox.removeFile(step.file.previousPath);
+        } catch (error) {
+          try {
+            await sandbox.removeFile(step.file.path);
+          } catch {
+            // Preserve the original failure; the provider may be unavailable for cleanup.
+          }
+          throw new ToolError('MOVE_FAILED', 'The source could not be removed after renaming.', {
+            path: step.file.previousPath,
+            cause: error,
+          });
+        }
+      }
+    }
     applied.push(step.file);
   }
 

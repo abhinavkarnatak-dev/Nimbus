@@ -188,7 +188,7 @@ export const applyPatchTool = defineTool({
       ),
   }),
   run: async (input, context) => {
-    const result = await applyPatch(context.sandbox, input, context.limits);
+    const result = await applyPatch(context.sandbox, input, context.limits, context.approvedByUser);
 
     return {
       summary: shorten(
@@ -202,7 +202,7 @@ export const applyPatchTool = defineTool({
 export const editFileTool = defineTool({
   name: 'edit_file',
   description:
-    'Replace one exact, unique piece of text in an existing text file. Read the file first and include enough surrounding context that oldText occurs exactly once. Use this for a focused edit; use apply_patch for edits across multiple files or structural diffs. Protected and dependency paths still need approval.',
+    'Replace one exact, unique piece of text in an existing text file without creating a new file. Read the file first and include enough surrounding context that oldText occurs exactly once. For a filename change, use move_file with from and to; never use create_file to rename an existing file. Use apply_patch for edits across multiple files or structural diffs. Protected and dependency paths still need approval.',
   timeoutMs: REGISTRY_LIMITS.writeTimeoutMs,
   input: z.strictObject({
     path: WorkspacePathSchema.describe('the existing file to edit, such as src/server.ts'),
@@ -241,7 +241,7 @@ export const deleteFileTool = defineTool({
 export const moveFileTool = defineTool({
   name: 'move_file',
   description:
-    'Move or rename one existing workspace file to a new path. This is destructive and always requires human approval. The destination must not already exist; use edit_file for content changes.',
+    'Move or rename one existing workspace file to a new path. This changes the name in place: it must leave the source absent and must not create a duplicate. This is destructive and always requires human approval. The destination must not already exist; use edit_file for content changes.',
   timeoutMs: REGISTRY_LIMITS.writeTimeoutMs,
   input: z.strictObject({
     from: WorkspacePathSchema.describe('the existing source file'),

@@ -132,6 +132,21 @@ describe('what needs a person', () => {
     expect(outcome.category).toBe('file_rename');
   });
 
+  it('uses protected-path approval when a rename removes a protected source', async () => {
+    const { policy } = gate();
+    const patch = patchOf(
+      '--- a/.github/workflows/ci.yml',
+      '+++ b/workflow-copy.yml',
+      '@@ -1,1 +1,1 @@',
+      '-name: ci',
+      '+name: ci',
+    );
+    const outcome = await policy.authorize({ tool: 'apply_patch', input: { patch } });
+
+    expect(outcome.decision).toBe('approval_required');
+    expect(outcome.category).toBe('protected_path_change');
+  });
+
   it('asks about a patch that touches a protected path', async () => {
     const { policy } = gate();
     const patch = patchOf(

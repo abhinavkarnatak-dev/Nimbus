@@ -99,7 +99,7 @@ describe('a person watching the run while it happens', () => {
     await harness.executor.execute(WORKFLOW);
 
     expect(harness.reporter.starts).toHaveLength(0);
-    expect(harness.reporter.completions[0]?.outcome).toBe('denied');
+    expect(harness.reporter.completions).toHaveLength(0);
   });
 
   it('never lets a secret out of the sandbox and onto a socket', async () => {
