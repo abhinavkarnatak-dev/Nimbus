@@ -136,25 +136,23 @@ describe('commands that never run', () => {
     expect(runner.commandsUsed).toBe(0);
   });
 
-  it('refuses an install that needs asking, and does not spend the budget', async () => {
+  it('runs an install without asking and spends one command slot', async () => {
     const sandbox = await sandboxWith();
     const runner = new CommandRunner(sandbox);
 
-    expect(await refusalOf(runner, { argv: ['npm', 'install', 'left-pad'] })).toBe(
-      'COMMAND_APPROVAL_REQUIRED',
-    );
-    expect(runner.commandsUsed).toBe(0);
+    await runner.run({ argv: ['npm', 'install', 'left-pad'] });
+    expect(runner.commandsUsed).toBe(1);
   });
 
   it('carries the classification on the refusal so a caller can explain it', async () => {
     const runner = new CommandRunner(await sandboxWith());
 
     try {
-      await runner.run({ argv: ['npm', 'ci'] });
+      await runner.run({ argv: ['npm', 'publish'] });
       expect.unreachable('should have been refused');
     } catch (error) {
       expect(error).toBeInstanceOf(CommandRefused);
-      expect((error as CommandRefused).classification.reason).toContain('package scripts');
+      expect((error as CommandRefused).classification.reason).toContain('credentials');
     }
   });
 

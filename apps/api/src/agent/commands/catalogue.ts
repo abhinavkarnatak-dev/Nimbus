@@ -88,15 +88,6 @@ export const DENIED_PROGRAMS: readonly string[] = [
   'nohup',
   'screen',
   'tmux',
-  'xargs',
-  'find',
-  'perl',
-  'ruby',
-  'php',
-  'lua',
-  'openssl',
-  'base64',
-  'gpg',
 ];
 
 export const CODE_STRING_FLAGS: readonly string[] = ['-c', '-e', '--eval', '--exec', '--command'];

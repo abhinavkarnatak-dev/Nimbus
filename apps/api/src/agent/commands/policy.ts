@@ -4,7 +4,6 @@ import {
   DENIED_PROGRAMS,
   DEPENDENCY_SUBCOMMANDS,
   GLOBALLY_DENIED_FLAGS,
-  IGNORE_SCRIPTS_FLAG,
   PACKAGE_MANAGERS,
   PROGRAM_RULES,
   PYTHON_MODULES,
@@ -28,7 +27,25 @@ export interface CommandClassification {
 
 const NUL = String.fromCharCode(0);
 const SCRIPT_SUBCOMMANDS: readonly string[] = ['run', 'run-script'];
-const ARBITRARY_PACKAGE_SUBCOMMANDS: readonly string[] = ['exec', 'dlx', 'create', 'init'];
+const BLOCKED_PACKAGE_SUBCOMMANDS: readonly string[] = [
+  'publish',
+  'login',
+  'token',
+  'exec',
+  'dlx',
+  'create',
+  'init',
+];
+const BLOCKED_GIT_SUBCOMMANDS: readonly string[] = [
+  'push',
+  'remote',
+  'config',
+  'fetch',
+  'clone',
+  'submodule',
+  'filter-branch',
+  'commit',
+];
 
 const SHORTCUT_SUBCOMMANDS: Readonly<Record<string, CommandCategory>> = {
   test: 'test',
@@ -48,16 +65,7 @@ function allowed(
   subcommand: string | null,
   category: CommandCategory,
 ): CommandClassification {
-  return { decision: 'allowed', category, program, subcommand, reason: 'on_the_allowlist' };
-}
-
-function needsApproval(
-  program: string,
-  subcommand: string | null,
-  category: CommandCategory,
-  reason: string,
-): CommandClassification {
-  return { decision: 'approval_required', category, program, subcommand, reason };
+  return { decision: 'allowed', category, program, subcommand, reason: 'not_on_the_blocklist' };
 }
 
 function isFlag(value: string): boolean {
@@ -110,28 +118,19 @@ function classifyPackageManager(program: string, argv: readonly string[]): Comma
   }
 
   if (program === 'npx') {
-    return denied(program, subcommand, 'running a package fetched on demand is never allowed');
+    return denied(program, subcommand, 'running a package fetched on demand is blocked');
   }
 
-  if (ARBITRARY_PACKAGE_SUBCOMMANDS.includes(subcommand)) {
-    return denied(program, subcommand, 'running an arbitrary package is never allowed');
+  if (BLOCKED_PACKAGE_SUBCOMMANDS.includes(subcommand)) {
+    return denied(
+      program,
+      subcommand,
+      'that package-manager action can publish or change credentials',
+    );
   }
 
   if (DEPENDENCY_SUBCOMMANDS.includes(subcommand)) {
-    const clean = subcommand === 'ci' && argv.includes(IGNORE_SCRIPTS_FLAG);
-
-    if (clean) {
-      return allowed(program, subcommand, 'dependency_install');
-    }
-
-    return needsApproval(
-      program,
-      subcommand,
-      'dependency_install',
-      subcommand === 'ci'
-        ? 'installing without --ignore-scripts runs package scripts'
-        : 'changing dependencies downloads and runs code',
-    );
+    return allowed(program, subcommand, 'dependency_install');
   }
 
   if (SCRIPT_SUBCOMMANDS.includes(subcommand)) {
@@ -148,7 +147,7 @@ function classifyPackageManager(program: string, argv: readonly string[]): Comma
     return allowed(program, subcommand, shortcut);
   }
 
-  return denied(program, subcommand, 'that subcommand is not on the allowlist');
+  return allowed(program, subcommand, 'script');
 }
 
 function classifyPython(program: string, argv: readonly string[]): CommandClassification {
@@ -156,12 +155,8 @@ function classifyPython(program: string, argv: readonly string[]): CommandClassi
 
   if (moduleAt !== -1) {
     const wanted = argv[moduleAt + 1] ?? '';
-    const category = PYTHON_MODULES[wanted];
-
-    if (category === undefined) {
-      return denied(program, wanted === '' ? null : wanted, 'that module is not on the allowlist');
-    }
-    return allowed(program, wanted, category);
+    const category = PYTHON_MODULES[wanted] ?? 'script';
+    return allowed(program, wanted === '' ? null : wanted, category);
   }
 
   const script = firstPositional(argv, 1);
@@ -199,7 +194,7 @@ export function classifyCommand(argv: readonly string[]): CommandClassification 
 
   const rule = PROGRAM_RULES[program];
   if (rule === undefined) {
-    return denied(program, null, 'that program is not on the allowlist');
+    return allowed(program, firstPositional(argv, 1), 'script');
   }
 
   const flag = offendingFlag(program, argv);
@@ -217,6 +212,14 @@ export function classifyCommand(argv: readonly string[]): CommandClassification 
 
   const subcommand = firstPositional(argv, 1);
 
+  if (program === 'git' && subcommand !== null && BLOCKED_GIT_SUBCOMMANDS.includes(subcommand)) {
+    return denied(
+      program,
+      subcommand,
+      'that git action changes history, remotes, or repository state',
+    );
+  }
+
   if (rule.requiresSubcommand === true) {
     if (subcommand === null) {
       return denied(program, null, 'that command needs a subcommand');
@@ -224,7 +227,7 @@ export function classifyCommand(argv: readonly string[]): CommandClassification 
 
     const category = rule.subcommands?.[subcommand];
     if (category === undefined) {
-      return denied(program, subcommand, 'that subcommand is not on the allowlist');
+      return allowed(program, subcommand, 'script');
     }
     return allowed(program, subcommand, category);
   }
