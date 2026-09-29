@@ -490,6 +490,7 @@ export async function applyPatch(
   sandbox: Sandbox,
   input: ApplyPatchInput,
   caps: PatchCaps = DEFAULT_LIMITS,
+  approvedByUser = false,
 ): Promise<ApplyPatchResult> {
   const index = await buildIndex(sandbox);
   const parsed = parsePatch(input.patch, caps);
@@ -497,10 +498,12 @@ export async function applyPatch(
   const planned: { file: AppliedFile; contents: string }[] = [];
 
   for (const file of parsed) {
-    if (file.changeKind === 'deleted' || file.changeKind === 'renamed') {
+    if (file.changeKind === 'deleted' || (file.changeKind === 'renamed' && !approvedByUser)) {
       throw new ToolError(
         'PATCH_APPROVAL_REQUIRED',
-        'Deleting or renaming a file needs a separate approval.',
+        file.changeKind === 'renamed'
+          ? 'Renaming a file needs a separate approval.'
+          : 'Deleting a file needs a separate approval.',
         { path: file.oldPath ?? '' },
       );
     }
@@ -529,7 +532,7 @@ export async function applyPatch(
     planned.push({
       file: {
         path: newResolved.path,
-        previousPath: null,
+        previousPath: file.changeKind === 'renamed' ? (oldResolved?.path ?? null) : null,
         changeKind: file.changeKind,
         addedLines: file.addedLines,
         removedLines: file.removedLines,
@@ -543,6 +546,9 @@ export async function applyPatch(
 
   for (const step of planned) {
     await sandbox.writeFile(step.file.path, step.contents);
+    if (step.file.changeKind === 'renamed' && step.file.previousPath !== null) {
+      await sandbox.removeFile(step.file.previousPath);
+    }
     applied.push(step.file);
   }
 

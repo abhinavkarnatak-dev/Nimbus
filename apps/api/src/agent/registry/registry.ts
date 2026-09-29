@@ -25,6 +25,7 @@ export interface InvokeRequest {
   tool: string;
   input: unknown;
   signal?: AbortSignal;
+  approvedByUser?: boolean;
 }
 
 export interface InvokeResult {
@@ -157,7 +158,10 @@ export class ToolRegistry {
       request.signal === undefined ? timeout : AbortSignal.any([request.signal, timeout]);
 
     try {
-      const output = await tool.run(parsed.value, this.contextWith(signal));
+      const output = await tool.run(
+        parsed.value,
+        this.contextWith(signal, request.approvedByUser === true),
+      );
       return this.finish(request, startedAt, started, output, {});
     } catch (error) {
       if (alreadyAborted(request.signal)) {
@@ -175,13 +179,14 @@ export class ToolRegistry {
     }
   }
 
-  private contextWith(signal: AbortSignal): ToolContext {
+  private contextWith(signal: AbortSignal, approvedByUser: boolean): ToolContext {
     return {
       sessionId: this.sessionId,
       sandbox: this.sandbox,
       commands: this.commands,
       signal,
       limits: this.limits,
+      approvedByUser,
     };
   }
 

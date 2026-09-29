@@ -150,6 +150,7 @@ export class ActionExecutor {
       toolCallId: request.toolCallId,
       tool: request.tool,
       input: request.toolArguments,
+      approvedByUser: decision.approvedByUser,
       ...(request.signal === undefined ? {} : { signal: request.signal }),
     });
 
@@ -323,7 +324,13 @@ export class ActionExecutor {
     );
 
     await this.#sayOutput(request.toolCallId, parts.output);
-    await this.#sayCompleted(request, event, durationMs);
+    // An approval pause is not a completed tool run. Emitting a completion here
+    // makes the UI render the pending approval as a red refusal before the user
+    // has answered it. The actual completion is reported when the approved
+    // action is resumed and invoked.
+    if (parts.status !== 'approval_required') {
+      await this.#sayCompleted(request, event, durationMs);
+    }
     await this.#saySaid(request, parts.userMessage ?? null);
 
     return {

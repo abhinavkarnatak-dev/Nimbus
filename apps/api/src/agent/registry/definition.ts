@@ -27,6 +27,7 @@ export interface ToolContext {
   commands: CommandRunner;
   signal: AbortSignal;
   limits: PatchCaps;
+  approvedByUser: boolean;
 }
 
 export interface ToolOutput {

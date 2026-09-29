@@ -3,7 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { FakeSandboxProvider, type Sandbox } from '../../sandbox/index.js';
 import { testSpec } from '../../sandbox/sandbox.fixtures.js';
 import { ToolError } from './errors.js';
-import { applyPatch, createFile, editFile, listTree, readFile, searchCode } from './file-tools.js';
+import {
+  applyPatch,
+  createFile,
+  editFile,
+  listTree,
+  moveFile,
+  readFile,
+  searchCode,
+} from './file-tools.js';
 import { TOOL_LIMITS } from './limits.js';
 
 const FILES: Record<string, string> = {
@@ -346,6 +354,18 @@ describe('edit_file', () => {
   });
 });
 
+describe('move_file', () => {
+  it('renames a file without leaving the source or creating a duplicate', async () => {
+    const { sandbox } = await workspace({ 'XYZ.txt': 'keep this content\n' });
+
+    const result = await moveFile(sandbox, { from: 'XYZ.txt', to: 'ABC.txt' });
+
+    expect(result).toMatchObject({ path: 'ABC.txt', previousPath: 'XYZ.txt' });
+    expect(await sandbox.readFile('ABC.txt')).toBe('keep this content\n');
+    await expect(sandbox.readFile('XYZ.txt')).rejects.toThrow();
+  });
+});
+
 describe('apply_patch', () => {
   const patchFor = (path: string, from: string, to: string): string =>
     [`--- a/${path}`, `+++ b/${path}`, '@@ -1,1 +1,1 @@', `-${from}`, `+${to}`, ''].join('\n');
@@ -442,6 +462,28 @@ describe('apply_patch', () => {
     expect(await codeOf(async () => applyPatch(sandbox, { patch }))).toBe(
       'PATCH_APPROVAL_REQUIRED',
     );
+  });
+
+  it('renames after the approval has been granted and removes the source', async () => {
+    const { sandbox } = await workspace({ 'README.md': '# Demo\n\nA small repository.\n' });
+    const patch = [
+      '--- a/README.md',
+      '+++ b/READTHIS.md',
+      '@@ -1,1 +1,1 @@',
+      '-# Demo',
+      '+# Demo',
+      '',
+    ].join('\n');
+
+    const result = await applyPatch(sandbox, { patch }, undefined, true);
+
+    expect(result.files[0]).toMatchObject({
+      path: 'READTHIS.md',
+      previousPath: 'README.md',
+      changeKind: 'renamed',
+    });
+    expect(await sandbox.readFile('READTHIS.md')).toContain('# Demo');
+    await expect(sandbox.readFile('README.md')).rejects.toThrow();
   });
 
   it('refuses when the surrounding lines have moved on', async () => {
