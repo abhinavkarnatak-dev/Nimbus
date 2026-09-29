@@ -521,6 +521,11 @@ export async function applyPatch(
       if (oldResolved === null) {
         throw new ToolError('PATCH_MALFORMED', 'That patch could not be read: no source file.');
       }
+      // Validate the deletion hunk against the current contents before removing
+      // anything. Approval is bound to the exact action; it must not authorize
+      // deleting a file that changed after the patch was prepared.
+      const original = await sandbox.readFile(oldResolved.path);
+      applyPatchToFile(file, original);
       planned.push({
         file: {
           path: oldResolved.path,

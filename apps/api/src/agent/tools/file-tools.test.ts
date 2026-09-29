@@ -507,6 +507,18 @@ describe('apply_patch', () => {
     await expect(sandbox.readFile('remove.txt')).rejects.toThrow();
   });
 
+  it('does not delete a file whose contents changed after approval', async () => {
+    const { sandbox } = await workspace({ 'remove.txt': 'new content\n' });
+    const patch = ['--- a/remove.txt', '+++ /dev/null', '@@ -1,1 +0,0 @@', '-old content', ''].join(
+      '\n',
+    );
+
+    expect(await codeOf(async () => applyPatch(sandbox, { patch }, undefined, true))).toBe(
+      'PATCH_CONTEXT_MISMATCH',
+    );
+    expect(await sandbox.readFile('remove.txt')).toBe('new content\n');
+  });
+
   it('refuses when the surrounding lines have moved on', async () => {
     const { sandbox } = await workspace({ 'one.txt': 'something else\n' });
 
