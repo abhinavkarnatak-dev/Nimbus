@@ -60,7 +60,36 @@ export interface TrustedPullRequestGatewayOptions {
   wait?: (ms: number) => Promise<void>;
 }
 
-export function titleFor(task: string, summary?: string): string {
+function verbFor(kind: PatchValidationReport['files'][number]['changeKind']): string {
+  return kind === 'renamed'
+    ? 'rename'
+    : kind === 'added'
+      ? 'add'
+      : kind === 'deleted'
+        ? 'delete'
+        : 'update';
+}
+
+export function titleFor(task: string, summary?: string, report?: PatchValidationReport): string {
+  const files = report?.files ?? [];
+
+  if (files.length === 1) {
+    const file = files[0];
+    if (file !== undefined) {
+      const detail =
+        file.changeKind === 'renamed' && file.previousPath !== undefined
+          ? `${file.previousPath} to ${file.path}`
+          : file.path;
+      return `${verbFor(file.changeKind)} ${detail}`.slice(0, TITLE_MAX_CHARS);
+    }
+  }
+
+  if (files.length > 1) {
+    const verbs = [...new Set(files.map((file) => verbFor(file.changeKind)))];
+    const verb = verbs.length === 1 ? verbs[0] : 'update';
+    return `${verb} ${String(files.length)} files`.slice(0, TITLE_MAX_CHARS);
+  }
+
   // Follow-up answers are often short clarifications ("anywhere", "yes", ...).
   // The summary is produced after the agent has actually inspected and changed
   // the repository, so it is the authoritative source for a PR title.
@@ -119,7 +148,7 @@ export class TrustedPullRequestGateway implements PullRequestGateway {
       const input = {
         branch: request.branch,
         baseBranch: request.defaultBranch,
-        title: titleFor(request.task, request.summary),
+        title: titleFor(request.task, request.summary, request.report),
         body: buildPullRequestBody({
           task: request.task,
           summary: request.summary,

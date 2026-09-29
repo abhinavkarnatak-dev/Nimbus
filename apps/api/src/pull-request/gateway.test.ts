@@ -86,6 +86,27 @@ describe('opening a pull request', () => {
     expect(titleFor('x'.repeat(300))).toHaveLength(72);
   });
 
+  it('titles from the completed file change, not follow-up wording', () => {
+    const request = openRequest();
+    const file = request.report.files[0];
+    expect(file).toBeDefined();
+    if (file === undefined) return;
+
+    expect(
+      titleFor('anywhere', request.summary, {
+        ...request.report,
+        files: [
+          {
+            ...file,
+            path: 'HelloName.cpp',
+            previousPath: 'main.cpp',
+            changeKind: 'renamed',
+          },
+        ],
+      }),
+    ).toBe('rename main.cpp to HelloName.cpp');
+  });
+
   it('sends no email of its own, because telling people is the runner job', async () => {
     await gatewayWith().gateway.open(openRequest());
 
