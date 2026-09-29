@@ -154,7 +154,7 @@ describe('commands that never run', () => {
       expect.unreachable('should have been refused');
     } catch (error) {
       expect(error).toBeInstanceOf(CommandRefused);
-      expect((error as CommandRefused).classification.reason).toContain('package scripts');
+      expect((error as CommandRefused).classification.reason).toContain('dependency');
     }
   });
 
