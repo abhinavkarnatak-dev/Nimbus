@@ -172,6 +172,9 @@ describe('git is read only', () => {
     ['submodules', ['git', 'submodule', 'update', '--init']],
     ['rewriting history', ['git', 'filter-branch']],
     ['committing', ['git', 'commit', '-m', 'x']],
+    ['resetting workspace changes', ['git', 'reset', '--hard', 'HEAD']],
+    ['cleaning workspace files', ['git', 'clean', '-fd']],
+    ['checking out another revision', ['git', 'checkout', 'HEAD~1']],
   ])('refuses %s', (_label, argv) => {
     expect(decisionOf(argv)).toBe('denied');
   });
@@ -189,10 +192,10 @@ describe('installing dependencies', () => {
     expect(classified.category).toBe('dependency_install');
   });
 
-  it('runs installs without an approval loop inside the sandbox', () => {
+  it('requires approval for installs that can change dependency files', () => {
     const classified = classifyCommand(['npm', 'ci']);
 
-    expect(classified.decision).toBe('allowed');
+    expect(classified.decision).toBe('approval_required');
   });
 
   it.each([
@@ -202,8 +205,8 @@ describe('installing dependencies', () => {
     ['removing a package', ['npm', 'uninstall', 'react']],
     ['updating everything', ['npm', 'update']],
     ['rebuilding native modules', ['npm', 'rebuild']],
-  ])('allows %s inside the sandbox', (_label, argv) => {
-    expect(decisionOf(argv)).toBe('allowed');
+  ])('requires approval for %s', (_label, argv) => {
+    expect(decisionOf(argv)).toBe('approval_required');
   });
 
   it('is not fooled by turning the safety flag off', () => {

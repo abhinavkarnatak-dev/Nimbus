@@ -88,6 +88,7 @@ export const DENIED_PROGRAMS: readonly string[] = [
   'nohup',
   'screen',
   'tmux',
+  'find',
 ];
 
 export const CODE_STRING_FLAGS: readonly string[] = ['-c', '-e', '--eval', '--exec', '--command'];

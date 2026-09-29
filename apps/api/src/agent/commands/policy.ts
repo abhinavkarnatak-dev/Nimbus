@@ -4,6 +4,7 @@ import {
   DENIED_PROGRAMS,
   DEPENDENCY_SUBCOMMANDS,
   GLOBALLY_DENIED_FLAGS,
+  IGNORE_SCRIPTS_FLAG,
   PACKAGE_MANAGERS,
   PROGRAM_RULES,
   PYTHON_MODULES,
@@ -27,6 +28,7 @@ export interface CommandClassification {
 
 const NUL = String.fromCharCode(0);
 const SCRIPT_SUBCOMMANDS: readonly string[] = ['run', 'run-script'];
+const ARBITRARY_PACKAGE_SUBCOMMANDS: readonly string[] = ['exec', 'dlx', 'create', 'init'];
 const BLOCKED_PACKAGE_SUBCOMMANDS: readonly string[] = [
   'publish',
   'login',
@@ -45,6 +47,14 @@ const BLOCKED_GIT_SUBCOMMANDS: readonly string[] = [
   'submodule',
   'filter-branch',
   'commit',
+  'reset',
+  'clean',
+  'checkout',
+  'restore',
+  'rebase',
+  'merge',
+  'cherry-pick',
+  'stash',
 ];
 
 const SHORTCUT_SUBCOMMANDS: Readonly<Record<string, CommandCategory>> = {
@@ -66,6 +76,15 @@ function allowed(
   category: CommandCategory,
 ): CommandClassification {
   return { decision: 'allowed', category, program, subcommand, reason: 'not_on_the_blocklist' };
+}
+
+function needsApproval(
+  program: string,
+  subcommand: string | null,
+  category: CommandCategory,
+  reason: string,
+): CommandClassification {
+  return { decision: 'approval_required', category, program, subcommand, reason };
 }
 
 function isFlag(value: string): boolean {
@@ -121,6 +140,10 @@ function classifyPackageManager(program: string, argv: readonly string[]): Comma
     return denied(program, subcommand, 'running a package fetched on demand is blocked');
   }
 
+  if (ARBITRARY_PACKAGE_SUBCOMMANDS.includes(subcommand)) {
+    return denied(program, subcommand, 'running an arbitrary package is blocked');
+  }
+
   if (BLOCKED_PACKAGE_SUBCOMMANDS.includes(subcommand)) {
     return denied(
       program,
@@ -130,7 +153,14 @@ function classifyPackageManager(program: string, argv: readonly string[]): Comma
   }
 
   if (DEPENDENCY_SUBCOMMANDS.includes(subcommand)) {
-    return allowed(program, subcommand, 'dependency_install');
+    const clean = subcommand === 'ci' && argv.includes(IGNORE_SCRIPTS_FLAG);
+    if (clean) return allowed(program, subcommand, 'dependency_install');
+    return needsApproval(
+      program,
+      subcommand,
+      'dependency_install',
+      'dependency changes can modify package manifests and execute package scripts',
+    );
   }
 
   if (SCRIPT_SUBCOMMANDS.includes(subcommand)) {
@@ -147,7 +177,11 @@ function classifyPackageManager(program: string, argv: readonly string[]): Comma
     return allowed(program, subcommand, shortcut);
   }
 
-  return allowed(program, subcommand, 'script');
+  return denied(
+    program,
+    subcommand,
+    'that package-manager action is not supported by the sandbox policy',
+  );
 }
 
 function classifyPython(program: string, argv: readonly string[]): CommandClassification {
