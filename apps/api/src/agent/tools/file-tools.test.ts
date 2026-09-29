@@ -486,6 +486,27 @@ describe('apply_patch', () => {
     await expect(sandbox.readFile('README.md')).rejects.toThrow();
   });
 
+  it('rejects an approved rename when the destination already exists', async () => {
+    const { sandbox } = await workspace({ 'A.txt': 'a\n', 'B.txt': 'b\n' });
+    const patch = ['--- a/A.txt', '+++ b/B.txt', '@@ -1,1 +1,1 @@', '-a', '+a', ''].join('\n');
+
+    expect(await codeOf(async () => applyPatch(sandbox, { patch }, undefined, true))).toBe(
+      'FILE_EXISTS',
+    );
+    expect(await sandbox.readFile('A.txt')).toBe('a\n');
+    expect(await sandbox.readFile('B.txt')).toBe('b\n');
+  });
+
+  it('deletes after the approval has been granted', async () => {
+    const { sandbox } = await workspace({ 'remove.txt': 'remove me\n' });
+    const patch = ['--- a/remove.txt', '+++ /dev/null', '@@ -1,1 +0,0 @@', '-remove me', ''].join(
+      '\n',
+    );
+
+    await applyPatch(sandbox, { patch }, undefined, true);
+    await expect(sandbox.readFile('remove.txt')).rejects.toThrow();
+  });
+
   it('refuses when the surrounding lines have moved on', async () => {
     const { sandbox } = await workspace({ 'one.txt': 'something else\n' });
 

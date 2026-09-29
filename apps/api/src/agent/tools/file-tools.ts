@@ -495,10 +495,10 @@ export async function applyPatch(
   const index = await buildIndex(sandbox);
   const parsed = parsePatch(input.patch, caps);
 
-  const planned: { file: AppliedFile; contents: string }[] = [];
+  const planned: { file: AppliedFile; contents: string | null }[] = [];
 
   for (const file of parsed) {
-    if (file.changeKind === 'deleted' || (file.changeKind === 'renamed' && !approvedByUser)) {
+    if ((file.changeKind === 'deleted' || file.changeKind === 'renamed') && !approvedByUser) {
       throw new ToolError(
         'PATCH_APPROVAL_REQUIRED',
         file.changeKind === 'renamed'
@@ -517,8 +517,36 @@ export async function applyPatch(
       });
     }
 
+    if (file.changeKind === 'deleted') {
+      if (oldResolved === null) {
+        throw new ToolError('PATCH_MALFORMED', 'That patch could not be read: no source file.');
+      }
+      planned.push({
+        file: {
+          path: oldResolved.path,
+          previousPath: null,
+          changeKind: 'deleted',
+          addedLines: file.addedLines,
+          removedLines: file.removedLines,
+          isProtected: oldResolved.protected,
+        },
+        contents: null,
+      });
+      continue;
+    }
+
     if (newResolved === null) {
       throw new ToolError('PATCH_MALFORMED', 'That patch could not be read: no target file.');
+    }
+
+    if (file.changeKind === 'renamed' && newResolved.kind !== 'missing') {
+      throw new ToolError(
+        'FILE_EXISTS',
+        'That patch renames a file onto an existing destination.',
+        {
+          path: file.newPath ?? '',
+        },
+      );
     }
 
     if (file.changeKind === 'added' && newResolved.kind !== 'missing') {
@@ -536,7 +564,7 @@ export async function applyPatch(
         changeKind: file.changeKind,
         addedLines: file.addedLines,
         removedLines: file.removedLines,
-        isProtected: isProtectedPath(newResolved.path),
+        isProtected: oldResolved?.protected === true || isProtectedPath(newResolved.path),
       },
       contents: applyPatchToFile(file, original),
     });
@@ -545,9 +573,25 @@ export async function applyPatch(
   const applied: AppliedFile[] = [];
 
   for (const step of planned) {
-    await sandbox.writeFile(step.file.path, step.contents);
-    if (step.file.changeKind === 'renamed' && step.file.previousPath !== null) {
-      await sandbox.removeFile(step.file.previousPath);
+    if (step.file.changeKind === 'deleted') {
+      await sandbox.removeFile(step.file.path);
+    } else {
+      await sandbox.writeFile(step.file.path, step.contents ?? '');
+      if (step.file.changeKind === 'renamed' && step.file.previousPath !== null) {
+        try {
+          await sandbox.removeFile(step.file.previousPath);
+        } catch (error) {
+          try {
+            await sandbox.removeFile(step.file.path);
+          } catch {
+            // Preserve the original failure; the provider may be unavailable for cleanup.
+          }
+          throw new ToolError('MOVE_FAILED', 'The source could not be removed after renaming.', {
+            path: step.file.previousPath,
+            cause: error,
+          });
+        }
+      }
     }
     applied.push(step.file);
   }

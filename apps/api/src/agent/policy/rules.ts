@@ -102,9 +102,9 @@ function classifyPatch(patch: string): Classification {
     return allowed('that patch cannot be read, so the tool will refuse it and say why');
   }
 
-  const paths = files
-    .map((file) => file.newPath ?? file.oldPath ?? '')
-    .filter((path) => path !== '');
+  const paths = [...files.flatMap((file) => [file.oldPath, file.newPath])].filter(
+    (path): path is string => path !== null && path !== '',
+  );
 
   if (paths.some((path) => !canBeApproved(path))) {
     return denied('that patch writes to a path that can never be written to');
