@@ -239,6 +239,12 @@ describe('package manager subcommands', () => {
     expect(classifyCommand(['pnpm', 'why', 'typescript']).decision).toBe('allowed');
   });
 
+  it('does not spend a command slot on registry queries the sandbox cannot complete', () => {
+    expect(classifyCommand(['npm', 'view', 'typescript']).decision).toBe('denied');
+    expect(classifyCommand(['npm', 'info', 'typescript']).decision).toBe('denied');
+    expect(classifyCommand(['npm', 'outdated']).decision).toBe('denied');
+  });
+
   it('refuses a package manager with no subcommand', () => {
     expect(decisionOf(['npm'])).toBe('denied');
   });

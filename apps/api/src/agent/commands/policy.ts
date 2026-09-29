@@ -33,12 +33,10 @@ const READ_ONLY_PACKAGE_SUBCOMMANDS: readonly string[] = [
   'list',
   'why',
   'explain',
-  'outdated',
-  'view',
-  'info',
   'prefix',
   'root',
 ];
+const BLOCKED_NETWORK_PACKAGE_SUBCOMMANDS: readonly string[] = ['outdated', 'view', 'info'];
 const ARBITRARY_PACKAGE_SUBCOMMANDS: readonly string[] = ['exec', 'dlx', 'create', 'init'];
 const BLOCKED_PACKAGE_SUBCOMMANDS: readonly string[] = [
   'publish',
@@ -160,6 +158,14 @@ function classifyPackageManager(program: string, argv: readonly string[]): Comma
       program,
       subcommand,
       'that package-manager action can publish or change credentials',
+    );
+  }
+
+  if (BLOCKED_NETWORK_PACKAGE_SUBCOMMANDS.includes(subcommand)) {
+    return denied(
+      program,
+      subcommand,
+      'registry inspection needs network access, which this sandbox does not provide',
     );
   }
 
